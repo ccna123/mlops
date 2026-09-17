@@ -206,11 +206,15 @@ Không tự trigger retrain. Khi mức độ là `high`, Dashboard hiện cảnh
 
 | Module | Trách nhiệm |
 | --- | --- |
-| `schema.py` | Định nghĩa cột, dtype, ràng buộc hợp lệ (`year_built` ≤ năm hiện tại, `bedrooms` ≥ 0, `zipcode` khớp `^\d{5}$`...). Dùng bởi cả `validate` lẫn `/predict`. |
-| `cleaning.py` | Các sklearn transformer cho từng loại dirty: parse `"$450,000"` → float, chuẩn hoá `has_pool` từ 8 cách biểu diễn, chuẩn hoá case/whitespace cho `city`/`state`/`property_type`/`condition`, parse 3 format `listing_date`, clip outlier, xử lý missing. |
+| `schema.py` | Định nghĩa cột, dtype, ràng buộc hợp lệ (`year_built` ≤ năm hiện tại, `bedrooms` ≥ 0, `zipcode` khớp `^\d{5}$`...), và danh sách cột leakage theo từng bài toán. Dùng bởi cả `validate` lẫn `/predict`. |
+| `parsers.py` | Hàm parse thuần trên **một giá trị đơn lẻ**: `"$450,000"` → float, `has_pool` từ 8 cách biểu diễn, 3 format `listing_date`, zipcode, chuẩn hoá text. Không biết gì về pandas — test được bằng bảng tham số. |
+| `cleaning.py` | Các sklearn transformer áp parser lên DataFrame **theo cột**: `RawRecordCleaner`, `OutlierClipper`, `DateFeatures`. |
+| `rowops.py` | Thao tác **theo dòng**: `drop_duplicates`, `drop_rows_missing_target`. |
 | `features.py` | Dựng `sklearn.Pipeline(transformers + estimator)` theo `task_type`. |
 | `storage.py` | Wrapper `boto3` + convention đường dẫn. **Đây là điểm duy nhất phải sửa khi migrate sang S3.** |
 | `profiling.py` | Tính baseline profile từ một DataFrame. |
+
+**Ranh giới giữa `cleaning.py` và `rowops.py` là ràng buộc kiến trúc, không phải sở thích tổ chức file.** Transformer trong `cleaning.py` nằm trong `Pipeline` và được đóng gói cùng model, nên chúng chạy ở cả `preprocess` (2 triệu dòng) lẫn serving (một record). Một transformer xoá dòng sẽ trả về DataFrame rỗng khi `/predict` gọi nó và làm serving sập. Tách thành hai file khiến không ai vô tình import nhầm.
 
 Cài bằng `pip install -e common/` vào image `stages/base/` và image serving. `train.py` log nguyên `Pipeline` vào MLflow qua `mlflow.sklearn.log_model` → model trong Registry tự chứa toàn bộ logic clean, và `/predict` nhận record **thô** (đúng như dữ liệu người dùng thật có trong tay).
 
@@ -396,7 +400,9 @@ project/
 │   ├── pyproject.toml
 │   └── ml_common/
 │       ├── schema.py
-│       ├── cleaning.py
+│       ├── parsers.py             # parse giá trị đơn lẻ
+│       ├── cleaning.py            # transformer theo CỘT (vào Pipeline)
+│       ├── rowops.py              # thao tác theo DÒNG (chỉ preprocess)
 │       ├── features.py
 │       ├── storage.py
 │       └── profiling.py
