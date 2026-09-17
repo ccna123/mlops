@@ -29,6 +29,41 @@
 
 ---
 
+## Ánh xạ Task → Agent → Skill
+
+13 task chỉ có 3 quy trình thật sự khác nhau, nên chúng dùng chung 2 agent và
+3 skill thay vì mỗi task một bộ.
+
+| Task | Nội dung | Agent | Skill |
+| --- | --- | --- | --- |
+| 1 | Scaffolding và tooling | — (chạy trực tiếp) | — |
+| 2 | `schema.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 3 | `parsers.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 4 | `cleaning.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 5 | `rowops.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 6 | `features.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 7 | Postgres + MinIO | `mlops-infra` | `mlops-infra-service` |
+| 8 | `storage.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 9 | `profiling.py` | `mlops-tdd` | `mlops-tdd-module` |
+| 10 | MLflow | `mlops-infra` | `mlops-infra-service` |
+| 11 | Airflow | `mlops-infra` | `mlops-infra-service` |
+| 12 | Image nền `ml-base` | `mlops-infra` | `mlops-infra-service` |
+| 13 | Tài liệu và xác nhận | — (chạy trực tiếp) | `mlops-verify` |
+
+Task 1 và 13 chạy trực tiếp, không qua subagent: Task 1 dựng chính cái môi
+trường mà mọi subagent sau đó cần, còn Task 13 cần nhìn toàn cảnh cả 12 task
+trước nên context trống không giúp được gì.
+
+Prompt dispatch cho subagent phải nêu rõ số task, ví dụ:
+
+> Thực thi Task 3 của Plan 1 (`parsers.py`). Đọc `CLAUDE.md` và mục `## Task 3`
+> trong `docs/superpowers/plans/2026-09-17-foundation.md` trước khi viết code.
+
+Định nghĩa agent nằm ở `.claude/agents/`, skill ở `.claude/skills/`. Chúng được
+commit cùng repo nên ai clone về cũng có.
+
+---
+
 ## File Structure
 
 | File | Trách nhiệm |
