@@ -1,0 +1,101 @@
+from datetime import date
+
+import pandas as pd
+import pytest
+from moto import mock_aws
+
+from ml_common import storage
+
+BUCKET = "test-bucket"
+
+
+@pytest.fixture
+def store():
+    with mock_aws():
+        import boto3
+
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=BUCKET)
+        yield storage.Storage(
+            endpoint_url=None,
+            access_key="test",
+            secret_key="test",
+            bucket=BUCKET,
+        )
+
+
+class TestKeyHelpers:
+    def test_raw_key(self):
+        assert storage.raw_key("v1") == "raw/v1/data.parquet"
+
+    def test_processed_key(self):
+        assert storage.processed_key("abc123", "train") == "processed/abc123/train.parquet"
+        assert storage.processed_key("abc123", "test") == "processed/abc123/test.parquet"
+
+    def test_processed_key_invalid_split_raises(self):
+        with pytest.raises(ValueError, match="split"):
+            storage.processed_key("abc123", "validation")
+
+    def test_baseline_key(self):
+        result = storage.baseline_key("house_price_regressor", 3)
+        assert result == "monitoring-baseline/house_price_regressor/3/profile.json"
+
+    def test_inference_log_key_partitions_by_day(self):
+        result = storage.inference_log_key("house_price_regressor", date(2026, 9, 17), "0001")
+        assert result == "inference-log/house_price_regressor/dt=2026-09-17/part-0001.parquet"
+
+    def test_ground_truth_key_partitions_by_day(self):
+        result = storage.ground_truth_key("house_price_regressor", date(2026, 9, 17), "0001")
+        assert result == "ground-truth/house_price_regressor/dt=2026-09-17/part-0001.parquet"
+
+    def test_report_key(self):
+        result = storage.report_key("house_price_regressor", "run-42", "html")
+        assert result == "reports/house_price_regressor/run-42/evidently.html"
+
+    def test_no_key_starts_with_a_slash(self):
+        keys = [
+            storage.raw_key("v1"),
+            storage.processed_key("a", "train"),
+            storage.baseline_key("m", 1),
+            storage.inference_log_key("m", date(2026, 1, 1), "0001"),
+            storage.ground_truth_key("m", date(2026, 1, 1), "0001"),
+            storage.report_key("m", "r", "json"),
+        ]
+        for key in keys:
+            assert not key.startswith("/"), f"{key} starts with a slash"
+
+
+class TestStorage:
+    def test_write_and_read_parquet_preserves_data(self, store):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+        store.write_parquet(df, "some/folder/file.parquet")
+        result = store.read_parquet("some/folder/file.parquet")
+        pd.testing.assert_frame_equal(df, result)
+
+    def test_write_and_read_json(self, store):
+        data = {"name": "test", "count": 42, "items": [1, 2, 3]}
+        store.write_json(data, "some/folder/file.json")
+        assert store.read_json("some/folder/file.json") == data
+
+    def test_exists_is_correct_for_present_and_absent_keys(self, store):
+        store.write_json({"a": 1}, "present/file.json")
+        assert store.exists("present/file.json") is True
+        assert store.exists("absent/file.json") is False
+
+    def test_list_keys_by_prefix(self, store):
+        store.write_json({}, "prefix-a/one.json")
+        store.write_json({}, "prefix-a/two.json")
+        store.write_json({}, "prefix-b/three.json")
+        result = store.list_keys("prefix-a/")
+        assert sorted(result) == ["prefix-a/one.json", "prefix-a/two.json"]
+
+    def test_list_keys_missing_prefix_returns_empty_list(self, store):
+        assert store.list_keys("does-not-exist/") == []
+
+    def test_reading_a_missing_key_raises(self, store):
+        with pytest.raises(FileNotFoundError, match="missing/file.parquet"):
+            store.read_parquet("missing/file.parquet")
+
+    def test_overwriting_an_existing_key(self, store):
+        store.write_json({"version": 1}, "file.json")
+        store.write_json({"version": 2}, "file.json")
+        assert store.read_json("file.json") == {"version": 2}
