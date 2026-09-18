@@ -34,21 +34,21 @@
 13 task chỉ có 3 quy trình thật sự khác nhau, nên chúng dùng chung 2 agent và
 3 skill thay vì mỗi task một bộ.
 
-| Task | Nội dung | Agent | Skill |
-| --- | --- | --- | --- |
-| 1 | Scaffolding và tooling | — (chạy trực tiếp) | — |
-| 2 | `schema.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 3 | `parsers.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 4 | `cleaning.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 5 | `rowops.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 6 | `features.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 7 | Postgres + MinIO | `mlops-infra` | `mlops-infra-service` |
-| 8 | `storage.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 9 | `profiling.py` | `mlops-tdd` | `mlops-tdd-module` |
-| 10 | MLflow | `mlops-infra` | `mlops-infra-service` |
-| 11 | Airflow | `mlops-infra` | `mlops-infra-service` |
-| 12 | Image nền `ml-base` | `mlops-infra` | `mlops-infra-service` |
-| 13 | Tài liệu và xác nhận | — (chạy trực tiếp) | `mlops-verify` |
+| Task | Nội dung                 | Agent                  | Skill                   |
+| ---- | ------------------------- | ---------------------- | ----------------------- |
+| 1    | Scaffolding và tooling   | — (chạy trực tiếp) | —                      |
+| 2    | `schema.py`             | `mlops-tdd`          | `mlops-tdd-module`    |
+| 3    | `parsers.py`            | `mlops-tdd`          | `mlops-tdd-module`    |
+| 4    | `cleaning.py`           | `mlops-tdd`          | `mlops-tdd-module`    |
+| 5    | `rowops.py`             | `mlops-tdd`          | `mlops-tdd-module`    |
+| 6    | `features.py`           | `mlops-tdd`          | `mlops-tdd-module`    |
+| 7    | Postgres + MinIO          | `mlops-infra`        | `mlops-infra-service` |
+| 8    | `storage.py`            | `mlops-tdd`          | `mlops-tdd-module`    |
+| 9    | `profiling.py`          | `mlops-tdd`          | `mlops-tdd-module`    |
+| 10   | MLflow                    | `mlops-infra`        | `mlops-infra-service` |
+| 11   | Airflow                   | `mlops-infra`        | `mlops-infra-service` |
+| 12   | Image nền`ml-base`     | `mlops-infra`        | `mlops-infra-service` |
+| 13   | Tài liệu và xác nhận | — (chạy trực tiếp) | `mlops-verify`        |
 
 Task 1 và 13 chạy trực tiếp, không qua subagent: Task 1 dựng chính cái môi
 trường mà mọi subagent sau đó cần, còn Task 13 cần nhìn toàn cảnh cả 12 task
@@ -66,22 +66,22 @@ commit cùng repo nên ai clone về cũng có.
 
 ## File Structure
 
-| File | Trách nhiệm |
-| --- | --- |
-| `common/pyproject.toml` | Khai báo package `ml_common`, dependency, cấu hình pytest + ruff |
-| `common/ml_common/schema.py` | Nguồn sự thật duy nhất về cột, kiểu, ràng buộc, cột leakage. Không import pandas ở mức module. |
-| `common/ml_common/parsers.py` | Hàm parse thuần cho từng giá trị đơn lẻ (tiền, bool, ngày, zipcode, text). Không biết gì về pandas hay sklearn. |
-| `common/ml_common/cleaning.py` | Các sklearn transformer áp parser lên DataFrame theo cột. Chỉ thao tác theo cột. |
-| `common/ml_common/rowops.py` | Thao tác theo dòng (dedup, loại dòng hỏng). Tách riêng để không ai vô tình đưa vào Pipeline. |
-| `common/ml_common/features.py` | Dựng `Pipeline` hoàn chỉnh theo `task_type` |
-| `common/ml_common/storage.py` | Wrapper boto3 + toàn bộ convention đường dẫn MinIO/S3 |
-| `common/ml_common/profiling.py` | Tính baseline profile từ DataFrame |
-| `common/tests/` | Test cho từng module trên |
-| `docker-compose.yml` | Postgres, MinIO, MLflow, Airflow |
-| `docker/postgres/init-databases.sql` | Tạo database `mlflow` bên cạnh `airflow` |
-| `docker/mlflow/Dockerfile` | MLflow + psycopg2 + boto3 |
-| `stages/base/Dockerfile` | Image nền cho mọi stage: Python 3.12 + ml_common |
-| `.env.example` | Mẫu biến môi trường |
+| File                                   | Trách nhiệm                                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `common/pyproject.toml`              | Khai báo package`ml_common`, dependency, cấu hình pytest + ruff                                                          |
+| `common/ml_common/schema.py`         | Nguồn sự thật duy nhất về cột, kiểu, ràng buộc, cột leakage. Không import pandas ở mức module.                   |
+| `common/ml_common/parsers.py`        | Hàm parse thuần cho từng giá trị đơn lẻ (tiền, bool, ngày, zipcode, text). Không biết gì về pandas hay sklearn. |
+| `common/ml_common/cleaning.py`       | Các sklearn transformer áp parser lên DataFrame theo cột. Chỉ thao tác theo cột.                                       |
+| `common/ml_common/rowops.py`         | Thao tác theo dòng (dedup, loại dòng hỏng). Tách riêng để không ai vô tình đưa vào Pipeline.                   |
+| `common/ml_common/features.py`       | Dựng`Pipeline` hoàn chỉnh theo `task_type`                                                                             |
+| `common/ml_common/storage.py`        | Wrapper boto3 + toàn bộ convention đường dẫn MinIO/S3                                                                   |
+| `common/ml_common/profiling.py`      | Tính baseline profile từ DataFrame                                                                                          |
+| `common/tests/`                      | Test cho từng module trên                                                                                                   |
+| `docker-compose.yml`                 | Postgres, MinIO, MLflow, Airflow                                                                                              |
+| `docker/postgres/init-databases.sql` | Tạo database`mlflow` bên cạnh `airflow`                                                                                |
+| `docker/mlflow/Dockerfile`           | MLflow + psycopg2 + boto3                                                                                                     |
+| `stages/base/Dockerfile`             | Image nền cho mọi stage: Python 3.12 + ml_common                                                                            |
+| `.env.example`                       | Mẫu biến môi trường                                                                                                      |
 
 Lý do tách `parsers.py` khỏi `cleaning.py`: parser là hàm thuần trên giá trị đơn lẻ, test được bằng bảng tham số, không cần dựng DataFrame. Transformer là lớp bọc pandas/sklearn quanh chúng. Gộp hai thứ vào một file sẽ tạo ra một file vừa lớn vừa khó test.
 
@@ -92,6 +92,7 @@ Lý do tách `rowops.py`: làm cho ràng buộc "không thao tác dòng trong Pi
 ## Task 1: Scaffolding và tooling
 
 **Files:**
+
 - Create: `common/pyproject.toml`
 - Create: `common/ml_common/__init__.py`
 - Create: `common/tests/__init__.py`
@@ -100,6 +101,7 @@ Lý do tách `rowops.py`: làm cho ràng buộc "không thao tác dòng trong Pi
 - Modify: `.gitignore`
 
 **Interfaces:**
+
 - Consumes: không có (task đầu tiên)
 - Produces: package `ml_common` cài được bằng `pip install -e common[dev]`; lệnh `pytest` và `ruff` chạy được từ thư mục gốc.
 
@@ -113,7 +115,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ml-common"
 version = "0.1.0"
-description = "Logic dùng chung cho MLOps house pricing pipeline"
+description = "Shared logic for the MLOps house pricing pipeline"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.2,<3",
@@ -151,7 +153,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 ```bash
 mkdir -p common/ml_common common/tests
-printf '"""Logic dung chung cho MLOps house pricing pipeline."""\n\n__version__ = "0.1.0"\n' > common/ml_common/__init__.py
+printf '"""Shared logic for the MLOps house pricing pipeline."""\n\n__version__ = "0.1.0"\n' > common/ml_common/__init__.py
 touch common/tests/__init__.py
 ```
 
@@ -195,11 +197,11 @@ AIRFLOW_UID=50000
 AIRFLOW_ADMIN_USER=admin
 AIRFLOW_ADMIN_PASSWORD=admin
 
-# Serving (dùng từ Plan 3)
+# Serving (used from Plan 3)
 SERVING_URL=http://serving:8000
 
-# Dev: giới hạn số dòng đọc từ raw data. Để trống = đọc toàn bộ ~2 triệu dòng.
-# Máy 16GB RAM nên để 200000 khi phát triển, xoá đi khi chạy thật.
+# Dev: limits how many rows are read from raw data. Empty = read all ~2M rows.
+# On a 16GB RAM machine, set 200000 while developing; remove it for real runs.
 SAMPLE_ROWS=200000
 ```
 
@@ -251,10 +253,12 @@ git commit -m "chore: scaffolding package ml_common va tooling"
 ## Task 2: `schema.py` — định nghĩa dataset
 
 **Files:**
+
 - Create: `common/ml_common/schema.py`
 - Test: `common/tests/test_schema.py`
 
 **Interfaces:**
+
 - Consumes: không có
 - Produces:
   - `ColumnSpec` dataclass với thuộc tính `name: str`, `kind: str`, `required: bool`, `min_value: float | None`, `max_value: float | None`, `allowed: tuple[str, ...] | None`
@@ -275,50 +279,50 @@ import pytest
 from ml_common import schema
 
 
-def test_co_du_24_cot():
+def test_has_24_columns():
     assert len(schema.COLUMNS) == 24
 
 
-def test_moi_cot_co_kind_hop_le():
-    hop_le = {"id", "numeric", "categorical", "boolean", "date", "money", "zipcode"}
+def test_every_column_has_valid_kind():
+    valid_kinds = {"id", "numeric", "categorical", "boolean", "date", "money", "zipcode"}
     for name, spec in schema.COLUMNS.items():
-        assert spec.kind in hop_le, f"{name} co kind khong hop le: {spec.kind}"
+        assert spec.kind in valid_kinds, f"{name} has invalid kind: {spec.kind}"
 
 
-def test_regression_loai_bo_cot_leakage_va_list_price():
+def test_regression_excludes_leakage_columns_and_list_price():
     cols = schema.feature_columns("regression")
-    assert "sale_price" not in cols, "target khong duoc la feature"
-    assert "price_category" not in cols, "price_category suy ra tu sale_price"
-    assert "list_price" not in cols, "list_price lam bai toan tro nen tam thuong"
-    assert "days_on_market" in cols, "days_on_market hop le voi bai regression"
+    assert "sale_price" not in cols, "target must not be a feature"
+    assert "price_category" not in cols, "price_category is derived from sale_price"
+    assert "list_price" not in cols, "list_price would make the task trivial"
+    assert "days_on_market" in cols, "days_on_market is valid for the regression task"
 
 
-def test_classification_loai_bo_cot_leakage_nhung_giu_list_price():
+def test_classification_excludes_leakage_columns_but_keeps_list_price():
     cols = schema.feature_columns("classification")
     assert "sold_within_30_days" not in cols
-    assert "days_on_market" not in cols, "sold_within_30_days suy truc tiep tu day"
-    assert "sale_price" not in cols, "chi biet sau khi ban"
+    assert "days_on_market" not in cols, "sold_within_30_days is derived directly from this"
+    assert "sale_price" not in cols, "only known after the sale"
     assert "price_category" not in cols
-    assert "list_price" in cols, "gia rao biet truoc khi ban, la tin hieu hop le"
+    assert "list_price" in cols, "asking price is known before the sale, a valid signal"
 
 
-def test_khong_co_id_trong_feature():
+def test_id_column_never_in_features():
     for task in ("regression", "classification"):
         assert schema.ID_COLUMN not in schema.feature_columns(task)
 
 
-def test_task_type_sai_thi_bao_loi():
+def test_invalid_task_type_raises():
     with pytest.raises(ValueError, match="task_type"):
         schema.feature_columns("clustering")
 
 
-def test_columns_of_kind_tra_ve_dung():
+def test_columns_of_kind_returns_correct_columns():
     assert set(schema.columns_of_kind("money")) == {"list_price", "sale_price"}
     assert set(schema.columns_of_kind("boolean")) == {"has_pool", "sold_within_30_days"}
     assert schema.columns_of_kind("date") == ["listing_date"]
 
 
-def test_rang_buoc_so_hoc_hop_ly():
+def test_numeric_bounds_are_sensible():
     assert schema.COLUMNS["bedrooms"].min_value == 0
     assert schema.COLUMNS["bedrooms"].max_value == 20
     assert schema.COLUMNS["school_rating"].min_value == 1
@@ -326,19 +330,19 @@ def test_rang_buoc_so_hoc_hop_ly():
     assert schema.COLUMNS["distance_to_city_center_km"].min_value == 0
 
 
-def test_year_built_max_la_nam_hien_tai():
+def test_year_built_max_is_current_year():
     from datetime import date
 
     assert schema.COLUMNS["year_built"].max_value == date.today().year
 
 
-def test_gia_tri_allowed_da_duoc_chuan_hoa():
+def test_allowed_values_are_already_normalized():
     for name, spec in schema.COLUMNS.items():
         if spec.allowed is None:
             continue
-        for gia_tri in spec.allowed:
-            assert gia_tri == gia_tri.strip().lower(), f"{name}: {gia_tri!r} chua chuan hoa"
-            assert "_" not in gia_tri and "-" not in gia_tri, f"{name}: {gia_tri!r} con dau noi"
+        for value in spec.allowed:
+            assert value == value.strip().lower(), f"{name}: {value!r} not normalized"
+            assert "_" not in value and "-" not in value, f"{name}: {value!r} still has a separator"
 ```
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
@@ -349,11 +353,11 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.schema'`
 - [ ] **Step 3: Viết `common/ml_common/schema.py`**
 
 ```python
-"""Nguon su that duy nhat ve schema cua dataset house pricing.
+"""Single source of truth for the house pricing dataset schema.
 
-Duoc dung boi stage `validate` (kiem tra du lieu tho) va boi serving
-(kiem tra record gui vao /predict). Khong import pandas o muc module de
-file nay nhe va import duoc tu bat ky dau.
+Used by the `validate` stage (checking raw data) and by serving (checking
+records sent to /predict). Does not import pandas at module level, so this
+file stays lightweight and importable from anywhere.
 """
 
 from __future__ import annotations
@@ -370,7 +374,7 @@ TASK_TYPES = ("regression", "classification")
 
 @dataclass(frozen=True)
 class ColumnSpec:
-    """Mo ta mot cot: kieu du lieu logic va rang buoc gia tri hop le."""
+    """Describes one column: its logical data kind and valid-value constraints."""
 
     name: str
     kind: str
@@ -423,46 +427,46 @@ _SPECS = [
 
 COLUMNS: dict[str, ColumnSpec] = {spec.name: spec for spec in _SPECS}
 
-# Cot phai loai khoi feature, theo tung bai toan.
-# Xem muc 5 cua tai lieu thiet ke de biet ly do tung cot.
+# Columns excluded from features, per task. See section 5 of the design doc
+# for the reasoning behind each one.
 _EXCLUDED: dict[str, frozenset[str]] = {
     "regression": frozenset(
         {
             ID_COLUMN,
             TARGET_REGRESSION,
-            "price_category",  # suy truc tiep tu sale_price
-            "list_price",  # hop le ve mat thoi gian nhung lam bai toan tam thuong
+            "price_category",  # derived directly from sale_price
+            "list_price",  # temporally valid but makes the task trivial
         }
     ),
     "classification": frozenset(
         {
             ID_COLUMN,
             TARGET_CLASSIFICATION,
-            "days_on_market",  # sold_within_30_days suy truc tiep tu day
-            "sale_price",  # chi biet sau khi ban
-            "price_category",  # suy ra tu sale_price
+            "days_on_market",  # sold_within_30_days is derived directly from this
+            "sale_price",  # only known after the sale
+            "price_category",  # derived from sale_price
         }
     ),
 }
 
 
 def feature_columns(task_type: str) -> list[str]:
-    """Danh sach cot dung lam feature cho mot bai toan, da loai leakage."""
+    """List of columns usable as features for a task, leakage already excluded."""
     if task_type not in TASK_TYPES:
-        raise ValueError(f"task_type phai thuoc {TASK_TYPES}, nhan duoc: {task_type!r}")
+        raise ValueError(f"task_type must be one of {TASK_TYPES}, got: {task_type!r}")
     excluded = _EXCLUDED[task_type]
     return [name for name in COLUMNS if name not in excluded]
 
 
 def columns_of_kind(kind: str) -> list[str]:
-    """Danh sach cot theo kieu logic, giu nguyen thu tu khai bao."""
+    """List of columns of a given logical kind, in declaration order."""
     return [name for name, spec in COLUMNS.items() if spec.kind == kind]
 
 
 def target_column(task_type: str) -> str:
-    """Ten cot target cua mot bai toan."""
+    """Name of the target column for a task."""
     if task_type not in TASK_TYPES:
-        raise ValueError(f"task_type phai thuoc {TASK_TYPES}, nhan duoc: {task_type!r}")
+        raise ValueError(f"task_type must be one of {TASK_TYPES}, got: {task_type!r}")
     return TARGET_REGRESSION if task_type == "regression" else TARGET_CLASSIFICATION
 ```
 
@@ -485,10 +489,12 @@ git commit -m "feat: dinh nghia schema dataset house pricing"
 Đây là task quan trọng nhất của plan. Mọi loại dirty trong dataset đều được xử lý ở đây, và mọi bug ở đây sẽ âm thầm làm hỏng cả model lẫn serving.
 
 **Files:**
+
 - Create: `common/ml_common/parsers.py`
 - Test: `common/tests/test_parsers.py`
 
 **Interfaces:**
+
 - Consumes: không có
 - Produces:
   - `parse_money(value: object) -> float | None`
@@ -510,10 +516,10 @@ import pytest
 from ml_common import parsers
 
 
-# --- Dirty type 6: lan lon so va chuoi "$xxx,xxx" ---
+# --- Dirty type 6: mixed plain numbers and "$xxx,xxx" strings ---
 
 @pytest.mark.parametrize(
-    "dau_vao,mong_doi",
+    "input,expected",
     [
         ("$450,000", 450000.0),
         ("$1,250,000", 1250000.0),
@@ -525,19 +531,19 @@ from ml_common import parsers
         ("$450,000.50", 450000.50),
     ],
 )
-def test_parse_money_cac_dinh_dang(dau_vao, mong_doi):
-    assert parsers.parse_money(dau_vao) == mong_doi
+def test_parse_money_with_multiple_input_format(input, expected):
+    assert parsers.parse_money(input) == expected
 
 
-@pytest.mark.parametrize("dau_vao", [None, "", "   ", np.nan, "khong phai so", "$"])
-def test_parse_money_gia_tri_khong_hop_le_tra_ve_none(dau_vao):
-    assert parsers.parse_money(dau_vao) is None
+@pytest.mark.parametrize("input", [None, "", "   ", np.nan, "Not number", "$"])
+def test_parse_money_invalid_input_expect_return_none(input):
+    assert parsers.parse_money(input) is None
 
 
-# --- Dirty type 4: has_pool co 8 cach bieu dien ---
+# --- Dirty type 4: has_pool has 8 different representations ---
 
 @pytest.mark.parametrize(
-    "dau_vao,mong_doi",
+    "input,expected",
     [
         ("Yes", True), ("No", False),
         ("Y", True), ("N", False),
@@ -550,71 +556,71 @@ def test_parse_money_gia_tri_khong_hop_le_tra_ve_none(dau_vao):
         (1.0, True), (0.0, False),
     ],
 )
-def test_parse_bool_moi_cach_bieu_dien(dau_vao, mong_doi):
-    assert parsers.parse_bool(dau_vao) is mong_doi
+def test_parse_bool_every_representation(input, expected):
+    assert parsers.parse_bool(input) is expected
 
 
-@pytest.mark.parametrize("dau_vao", [None, "", "   ", np.nan, "maybe", "2"])
-def test_parse_bool_gia_tri_khong_hop_le_tra_ve_none(dau_vao):
-    assert parsers.parse_bool(dau_vao) is None
+@pytest.mark.parametrize("input", [None, "", "   ", np.nan, "maybe", "2"])
+def test_parse_bool_invalid_input_expect_return_none(input):
+    assert parsers.parse_bool(input) is None
 
 
-# --- Dirty type 5: listing_date co 3 format ---
+# --- Dirty type 5: listing_date has 3 formats ---
 
 @pytest.mark.parametrize(
-    "dau_vao,mong_doi",
+    "input,expected",
     [
         ("2023-07-15", date(2023, 7, 15)),
         ("07/15/2023", date(2023, 7, 15)),
         ("15-Jul-2023", date(2023, 7, 15)),
         ("  2023-07-15  ", date(2023, 7, 15)),
-        ("01/02/2023", date(2023, 1, 2)),  # MM/DD, khong phai DD/MM
+        ("01/02/2023", date(2023, 1, 2)),  # MM/DD, not DD/MM
         ("03-Mar-2020", date(2020, 3, 3)),
     ],
 )
-def test_parse_date_ba_format(dau_vao, mong_doi):
-    assert parsers.parse_date(dau_vao) == mong_doi
+def test_parse_date_three_formats(input, expected):
+    assert parsers.parse_date(input) == expected
 
 
-@pytest.mark.parametrize("dau_vao", [None, "", "   ", np.nan, "khong phai ngay", "2023-13-45"])
-def test_parse_date_gia_tri_khong_hop_le_tra_ve_none(dau_vao):
-    assert parsers.parse_date(dau_vao) is None
+@pytest.mark.parametrize("input", [None, "", "   ", np.nan, "not a date", "2023-13-45"])
+def test_parse_date_invalid_input_expect_return_none(input):
+    assert parsers.parse_date(input) is None
 
 
-def test_parse_date_chap_nhan_doi_tuong_date_san_co():
+def test_parse_date_accepts_existing_date_object():
     assert parsers.parse_date(date(2023, 7, 15)) == date(2023, 7, 15)
 
 
-# --- Dirty type 8: zipcode thieu hoac bi cat con 4 so ---
+# --- Dirty type 8: zipcode missing or truncated to 4 digits ---
 
 @pytest.mark.parametrize(
-    "dau_vao,mong_doi",
+    "input,expected",
     [
         ("90210", "90210"),
         ("  90210  ", "90210"),
         (90210, "90210"),
-        ("02134", "02134"),  # so 0 dau khong duoc mat
+        ("02134", "02134"),  # leading 0 must not be lost
     ],
 )
-def test_parse_zipcode_hop_le(dau_vao, mong_doi):
-    assert parsers.parse_zipcode(dau_vao) == mong_doi
+def test_parse_zipcode_valid_input(input, expected):
+    assert parsers.parse_zipcode(input) == expected
 
 
-@pytest.mark.parametrize("dau_vao", [None, "", "9021", "902101", "abcde", np.nan, 9021])
-def test_parse_zipcode_sai_dinh_dang_tra_ve_none(dau_vao):
-    assert parsers.parse_zipcode(dau_vao) is None
+@pytest.mark.parametrize("input", [None, "", "9021", "902101", "abcde", np.nan, 9021])
+def test_parse_zipcode_invalid_format_expect_return_none(input):
+    assert parsers.parse_zipcode(input) is None
 
 
-def test_parse_zipcode_so_nguyen_mat_so_0_dau_van_duoc_khoi_phuc():
-    # 2134 trong CSV rat co the la 02134 bi Excel an mat so 0 dau.
-    # Ta KHONG doan: tra ve None de validate dem duoc va bao cao.
+def test_parse_zipcode_integer_with_lost_leading_zero_is_not_recovered():
+    # 2134 in the CSV is very likely 02134 with its leading zero stripped by Excel.
+    # We do NOT guess: return None so validate can count and report it.
     assert parsers.parse_zipcode(2134) is None
 
 
-# --- Dirty type 3: categorical lan lon hoa/thuong/gach ---
+# --- Dirty type 3: categorical mixing upper/lower case and separators ---
 
 @pytest.mark.parametrize(
-    "dau_vao,mong_doi",
+    "input,expected",
     [
         ("NEW YORK", "new york"),
         ("new york", "new york"),
@@ -626,23 +632,23 @@ def test_parse_zipcode_so_nguyen_mat_so_0_dau_van_duoc_khoi_phuc():
         ("Multi-Family", "multi family"),
         ("MULTI FAMILY", "multi family"),
         ("multi_family", "multi family"),
-        ("New   York", "new york"),  # nhieu khoang trang -> mot
+        ("New   York", "new york"),  # multiple spaces -> one
         ("CA", "ca"),
     ],
 )
-def test_normalize_text(dau_vao, mong_doi):
-    assert parsers.normalize_text(dau_vao) == mong_doi
+def test_normalize_text(input, expected):
+    assert parsers.normalize_text(input) == expected
 
 
-@pytest.mark.parametrize("dau_vao", [None, "", "   ", np.nan])
-def test_normalize_text_rong_tra_ve_none(dau_vao):
-    assert parsers.normalize_text(dau_vao) is None
+@pytest.mark.parametrize("input", [None, "", "   ", np.nan])
+def test_normalize_text_empty_input_expect_return_none(input):
+    assert parsers.normalize_text(input) is None
 
 
-def test_moi_bien_the_multi_family_deu_ra_cung_mot_gia_tri():
-    bien_the = ["Multi-Family", "MULTI FAMILY", "multi_family", "  Multi Family  "]
-    ket_qua = {parsers.normalize_text(v) for v in bien_the}
-    assert ket_qua == {"multi family"}
+def test_every_multi_family_variant_normalizes_to_the_same_value():
+    variants = ["Multi-Family", "MULTI FAMILY", "multi_family", "  Multi Family  "]
+    result = {parsers.normalize_text(v) for v in variants}
+    assert result == {"multi family"}
 ```
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
@@ -653,15 +659,15 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.parsers'`
 - [ ] **Step 3: Viết `common/ml_common/parsers.py`**
 
 ```python
-"""Ham parse cho tung gia tri don le.
+"""Parse functions for individual raw values.
 
-Moi ham nhan mot gia tri bat ky (chuoi, so, None, NaN) va tra ve gia tri
-da chuan hoa, hoac None neu khong parse duoc. Khong bao gio nem exception
-va khong bao gio doan: gia tri mo ho thi tra None de stage `validate` dem
-duoc va bao cao.
+Each function takes an arbitrary value (string, number, None, NaN) and
+returns a normalized value, or None if it could not be parsed. Never raises
+an exception and never guesses: an ambiguous value returns None so the
+`validate` stage can count and report it.
 
-Module nay khong import pandas hay sklearn — chi la ham thuan, test bang
-bang tham so.
+This module does not import pandas or sklearn — just pure functions, tested
+with parametrized tables.
 """
 
 from __future__ import annotations
@@ -669,50 +675,51 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
-_MONEY_KY_TU_THUA = re.compile(r"[$,\s]")
-_CHI_CO_SO = re.compile(r"^-?\d+(\.\d+)?$")
-_ZIPCODE_HOP_LE = re.compile(r"^\d{5}$")
-_NHIEU_KHOANG_TRANG = re.compile(r"\s+")
+_MONEY_NOISE_CHARS = re.compile(r"[$,\s]")
+_ONLY_DIGITS = re.compile(r"^-?\d+(\.\d+)?$")
+_VALID_ZIPCODE = re.compile(r"^\d{5}$")
+_EXTRA_SPACES = re.compile(r"\s+")
 
-_BOOL_THAT = {"yes", "y", "1", "true", "t"}
-_BOOL_GIA = {"no", "n", "0", "false", "f"}
+_BOOL_TRUE = {"yes", "y", "1", "true", "t"}
+_BOOL_FALSE = {"no", "n", "0", "false", "f"}
 
 _DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d-%b-%Y")
 
 
-def _la_rong(value: object) -> bool:
-    """True neu gia tri coi nhu thieu: None, NaN, chuoi rong hoac toan khoang trang."""
+def _is_empty(value: object) -> bool:
+    """True if the value counts as missing: None, NaN, empty or whitespace-only string."""
     if value is None:
         return True
-    # NaN la so thuc duy nhat khong bang chinh no.
+    # NaN is the only float that doesn't equal itself.
     if isinstance(value, float) and value != value:
         return True
     return isinstance(value, str) and not value.strip()
 
 
 def parse_money(value: object) -> float | None:
-    """Parse gia tien: '$450,000' -> 450000.0. Tra None neu khong parse duoc.
+    """Parse a money amount: '$450,000' -> 450000.0. Returns None if unparseable.
 
-    Xu ly dirty type 6: cung mot cot vua co so thuan vua co chuoi dinh dang tien.
+    Handles dirty type 6: the same column mixes plain numbers with
+    currency-formatted strings.
     """
-    if _la_rong(value):
+    if _is_empty(value):
         return None
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    text = _MONEY_KY_TU_THUA.sub("", str(value))
-    if not _CHI_CO_SO.match(text):
+    text = _MONEY_NOISE_CHARS.sub("", str(value))
+    if not _ONLY_DIGITS.match(text):
         return None
     return float(text)
 
 
 def parse_bool(value: object) -> bool | None:
-    """Parse boolean tu 8 cach bieu dien. Tra None neu khong parse duoc.
+    """Parse a boolean from 8 possible representations. Returns None if unparseable.
 
-    Xu ly dirty type 4: has_pool co Yes/No/Y/N/1/0/True/False.
+    Handles dirty type 4: has_pool has Yes/No/Y/N/1/0/True/False.
     """
-    if _la_rong(value):
+    if _is_empty(value):
         return None
     if isinstance(value, bool):
         return value
@@ -723,21 +730,21 @@ def parse_bool(value: object) -> bool | None:
             return False
         return None
     text = str(value).strip().lower()
-    if text in _BOOL_THAT:
+    if text in _BOOL_TRUE:
         return True
-    if text in _BOOL_GIA:
+    if text in _BOOL_FALSE:
         return False
     return None
 
 
 def parse_date(value: object) -> date | None:
-    """Parse ngay tu 3 format lan lon. Tra None neu khong parse duoc.
+    """Parse a date from 3 mixed formats. Returns None if unparseable.
 
-    Xu ly dirty type 5: YYYY-MM-DD, MM/DD/YYYY, DD-Mon-YYYY.
-    Thu lan luot tung format thay vi dung dateutil: nhanh hon nhieu lan tren
-    2 trieu dong, va khong bao gio doan nham DD/MM thanh MM/DD.
+    Handles dirty type 5: YYYY-MM-DD, MM/DD/YYYY, DD-Mon-YYYY.
+    Tries each format in turn instead of using dateutil: much faster over
+    2 million rows, and never mistakes DD/MM for MM/DD.
     """
-    if _la_rong(value):
+    if _is_empty(value):
         return None
     if isinstance(value, datetime):
         return value.date()
@@ -753,13 +760,13 @@ def parse_date(value: object) -> date | None:
 
 
 def parse_zipcode(value: object) -> str | None:
-    """Parse zipcode 5 so. Tra None neu thieu hoac sai dinh dang.
+    """Parse a 5-digit zipcode. Returns None if missing or badly formatted.
 
-    Xu ly dirty type 8. Zipcode 4 so tra ve None thay vi doan them so 0 dau:
-    doan se tao ra du lieu sai ma khong ai biet, con None thi stage `validate`
-    dem duoc va bao cao.
+    Handles dirty type 8. A 4-digit zipcode returns None instead of guessing
+    a leading zero: guessing would silently produce wrong data, while None
+    lets the `validate` stage count and report it.
     """
-    if _la_rong(value):
+    if _is_empty(value):
         return None
     if isinstance(value, bool):
         return None
@@ -768,23 +775,23 @@ def parse_zipcode(value: object) -> str | None:
             return None
         value = int(value)
     text = str(value).strip()
-    if not _ZIPCODE_HOP_LE.match(text):
+    if not _VALID_ZIPCODE.match(text):
         return None
     return text
 
 
 def normalize_text(value: object) -> str | None:
-    """Chuan hoa gia tri categorical ve chu thuong, dau cach don.
+    """Normalize a categorical value to lowercase, single spaces.
 
-    Xu ly dirty type 3: 'NEW YORK', 'new_york', 'New-York', '  New York  '
-    deu ra 'new york'. Gach duoi va gach noi doi thanh dau cach de moi bien
-    the cua 'Multi-Family' hoi tu ve cung mot gia tri.
+    Handles dirty type 3: 'NEW YORK', 'new_york', 'New-York', '  New York  '
+    all normalize to 'new york'. Underscores and hyphens become spaces so
+    every variant of 'Multi-Family' converges to the same value.
     """
-    if _la_rong(value):
+    if _is_empty(value):
         return None
     text = str(value).strip().lower()
     text = text.replace("_", " ").replace("-", " ")
-    text = _NHIEU_KHOANG_TRANG.sub(" ", text).strip()
+    text = _EXTRA_SPACES.sub(" ", text).strip()
     return text or None
 ```
 
@@ -810,10 +817,12 @@ git commit -m "feat: parser cho 5 loai dirty o muc gia tri don le"
 ## Task 4: `cleaning.py` — transformer theo cột
 
 **Files:**
+
 - Create: `common/ml_common/cleaning.py`
 - Test: `common/tests/test_cleaning.py`
 
 **Interfaces:**
+
 - Consumes: `ml_common.parsers` (Task 3), `ml_common.schema` (Task 2)
 - Produces:
   - `RawRecordCleaner(BaseEstimator, TransformerMixin)` — `.fit(X, y=None) -> self`, `.transform(X: pd.DataFrame) -> pd.DataFrame`
@@ -835,8 +844,8 @@ from ml_common import cleaning
 
 
 @pytest.fixture
-def df_ban():
-    """Mot DataFrame nho chua du cac loai dirty."""
+def dirty_df():
+    """A small DataFrame covering every dirty type."""
     return pd.DataFrame(
         {
             "property_id": [1, 2, 3],
@@ -859,114 +868,114 @@ def df_ban():
 
 
 class TestRawRecordCleaner:
-    def test_khong_bao_gio_xoa_dong(self, df_ban):
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        assert len(ket_qua) == len(df_ban)
+    def test_never_drops_rows(self, dirty_df):
+        result = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        assert len(result) == len(dirty_df)
 
-    def test_hoat_dong_voi_mot_dong_duy_nhat(self, df_ban):
-        """Serving goi /predict voi mot record — phai chay duoc."""
-        mot_dong = df_ban.head(1)
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(mot_dong)
-        assert len(ket_qua) == 1
+    def test_works_with_a_single_row(self, dirty_df):
+        """Serving calls /predict with one record — this must work."""
+        one_row = dirty_df.head(1)
+        result = cleaning.RawRecordCleaner().fit_transform(one_row)
+        assert len(result) == 1
 
-    def test_parse_cot_tien(self, df_ban):
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        assert ket_qua["list_price"].tolist() == [450000.0, 500000.0, 1250000.0]
-        assert ket_qua["sale_price"].tolist() == [440000.0, 490000.0, 1200000.0]
+    def test_parses_money_columns(self, dirty_df):
+        result = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        assert result["list_price"].tolist() == [450000.0, 500000.0, 1250000.0]
+        assert result["sale_price"].tolist() == [440000.0, 490000.0, 1200000.0]
 
-    def test_chuan_hoa_categorical(self, df_ban):
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        assert ket_qua["city"].tolist() == ["new york", "new york", "new york"]
-        assert ket_qua["state"].tolist() == ["ny", "ny", "ny"]
-        assert ket_qua["property_type"].tolist() == [
+    def test_normalizes_categorical_columns(self, dirty_df):
+        result = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        assert result["city"].tolist() == ["new york", "new york", "new york"]
+        assert result["state"].tolist() == ["ny", "ny", "ny"]
+        assert result["property_type"].tolist() == [
             "single family",
             "multi family",
             "multi family",
         ]
 
-    def test_parse_boolean(self, df_ban):
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        assert ket_qua["has_pool"].tolist() == [True, False, True]
+    def test_parses_boolean_columns(self, dirty_df):
+        result = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        assert result["has_pool"].tolist() == [True, False, True]
 
-    def test_zipcode_sai_thanh_none(self, df_ban):
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        assert ket_qua["zipcode"].tolist() == ["10001", None, None]
+    def test_invalid_zipcode_becomes_none(self, dirty_df):
+        result = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        assert result["zipcode"].tolist() == ["10001", None, None]
 
-    def test_parse_ngay_ba_format_ra_cung_mot_ngay(self, df_ban):
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ngay = pd.to_datetime(ket_qua["listing_date"])
-        assert ngay.nunique() == 1
+    def test_three_date_formats_parse_to_the_same_date(self, dirty_df):
+        result = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        parsed = pd.to_datetime(result["listing_date"])
+        assert parsed.nunique() == 1
 
-    def test_khong_sua_doi_dataframe_dau_vao(self, df_ban):
-        ban_sao = df_ban.copy(deep=True)
-        cleaning.RawRecordCleaner().fit_transform(df_ban)
-        pd.testing.assert_frame_equal(df_ban, ban_sao)
+    def test_does_not_mutate_the_input_dataframe(self, dirty_df):
+        original_copy = dirty_df.copy(deep=True)
+        cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        pd.testing.assert_frame_equal(dirty_df, original_copy)
 
-    def test_cot_thieu_thi_bo_qua_khong_nem_loi(self):
-        """Serving co the nhan record thieu cot tuy chon."""
+    def test_missing_column_is_skipped_without_raising(self):
+        """Serving may receive a record missing an optional column."""
         df = pd.DataFrame({"city": ["NEW YORK"], "list_price": ["$100,000"]})
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df)
-        assert ket_qua["city"].tolist() == ["new york"]
-        assert ket_qua["list_price"].tolist() == [100000.0]
+        result = cleaning.RawRecordCleaner().fit_transform(df)
+        assert result["city"].tolist() == ["new york"]
+        assert result["list_price"].tolist() == [100000.0]
 
-    def test_cot_ngoai_schema_duoc_giu_nguyen(self):
-        df = pd.DataFrame({"city": ["NEW YORK"], "cot_la": [42]})
-        ket_qua = cleaning.RawRecordCleaner().fit_transform(df)
-        assert ket_qua["cot_la"].tolist() == [42]
+    def test_column_outside_schema_is_left_untouched(self):
+        df = pd.DataFrame({"city": ["NEW YORK"], "extra_column": [42]})
+        result = cleaning.RawRecordCleaner().fit_transform(df)
+        assert result["extra_column"].tolist() == [42]
 
 
 class TestOutlierClipper:
-    def test_clip_ve_bien_cua_schema(self, df_ban):
-        da_sach = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ket_qua = cleaning.OutlierClipper().fit_transform(da_sach)
+    def test_clips_to_schema_bounds(self, dirty_df):
+        cleaned = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        result = cleaning.OutlierClipper().fit_transform(cleaned)
         # bedrooms: -1 -> 0, 25 -> 20
-        assert ket_qua["bedrooms"].tolist() == [3.0, 0.0, 20.0]
+        assert result["bedrooms"].tolist() == [3.0, 0.0, 20.0]
         # bathrooms: 50 -> 15
-        assert ket_qua["bathrooms"].tolist() == [2.0, 1.5, 15.0]
+        assert result["bathrooms"].tolist() == [2.0, 1.5, 15.0]
         # distance: -3 -> 0
-        assert ket_qua["distance_to_city_center_km"].tolist() == [5.0, 0.0, 10.0]
+        assert result["distance_to_city_center_km"].tolist() == [5.0, 0.0, 10.0]
 
-    def test_nam_xay_tuong_lai_bi_clip(self, df_ban):
+    def test_future_build_year_is_clipped(self, dirty_df):
         from datetime import date
 
-        da_sach = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ket_qua = cleaning.OutlierClipper().fit_transform(da_sach)
-        assert ket_qua["year_built"].max() <= date.today().year
-        assert ket_qua["year_built"].min() >= 1800
+        cleaned = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        result = cleaning.OutlierClipper().fit_transform(cleaned)
+        assert result["year_built"].max() <= date.today().year
+        assert result["year_built"].min() >= 1800
 
-    def test_dien_tich_bat_thuong_bi_clip(self, df_ban):
-        da_sach = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ket_qua = cleaning.OutlierClipper().fit_transform(da_sach)
-        assert ket_qua["living_area_sqft"].max() <= 50_000
+    def test_abnormal_area_is_clipped(self, dirty_df):
+        cleaned = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        result = cleaning.OutlierClipper().fit_transform(cleaned)
+        assert result["living_area_sqft"].max() <= 50_000
 
-    def test_khong_xoa_dong(self, df_ban):
-        da_sach = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ket_qua = cleaning.OutlierClipper().fit_transform(da_sach)
-        assert len(ket_qua) == len(df_ban)
+    def test_does_not_drop_rows(self, dirty_df):
+        cleaned = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        result = cleaning.OutlierClipper().fit_transform(cleaned)
+        assert len(result) == len(dirty_df)
 
-    def test_gia_tri_thieu_van_la_thieu_sau_khi_clip(self):
+    def test_missing_value_stays_missing_after_clip(self):
         df = pd.DataFrame({"bedrooms": [np.nan, 3.0]})
-        ket_qua = cleaning.OutlierClipper().fit_transform(df)
-        assert pd.isna(ket_qua["bedrooms"].iloc[0])
+        result = cleaning.OutlierClipper().fit_transform(df)
+        assert pd.isna(result["bedrooms"].iloc[0])
 
 
 class TestDateFeatures:
-    def test_tach_nam_va_thang(self, df_ban):
-        da_sach = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ket_qua = cleaning.DateFeatures().fit_transform(da_sach)
-        assert ket_qua["listing_year"].tolist() == [2023, 2023, 2023]
-        assert ket_qua["listing_month"].tolist() == [7, 7, 7]
+    def test_splits_year_and_month(self, dirty_df):
+        cleaned = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        result = cleaning.DateFeatures().fit_transform(cleaned)
+        assert result["listing_year"].tolist() == [2023, 2023, 2023]
+        assert result["listing_month"].tolist() == [7, 7, 7]
 
-    def test_bo_cot_ngay_goc(self, df_ban):
-        da_sach = cleaning.RawRecordCleaner().fit_transform(df_ban)
-        ket_qua = cleaning.DateFeatures().fit_transform(da_sach)
-        assert "listing_date" not in ket_qua.columns
+    def test_drops_the_original_date_column(self, dirty_df):
+        cleaned = cleaning.RawRecordCleaner().fit_transform(dirty_df)
+        result = cleaning.DateFeatures().fit_transform(cleaned)
+        assert "listing_date" not in result.columns
 
-    def test_ngay_thieu_thanh_nan_khong_nem_loi(self):
+    def test_missing_date_becomes_nan_without_raising(self):
         df = pd.DataFrame({"listing_date": [None, pd.Timestamp("2023-07-15")]})
-        ket_qua = cleaning.DateFeatures().fit_transform(df)
-        assert pd.isna(ket_qua["listing_year"].iloc[0])
-        assert ket_qua["listing_year"].iloc[1] == 2023
+        result = cleaning.DateFeatures().fit_transform(df)
+        assert pd.isna(result["listing_year"].iloc[0])
+        assert result["listing_year"].iloc[1] == 2023
 ```
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
@@ -977,14 +986,14 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.cleaning'`
 - [ ] **Step 3: Viết `common/ml_common/cleaning.py`**
 
 ```python
-"""Transformer lam sach du lieu — CHI thao tac theo cot.
+"""Data-cleaning transformers — column-wise ONLY.
 
-Cac transformer o day nam trong sklearn Pipeline va duoc dong goi cung
-model vao MLflow, nen chung chay o CA HAI noi: stage `preprocess` (tren 2
-trieu dong) va serving (tren mot record don le).
+The transformers here live inside a sklearn Pipeline and get packaged with
+the model into MLflow, so they run in BOTH places: the `preprocess` stage
+(over 2 million rows) and serving (over a single record).
 
-Vi vay chung TUYET DOI khong duoc xoa dong. Thao tac theo dong nam o
-`rowops.py`. Xem Global Constraints cua plan.
+That means they must NEVER drop rows. Row-wise operations live in
+`rowops.py`. See the plan's Global Constraints.
 """
 
 from __future__ import annotations
@@ -994,7 +1003,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 from ml_common import parsers, schema
 
-_PARSER_THEO_KIND = {
+_PARSER_BY_KIND = {
     "money": parsers.parse_money,
     "boolean": parsers.parse_bool,
     "date": parsers.parse_date,
@@ -1004,69 +1013,69 @@ _PARSER_THEO_KIND = {
 
 
 class RawRecordCleaner(BaseEstimator, TransformerMixin):
-    """Ap parser phu hop len tung cot theo `kind` khai bao trong schema.
+    """Applies the matching parser to each column, based on its `kind` in the schema.
 
-    Cot khong co trong schema duoc giu nguyen. Cot co trong schema nhung
-    vang mat trong DataFrame duoc bo qua — serving co the nhan record
-    thieu cot tuy chon.
+    Columns not in the schema are left untouched. Columns in the schema but
+    absent from the DataFrame are skipped — serving may receive a record
+    missing an optional column.
     """
 
     def fit(self, X: pd.DataFrame, y=None) -> RawRecordCleaner:  # noqa: N803
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:  # noqa: N803
-        ket_qua = X.copy()
-        for ten_cot, spec in schema.COLUMNS.items():
-            if ten_cot not in ket_qua.columns:
+        result = X.copy()
+        for column_name, spec in schema.COLUMNS.items():
+            if column_name not in result.columns:
                 continue
-            parser = _PARSER_THEO_KIND.get(spec.kind)
+            parser = _PARSER_BY_KIND.get(spec.kind)
             if parser is None:
                 continue
-            ket_qua[ten_cot] = [parser(gia_tri) for gia_tri in ket_qua[ten_cot]]
-        return ket_qua
+            result[column_name] = [parser(value) for value in result[column_name]]
+        return result
 
 
 class OutlierClipper(BaseEstimator, TransformerMixin):
-    """Cat gia tri so ve trong khoang [min_value, max_value] cua schema.
+    """Clips numeric values into the schema's [min_value, max_value] range.
 
-    Chon clip thay vi xoa dong vi hai ly do: serving khong the xoa dong, va
-    mot can nha co `bedrooms = -1` van con thong tin huu ich o cac cot khac.
-    Gia tri thieu van giu nguyen la thieu.
+    Clipping is chosen over dropping rows for two reasons: serving can't
+    drop rows, and a house with `bedrooms = -1` still has useful information
+    in its other columns. Missing values stay missing.
     """
 
     def fit(self, X: pd.DataFrame, y=None) -> OutlierClipper:  # noqa: N803
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:  # noqa: N803
-        ket_qua = X.copy()
-        for ten_cot, spec in schema.COLUMNS.items():
-            if ten_cot not in ket_qua.columns:
+        result = X.copy()
+        for column_name, spec in schema.COLUMNS.items():
+            if column_name not in result.columns:
                 continue
             if spec.min_value is None and spec.max_value is None:
                 continue
-            chuoi_so = pd.to_numeric(ket_qua[ten_cot], errors="coerce")
-            ket_qua[ten_cot] = chuoi_so.clip(lower=spec.min_value, upper=spec.max_value)
-        return ket_qua
+            numeric = pd.to_numeric(result[column_name], errors="coerce")
+            result[column_name] = numeric.clip(lower=spec.min_value, upper=spec.max_value)
+        return result
 
 
 class DateFeatures(BaseEstimator, TransformerMixin):
-    """Doi `listing_date` thanh `listing_year` + `listing_month`.
+    """Turns `listing_date` into `listing_year` + `listing_month`.
 
-    Model cay khong dung truc tiep duoc kieu datetime, va nam/thang la hai
-    tin hieu co y nghia thuc te (chu ky thi truong, mua cao diem).
+    Tree models can't use a datetime dtype directly, and year/month are two
+    signals with real-world meaning (market cycles, peak season).
     """
 
     def fit(self, X: pd.DataFrame, y=None) -> DateFeatures:  # noqa: N803
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:  # noqa: N803
-        ket_qua = X.copy()
-        if "listing_date" not in ket_qua.columns:
-            return ket_qua
-        ngay = pd.to_datetime(ket_qua["listing_date"], errors="coerce")
-        ket_qua["listing_year"] = ngay.dt.year
-        ket_qua["listing_month"] = ngay.dt.month
-        return ket_qua.drop(columns=["listing_date"])
+        result = X.copy()
+        if "listing_date" not in result.columns:
+            return result
+        parsed = pd.to_datetime(result["listing_date"], errors="coerce")
+        result["listing_year"] = parsed.dt.year
+        result["listing_month"] = parsed.dt.month
+        return result.drop(columns=["listing_date"])
 ```
 
 - [ ] **Step 4: Chạy test để xác nhận nó pass**
@@ -1086,10 +1095,12 @@ git commit -m "feat: transformer lam sach theo cot, dung chung train va serve"
 ## Task 5: `rowops.py` — thao tác theo dòng
 
 **Files:**
+
 - Create: `common/ml_common/rowops.py`
 - Test: `common/tests/test_rowops.py`
 
 **Interfaces:**
+
 - Consumes: `ml_common.schema` (Task 2)
 - Produces:
   - `drop_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]` — trả (df đã khử trùng, số dòng đã xoá)
@@ -1107,59 +1118,59 @@ import pytest
 from ml_common import rowops
 
 
-def test_drop_duplicates_xoa_dong_trung_property_id():
+def test_drop_duplicates_removes_rows_with_duplicate_property_id():
     df = pd.DataFrame(
         {
             "property_id": [1, 2, 2, 3],
             "city": ["a", "b", "b", "c"],
         }
     )
-    ket_qua, so_dong_xoa = rowops.drop_duplicates(df)
-    assert len(ket_qua) == 3
-    assert so_dong_xoa == 1
-    assert ket_qua["property_id"].tolist() == [1, 2, 3]
+    result, dropped_count = rowops.drop_duplicates(df)
+    assert len(result) == 3
+    assert dropped_count == 1
+    assert result["property_id"].tolist() == [1, 2, 3]
 
 
-def test_drop_duplicates_giu_dong_dau_tien():
-    df = pd.DataFrame({"property_id": [1, 1], "city": ["dau", "sau"]})
-    ket_qua, _ = rowops.drop_duplicates(df)
-    assert ket_qua["city"].tolist() == ["dau"]
+def test_drop_duplicates_keeps_the_first_row():
+    df = pd.DataFrame({"property_id": [1, 1], "city": ["first", "second"]})
+    result, _ = rowops.drop_duplicates(df)
+    assert result["city"].tolist() == ["first"]
 
 
-def test_drop_duplicates_khong_co_trung_thi_giu_nguyen():
+def test_drop_duplicates_with_no_duplicates_keeps_all_rows():
     df = pd.DataFrame({"property_id": [1, 2, 3]})
-    ket_qua, so_dong_xoa = rowops.drop_duplicates(df)
-    assert len(ket_qua) == 3
-    assert so_dong_xoa == 0
+    result, dropped_count = rowops.drop_duplicates(df)
+    assert len(result) == 3
+    assert dropped_count == 0
 
 
-def test_drop_duplicates_index_duoc_danh_lai():
+def test_drop_duplicates_reindexes_the_result():
     df = pd.DataFrame({"property_id": [1, 1, 2]})
-    ket_qua, _ = rowops.drop_duplicates(df)
-    assert ket_qua.index.tolist() == [0, 1]
+    result, _ = rowops.drop_duplicates(df)
+    assert result.index.tolist() == [0, 1]
 
 
 def test_drop_rows_missing_target_regression():
     df = pd.DataFrame({"sale_price": [100.0, np.nan, 300.0], "city": ["a", "b", "c"]})
-    ket_qua, so_dong_xoa = rowops.drop_rows_missing_target(df, "regression")
-    assert len(ket_qua) == 2
-    assert so_dong_xoa == 1
+    result, dropped_count = rowops.drop_rows_missing_target(df, "regression")
+    assert len(result) == 2
+    assert dropped_count == 1
 
 
 def test_drop_rows_missing_target_classification():
     df = pd.DataFrame({"sold_within_30_days": [True, None, False]})
-    ket_qua, so_dong_xoa = rowops.drop_rows_missing_target(df, "classification")
-    assert len(ket_qua) == 2
-    assert so_dong_xoa == 1
+    result, dropped_count = rowops.drop_rows_missing_target(df, "classification")
+    assert len(result) == 2
+    assert dropped_count == 1
 
 
-def test_drop_rows_missing_target_thieu_cot_target_thi_bao_loi():
+def test_drop_rows_missing_target_missing_target_column_raises():
     df = pd.DataFrame({"city": ["a"]})
     with pytest.raises(KeyError, match="sale_price"):
         rowops.drop_rows_missing_target(df, "regression")
 
 
-def test_drop_rows_missing_target_task_type_sai_thi_bao_loi():
+def test_drop_rows_missing_target_invalid_task_type_raises():
     df = pd.DataFrame({"sale_price": [1.0]})
     with pytest.raises(ValueError, match="task_type"):
         rowops.drop_rows_missing_target(df, "clustering")
@@ -1173,14 +1184,14 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.rowops'`
 - [ ] **Step 3: Viết `common/ml_common/rowops.py`**
 
 ```python
-"""Thao tac theo DONG — chi duoc goi tu stage `preprocess`.
+"""ROW-wise operations — only ever called from the `preprocess` stage.
 
-File nay tach rieng khoi `cleaning.py` mot cach co chu y: cac ham o day
-xoa dong, nen chung KHONG BAO GIO duoc dat vao sklearn Pipeline. Serving
-goi /predict voi mot record don le; mot buoc xoa dong se tra ve DataFrame
-rong va lam serving sap.
+This file is deliberately kept separate from `cleaning.py`: the functions
+here drop rows, so they must NEVER be placed in a sklearn Pipeline. Serving
+calls /predict with a single record; a row-dropping step would return an
+empty DataFrame and crash serving.
 
-Ranh gioi file chinh la co che bao ve — khong ai vo tinh import nham.
+The file boundary itself is the safeguard — nobody imports this by mistake.
 """
 
 from __future__ import annotations
@@ -1191,27 +1202,27 @@ from ml_common import schema
 
 
 def drop_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Xoa dong trung `property_id`, giu dong dau tien.
+    """Drops rows with a duplicate `property_id`, keeping the first one.
 
-    Xu ly dirty type 2 (~0.6% dong bi lap). Tra ve (df moi, so dong da xoa)
-    de stage `preprocess` log duoc con so nay.
+    Handles dirty type 2 (~0.6% of rows are duplicated). Returns
+    (new df, dropped row count) so the `preprocess` stage can log the count.
     """
-    so_dong_truoc = len(df)
-    ket_qua = df.drop_duplicates(subset=[schema.ID_COLUMN], keep="first").reset_index(drop=True)
-    return ket_qua, so_dong_truoc - len(ket_qua)
+    row_count_before = len(df)
+    result = df.drop_duplicates(subset=[schema.ID_COLUMN], keep="first").reset_index(drop=True)
+    return result, row_count_before - len(result)
 
 
 def drop_rows_missing_target(df: pd.DataFrame, task_type: str) -> tuple[pd.DataFrame, int]:
-    """Xoa dong khong co gia tri target — khong train duoc tren chung.
+    """Drops rows with no target value — they can't be trained on.
 
-    Tra ve (df moi, so dong da xoa).
+    Returns (new df, dropped row count).
     """
-    cot_target = schema.target_column(task_type)
-    if cot_target not in df.columns:
-        raise KeyError(f"Thieu cot target {cot_target!r} trong DataFrame")
-    so_dong_truoc = len(df)
-    ket_qua = df[df[cot_target].notna()].reset_index(drop=True)
-    return ket_qua, so_dong_truoc - len(ket_qua)
+    target_column = schema.target_column(task_type)
+    if target_column not in df.columns:
+        raise KeyError(f"Missing target column {target_column!r} in DataFrame")
+    row_count_before = len(df)
+    result = df[df[target_column].notna()].reset_index(drop=True)
+    return result, row_count_before - len(result)
 ```
 
 - [ ] **Step 4: Chạy test để xác nhận nó pass**
@@ -1231,10 +1242,12 @@ git commit -m "feat: thao tac theo dong, tach rieng khoi Pipeline"
 ## Task 6: `features.py` — dựng Pipeline
 
 **Files:**
+
 - Create: `common/ml_common/features.py`
 - Test: `common/tests/test_features.py`
 
 **Interfaces:**
+
 - Consumes: `ml_common.cleaning` (Task 4), `ml_common.schema` (Task 2)
 - Produces:
   - `build_pipeline(task_type: str, estimator) -> sklearn.pipeline.Pipeline`
@@ -1254,138 +1267,139 @@ from ml_common import features
 
 
 @pytest.fixture
-def df_tho():
-    """Du lieu THO — dung nhu du lieu that truoc khi lam sach."""
-    so_dong = 40
+def raw_df():
+    """RAW data — mirrors real data before cleaning."""
+    row_count = 40
     rng = np.random.default_rng(42)
     return pd.DataFrame(
         {
-            "property_id": range(so_dong),
-            "listing_date": ["2023-07-15", "07/15/2023"] * (so_dong // 2),
-            "city": ["NEW YORK", "new_york", "  Boston ", "BOSTON"] * (so_dong // 4),
-            "state": ["NY", "ny", "MA", "ma"] * (so_dong // 4),
-            "zipcode": ["10001", "1000"] * (so_dong // 2),
-            "property_type": ["Single_Family", "MULTI FAMILY"] * (so_dong // 2),
-            "lot_size_sqft": rng.uniform(1000, 9000, so_dong),
-            "living_area_sqft": rng.uniform(800, 4000, so_dong),
-            "bedrooms": rng.integers(1, 6, so_dong).astype(float),
-            "bathrooms": rng.choice([1.0, 1.5, 2.0, 2.5], so_dong),
-            "year_built": rng.integers(1950, 2020, so_dong).astype(float),
-            "stories": rng.integers(1, 4, so_dong).astype(float),
-            "garage_spaces": rng.integers(0, 3, so_dong).astype(float),
-            "has_pool": ["Yes", "N", "1", "False"] * (so_dong // 4),
-            "hoa_fee_monthly": rng.uniform(0, 400, so_dong),
-            "school_rating": rng.uniform(1, 10, so_dong),
-            "crime_index": rng.uniform(0, 100, so_dong),
-            "distance_to_city_center_km": rng.uniform(0, 40, so_dong),
-            "condition": ["Good", "EXCELLENT", "poor", "Fair"] * (so_dong // 4),
-            "days_on_market": rng.integers(1, 200, so_dong),
-            "list_price": ["$450,000", 500000] * (so_dong // 2),
-            "sale_price": [440000, "$490,000"] * (so_dong // 2),
-            "price_category": ["Medium", "High"] * (so_dong // 2),
-            "sold_within_30_days": ["Yes", "No"] * (so_dong // 2),
+            "property_id": range(row_count),
+            "listing_date": ["2023-07-15", "07/15/2023"] * (row_count // 2),
+            "city": ["NEW YORK", "new_york", "  Boston ", "BOSTON"] * (row_count // 4),
+            "state": ["NY", "ny", "MA", "ma"] * (row_count // 4),
+            "zipcode": ["10001", "1000"] * (row_count // 2),
+            "property_type": ["Single_Family", "MULTI FAMILY"] * (row_count // 2),
+            "lot_size_sqft": rng.uniform(1000, 9000, row_count),
+            "living_area_sqft": rng.uniform(800, 4000, row_count),
+            "bedrooms": rng.integers(1, 6, row_count).astype(float),
+            "bathrooms": rng.choice([1.0, 1.5, 2.0, 2.5], row_count),
+            "year_built": rng.integers(1950, 2020, row_count).astype(float),
+            "stories": rng.integers(1, 4, row_count).astype(float),
+            "garage_spaces": rng.integers(0, 3, row_count).astype(float),
+            "has_pool": ["Yes", "N", "1", "False"] * (row_count // 4),
+            "hoa_fee_monthly": rng.uniform(0, 400, row_count),
+            "school_rating": rng.uniform(1, 10, row_count),
+            "crime_index": rng.uniform(0, 100, row_count),
+            "distance_to_city_center_km": rng.uniform(0, 40, row_count),
+            "condition": ["Good", "EXCELLENT", "poor", "Fair"] * (row_count // 4),
+            "days_on_market": rng.integers(1, 200, row_count),
+            "list_price": ["$450,000", 500000] * (row_count // 2),
+            "sale_price": [440000, "$490,000"] * (row_count // 2),
+            "price_category": ["Medium", "High"] * (row_count // 2),
+            "sold_within_30_days": ["Yes", "No"] * (row_count // 2),
         }
     )
 
 
-def test_tra_ve_pipeline_cua_sklearn():
-    ket_qua = features.build_pipeline("regression", DummyRegressor())
-    assert isinstance(ket_qua, Pipeline)
+def test_returns_a_sklearn_pipeline():
+    result = features.build_pipeline("regression", DummyRegressor())
+    assert isinstance(result, Pipeline)
 
 
-def test_task_type_sai_thi_bao_loi():
+def test_invalid_task_type_raises():
     with pytest.raises(ValueError, match="task_type"):
         features.build_pipeline("clustering", DummyRegressor())
 
 
-def test_regression_fit_va_predict_tren_du_lieu_THO(df_tho):
-    """Day la dam bao quan trong nhat: Pipeline nhan du lieu tho, khong can
-    lam sach truoc. Neu test nay pass thi serving goi /predict voi record
-    tho se chay dung."""
+def test_regression_fit_and_predict_on_RAW_data(raw_df):
+    """This is the most important guarantee: the Pipeline accepts raw data,
+    no cleaning needed beforehand. If this test passes, serving calling
+    /predict with a raw record will work correctly."""
     pipeline = features.build_pipeline("regression", DummyRegressor())
-    X = df_tho.drop(columns=["sale_price"])
-    y = pd.to_numeric(df_tho["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
+    X = raw_df.drop(columns=["sale_price"])
+    y = pd.to_numeric(raw_df["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
     pipeline.fit(X, y)
-    du_doan = pipeline.predict(X)
-    assert len(du_doan) == len(df_tho)
+    predictions = pipeline.predict(X)
+    assert len(predictions) == len(raw_df)
 
 
-def test_classification_fit_va_predict_tren_du_lieu_THO(df_tho):
+def test_classification_fit_and_predict_on_RAW_data(raw_df):
     pipeline = features.build_pipeline("classification", DummyClassifier())
-    X = df_tho.drop(columns=["sold_within_30_days"])
-    y = df_tho["sold_within_30_days"].map({"Yes": 1, "No": 0})
+    X = raw_df.drop(columns=["sold_within_30_days"])
+    y = raw_df["sold_within_30_days"].map({"Yes": 1, "No": 0})
     pipeline.fit(X, y)
-    du_doan = pipeline.predict(X)
-    assert len(du_doan) == len(df_tho)
+    predictions = pipeline.predict(X)
+    assert len(predictions) == len(raw_df)
 
 
-def test_predict_duoc_voi_MOT_record(df_tho):
-    """Serving nhan mot record don le."""
+def test_can_predict_a_SINGLE_record(raw_df):
+    """Serving receives a single record."""
     pipeline = features.build_pipeline("regression", DummyRegressor())
-    X = df_tho.drop(columns=["sale_price"])
-    y = pd.to_numeric(df_tho["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
+    X = raw_df.drop(columns=["sale_price"])
+    y = pd.to_numeric(raw_df["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
     pipeline.fit(X, y)
-    du_doan = pipeline.predict(X.head(1))
-    assert len(du_doan) == 1
+    predictions = pipeline.predict(X.head(1))
+    assert len(predictions) == 1
 
 
-def test_cot_leakage_khong_lot_vao_pipeline(df_tho):
-    """price_category va list_price khong duoc anh huong model regression.
+def test_leakage_columns_do_not_affect_the_pipeline(raw_df):
+    """price_category and list_price must not influence the regression model.
 
-    Dung DecisionTreeRegressor chu KHONG dung DummyRegressor: Dummy bo qua
-    moi feature nen se pass du Pipeline co bug, cho ta niem tin gia.
+    Uses DecisionTreeRegressor, NOT DummyRegressor: Dummy ignores every
+    feature, so it would pass even with a buggy Pipeline, giving false
+    confidence.
     """
     from sklearn.tree import DecisionTreeRegressor
 
     pipeline = features.build_pipeline("regression", DecisionTreeRegressor(random_state=0))
-    X = df_tho.drop(columns=["sale_price"])
-    y = pd.to_numeric(df_tho["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
+    X = raw_df.drop(columns=["sale_price"])
+    y = pd.to_numeric(raw_df["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
     pipeline.fit(X, y)
 
-    X_doi = X.copy()
-    X_doi["price_category"] = "Luxury"
-    X_doi["list_price"] = "$9,999,999"
-    np.testing.assert_array_equal(pipeline.predict(X), pipeline.predict(X_doi))
+    X_altered = X.copy()
+    X_altered["price_category"] = "Luxury"
+    X_altered["list_price"] = "$9,999,999"
+    np.testing.assert_array_equal(pipeline.predict(X), pipeline.predict(X_altered))
 
 
-def test_selectcolumns_that_su_loai_bo_cot_leakage():
-    """Kiem tra truc tiep danh sach cot, khong qua ket qua predict."""
+def test_selectcolumns_actually_excludes_leakage_columns():
+    """Checks the column list directly, without going through predict results."""
     from sklearn.dummy import DummyRegressor as _Dummy
 
     pipeline = features.build_pipeline("regression", _Dummy())
-    cot_duoc_chon = pipeline.named_steps["chon_cot"].columns
-    assert "price_category" not in cot_duoc_chon
-    assert "list_price" not in cot_duoc_chon
-    assert "sale_price" not in cot_duoc_chon
-    assert "property_id" not in cot_duoc_chon
-    assert "living_area_sqft" in cot_duoc_chon
+    selected_columns = pipeline.named_steps["select_columns"].columns
+    assert "price_category" not in selected_columns
+    assert "list_price" not in selected_columns
+    assert "sale_price" not in selected_columns
+    assert "property_id" not in selected_columns
+    assert "living_area_sqft" in selected_columns
 
 
-def test_gia_tri_categorical_chua_tung_thay_khong_lam_sap(df_tho):
-    """Agent o Plan 4 se gui property_type moi (drift_scenario=new_segment)."""
+def test_unseen_categorical_value_does_not_crash(raw_df):
+    """The Plan 4 agent will send a new property_type (drift_scenario=new_segment)."""
     pipeline = features.build_pipeline("regression", DummyRegressor())
-    X = df_tho.drop(columns=["sale_price"])
-    y = pd.to_numeric(df_tho["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
+    X = raw_df.drop(columns=["sale_price"])
+    y = pd.to_numeric(raw_df["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
     pipeline.fit(X, y)
 
-    X_moi = X.head(1).copy()
-    X_moi["property_type"] = "Houseboat"
-    X_moi["city"] = "Atlantis"
-    du_doan = pipeline.predict(X_moi)
-    assert len(du_doan) == 1
+    X_new = X.head(1).copy()
+    X_new["property_type"] = "Houseboat"
+    X_new["city"] = "Atlantis"
+    predictions = pipeline.predict(X_new)
+    assert len(predictions) == 1
 
 
-def test_gia_tri_thieu_khong_lam_sap(df_tho):
+def test_missing_values_do_not_crash(raw_df):
     pipeline = features.build_pipeline("regression", DummyRegressor())
-    X = df_tho.drop(columns=["sale_price"])
-    y = pd.to_numeric(df_tho["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
+    X = raw_df.drop(columns=["sale_price"])
+    y = pd.to_numeric(raw_df["sale_price"].astype(str).str.replace(r"[$,]", "", regex=True))
     pipeline.fit(X, y)
 
-    X_thieu = X.head(1).copy()
-    for cot in ["bedrooms", "bathrooms", "year_built", "school_rating", "hoa_fee_monthly"]:
-        X_thieu[cot] = np.nan
-    du_doan = pipeline.predict(X_thieu)
-    assert len(du_doan) == 1
+    X_missing = X.head(1).copy()
+    for column in ["bedrooms", "bathrooms", "year_built", "school_rating", "hoa_fee_monthly"]:
+        X_missing[column] = np.nan
+    predictions = pipeline.predict(X_missing)
+    assert len(predictions) == 1
 ```
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
@@ -1396,12 +1410,12 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.features'`
 - [ ] **Step 3: Viết `common/ml_common/features.py`**
 
 ```python
-"""Dung sklearn Pipeline hoan chinh cho tung bai toan.
+"""Builds the complete sklearn Pipeline for each task.
 
-Pipeline tra ve tu day duoc log nguyen ven vao MLflow o stage `train`, nen
-no phai TU CHUA toan bo logic lam sach: model trong Registry nhan record
-THO va tu xu ly. Day la co che chong training/serving skew — xem muc 7.1
-cua tai lieu thiet ke.
+The Pipeline returned here gets logged whole into MLflow at the `train`
+stage, so it must SELF-CONTAIN all cleaning logic: the model in the
+Registry receives a RAW record and handles it itself. This is the guard
+against training/serving skew — see section 7.1 of the design doc.
 """
 
 from __future__ import annotations
@@ -1417,11 +1431,11 @@ from ml_common.cleaning import DateFeatures, OutlierClipper, RawRecordCleaner
 
 
 class SelectColumns(BaseEstimator, TransformerMixin):
-    """Giu lai dung danh sach cot, theo dung thu tu.
+    """Keeps exactly the given list of columns, in that order.
 
-    Cot thieu duoc them vao voi gia tri None. Nho vay serving khong sap khi
-    nguoi goi quen mot cot tuy chon, va cot leakage bi loai bo triet de du
-    nguoi goi co gui len.
+    Missing columns are added with value None. This keeps serving from
+    crashing when a caller omits an optional column, and strips leakage
+    columns even if a caller sends them.
     """
 
     def __init__(self, columns: list[str]):
@@ -1431,61 +1445,61 @@ class SelectColumns(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):  # noqa: N803
-        ket_qua = X.copy()
-        for ten_cot in self.columns:
-            if ten_cot not in ket_qua.columns:
-                ket_qua[ten_cot] = None
-        return ket_qua[self.columns]
+        result = X.copy()
+        for column_name in self.columns:
+            if column_name not in result.columns:
+                result[column_name] = None
+        return result[self.columns]
 
 
-def _cot_so_va_cot_chu(task_type: str) -> tuple[list[str], list[str]]:
-    """Chia feature thanh nhom so va nhom chu, SAU khi DateFeatures da chay."""
+def _numeric_and_categorical_columns(task_type: str) -> tuple[list[str], list[str]]:
+    """Splits features into numeric and categorical groups, AFTER DateFeatures has run."""
     feature = schema.feature_columns(task_type)
-    cot_so: list[str] = []
-    cot_chu: list[str] = []
-    for ten_cot in feature:
-        if ten_cot == "listing_date":
-            continue  # da bien thanh listing_year / listing_month
-        spec = schema.COLUMNS[ten_cot]
+    numeric_columns: list[str] = []
+    categorical_columns: list[str] = []
+    for column_name in feature:
+        if column_name == "listing_date":
+            continue  # already turned into listing_year / listing_month
+        spec = schema.COLUMNS[column_name]
         if spec.kind in ("numeric", "money"):
-            cot_so.append(ten_cot)
+            numeric_columns.append(column_name)
         elif spec.kind == "boolean":
-            cot_so.append(ten_cot)  # True/False -> 1/0
+            numeric_columns.append(column_name)  # True/False -> 1/0
         else:  # categorical, zipcode
-            cot_chu.append(ten_cot)
+            categorical_columns.append(column_name)
     if "listing_date" in feature:
-        cot_so.extend(["listing_year", "listing_month"])
-    return cot_so, cot_chu
+        numeric_columns.extend(["listing_year", "listing_month"])
+    return numeric_columns, categorical_columns
 
 
 def build_pipeline(task_type: str, estimator) -> Pipeline:
-    """Dung Pipeline day du: lam sach -> chon cot -> ma hoa -> model.
+    """Builds the full Pipeline: clean -> select columns -> encode -> model.
 
     Args:
-        task_type: "regression" hoac "classification".
-        estimator: mot estimator cua sklearn, da khoi tao.
+        task_type: "regression" or "classification".
+        estimator: an already-initialized sklearn estimator.
 
     Returns:
-        Pipeline nhan DataFrame THO o dau vao.
+        A Pipeline that accepts a RAW DataFrame as input.
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(
-            f"task_type phai thuoc {schema.TASK_TYPES}, nhan duoc: {task_type!r}"
+            f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}"
         )
 
-    cot_so, cot_chu = _cot_so_va_cot_chu(task_type)
+    numeric_columns, categorical_columns = _numeric_and_categorical_columns(task_type)
 
-    nhanh_so = Pipeline(
+    numeric_branch = Pipeline(
         [
             ("impute", SimpleImputer(strategy="median")),
             ("scale", StandardScaler()),
         ]
     )
-    nhanh_chu = Pipeline(
+    categorical_branch = Pipeline(
         [
             ("impute", SimpleImputer(strategy="most_frequent")),
-            # handle_unknown="infrequent_if_exist" giu cho serving khong sap
-            # khi gap gia tri chua tung thay (agent drift_scenario=new_segment).
+            # handle_unknown="infrequent_if_exist" keeps serving from crashing
+            # on a value it has never seen (agent drift_scenario=new_segment).
             (
                 "encode",
                 OneHotEncoder(
@@ -1497,21 +1511,21 @@ def build_pipeline(task_type: str, estimator) -> Pipeline:
         ]
     )
 
-    ma_hoa = ColumnTransformer(
+    encoder = ColumnTransformer(
         [
-            ("so", nhanh_so, cot_so),
-            ("chu", nhanh_chu, cot_chu),
+            ("numeric", numeric_branch, numeric_columns),
+            ("categorical", categorical_branch, categorical_columns),
         ],
         remainder="drop",
     )
 
     return Pipeline(
         [
-            ("lam_sach", RawRecordCleaner()),
+            ("clean", RawRecordCleaner()),
             ("clip_outlier", OutlierClipper()),
-            ("dac_trung_ngay", DateFeatures()),
-            ("chon_cot", SelectColumns(cot_so + cot_chu)),
-            ("ma_hoa", ma_hoa),
+            ("date_features", DateFeatures()),
+            ("select_columns", SelectColumns(numeric_columns + categorical_columns)),
+            ("encode", encoder),
             ("model", estimator),
         ]
     )
@@ -1522,7 +1536,7 @@ def build_pipeline(task_type: str, estimator) -> Pipeline:
 Run: `.venv\Scripts\python.exe -m pytest common/tests/test_features.py -v`
 Expected: PASS toàn bộ 9 test
 
-Nếu `test_gia_tri_categorical_chua_tung_thay_khong_lam_sap` thất bại với `Found unknown categories`, kiểm tra lại `handle_unknown` của `OneHotEncoder` — đây chính là lỗi sẽ làm serving sập ở Plan 4.
+Nếu `test_unseen_categorical_value_does_not_crash` thất bại với `Found unknown categories`, kiểm tra lại `handle_unknown` của `OneHotEncoder` — đây chính là lỗi sẽ làm serving sập ở Plan 4.
 
 **Một hạn chế đã biết, cố ý để lại:** `zipcode` được xếp vào nhóm categorical, mà nó có hàng chục nghìn giá trị khác nhau. Với `min_frequency=0.01` trên 2 triệu dòng, gần như mọi zipcode sẽ rơi vào nhóm "infrequent" và cột này gần như không đóng góp gì. Vô hại nhưng lãng phí. Không sửa ở Plan 1 vì chưa có dữ liệu thật để biết nên thay bằng gì (target encoding? gộp theo 3 số đầu?) — Plan 2 sẽ quyết sau khi nhìn kết quả train đầu tiên.
 
@@ -1538,16 +1552,18 @@ git commit -m "feat: dung Pipeline tu chua logic lam sach cho ca 2 bai toan"
 ## Task 7: Hạ tầng — Postgres và MinIO
 
 **Files:**
+
 - Create: `docker-compose.yml`
 - Create: `docker/postgres/init-databases.sql`
 
 **Interfaces:**
+
 - Consumes: `.env.example` (Task 1)
 - Produces: Postgres nghe ở `localhost:5432` với hai database `airflow` và `mlflow`; MinIO ở `localhost:9000` (API) và `localhost:9001` (console), bucket `ml-pipeline` đã tạo sẵn.
 
 - [ ] **Step 1: Kiểm tra dung lượng đĩa trước khi pull image**
 
-Run: `.venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB trong')"`
+Run: `.venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB free')"`
 Expected: ≥ 8 GB. Nếu ít hơn, dọn đĩa trước — `docker system prune -a` nếu có image cũ không dùng.
 
 - [ ] **Step 2: Tạo `docker/postgres/init-databases.sql`**
@@ -1555,9 +1571,9 @@ Expected: ≥ 8 GB. Nếu ít hơn, dọn đĩa trước — `docker system prun
 Script này chỉ chạy đúng một lần, lúc volume Postgres được khởi tạo lần đầu.
 
 ```sql
--- Database `airflow` da duoc tao boi bien POSTGRES_DB.
--- Tao them database rieng cho MLflow: khong dung chung de metadata cua
--- Airflow va cua MLflow khong anh huong lan nhau khi backup hay reset.
+-- Database `airflow` is already created by the POSTGRES_DB variable.
+-- Create a separate database for MLflow: keeping them apart means Airflow's
+-- and MLflow's metadata don't affect each other on backup or reset.
 CREATE DATABASE mlflow;
 ```
 
@@ -1615,7 +1631,7 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} &&
       mc mb --ignore-existing local/${ML_BUCKET} &&
-      echo 'Bucket ${ML_BUCKET} san sang'
+      echo 'Bucket ${ML_BUCKET} ready'
       "
 
 volumes:
@@ -1638,7 +1654,7 @@ Expected: bảng liệt kê có cả `airflow` và `mlflow`
 - [ ] **Step 6: Xác nhận MinIO có bucket**
 
 Run: `docker compose logs minio-init`
-Expected: dòng `Bucket ml-pipeline san sang`
+Expected: dòng `Bucket ml-pipeline ready`
 
 Mở `http://localhost:9001` bằng trình duyệt, đăng nhập `minioadmin` / `minioadmin`, thấy bucket `ml-pipeline`.
 
@@ -1654,10 +1670,12 @@ git commit -m "feat: ha tang Postgres hai database va MinIO"
 ## Task 8: `storage.py` — wrapper MinIO/S3
 
 **Files:**
+
 - Create: `common/ml_common/storage.py`
 - Test: `common/tests/test_storage.py`
 
 **Interfaces:**
+
 - Consumes: Task 7 (MinIO đang chạy — nhưng test dùng `moto`, không cần MinIO thật)
 - Produces:
   - Hàm đường dẫn key: `raw_key(dataset_version) -> str`, `processed_key(fingerprint, split) -> str`, `baseline_key(model_name, version) -> str`, `inference_log_key(model_name, day, part_id) -> str`, `ground_truth_key(model_name, day, part_id) -> str`, `report_key(model_name, run_id, ext) -> str`
@@ -1681,7 +1699,7 @@ BUCKET = "test-bucket"
 
 
 @pytest.fixture
-def kho():
+def store():
     with mock_aws():
         import boto3
 
@@ -1694,7 +1712,7 @@ def kho():
         )
 
 
-class TestDuongDan:
+class TestKeyHelpers:
     def test_raw_key(self):
         assert storage.raw_key("v1") == "raw/v1/data.parquet"
 
@@ -1702,28 +1720,28 @@ class TestDuongDan:
         assert storage.processed_key("abc123", "train") == "processed/abc123/train.parquet"
         assert storage.processed_key("abc123", "test") == "processed/abc123/test.parquet"
 
-    def test_processed_key_split_sai_thi_bao_loi(self):
+    def test_processed_key_invalid_split_raises(self):
         with pytest.raises(ValueError, match="split"):
             storage.processed_key("abc123", "validation")
 
     def test_baseline_key(self):
-        ket_qua = storage.baseline_key("house_price_regressor", 3)
-        assert ket_qua == "monitoring-baseline/house_price_regressor/3/profile.json"
+        result = storage.baseline_key("house_price_regressor", 3)
+        assert result == "monitoring-baseline/house_price_regressor/3/profile.json"
 
-    def test_inference_log_key_phan_vung_theo_ngay(self):
-        ket_qua = storage.inference_log_key("house_price_regressor", date(2026, 9, 17), "0001")
-        assert ket_qua == "inference-log/house_price_regressor/dt=2026-09-17/part-0001.parquet"
+    def test_inference_log_key_partitions_by_day(self):
+        result = storage.inference_log_key("house_price_regressor", date(2026, 9, 17), "0001")
+        assert result == "inference-log/house_price_regressor/dt=2026-09-17/part-0001.parquet"
 
-    def test_ground_truth_key_phan_vung_theo_ngay(self):
-        ket_qua = storage.ground_truth_key("house_price_regressor", date(2026, 9, 17), "0001")
-        assert ket_qua == "ground-truth/house_price_regressor/dt=2026-09-17/part-0001.parquet"
+    def test_ground_truth_key_partitions_by_day(self):
+        result = storage.ground_truth_key("house_price_regressor", date(2026, 9, 17), "0001")
+        assert result == "ground-truth/house_price_regressor/dt=2026-09-17/part-0001.parquet"
 
     def test_report_key(self):
-        ket_qua = storage.report_key("house_price_regressor", "run-42", "html")
-        assert ket_qua == "reports/house_price_regressor/run-42/evidently.html"
+        result = storage.report_key("house_price_regressor", "run-42", "html")
+        assert result == "reports/house_price_regressor/run-42/evidently.html"
 
-    def test_moi_duong_dan_khong_bat_dau_bang_gach_cheo(self):
-        cac_key = [
+    def test_no_key_starts_with_a_slash(self):
+        keys = [
             storage.raw_key("v1"),
             storage.processed_key("a", "train"),
             storage.baseline_key("m", 1),
@@ -1731,45 +1749,45 @@ class TestDuongDan:
             storage.ground_truth_key("m", date(2026, 1, 1), "0001"),
             storage.report_key("m", "r", "json"),
         ]
-        for key in cac_key:
-            assert not key.startswith("/"), f"{key} bat dau bang gach cheo"
+        for key in keys:
+            assert not key.startswith("/"), f"{key} starts with a slash"
 
 
 class TestStorage:
-    def test_ghi_va_doc_parquet_giu_nguyen_du_lieu(self, kho):
+    def test_write_and_read_parquet_preserves_data(self, store):
         df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
-        kho.write_parquet(df, "thu/muc/file.parquet")
-        ket_qua = kho.read_parquet("thu/muc/file.parquet")
-        pd.testing.assert_frame_equal(df, ket_qua)
+        store.write_parquet(df, "some/folder/file.parquet")
+        result = store.read_parquet("some/folder/file.parquet")
+        pd.testing.assert_frame_equal(df, result)
 
-    def test_ghi_va_doc_json(self, kho):
-        du_lieu = {"ten": "test", "so": 42, "danh_sach": [1, 2, 3]}
-        kho.write_json(du_lieu, "thu/muc/file.json")
-        assert kho.read_json("thu/muc/file.json") == du_lieu
+    def test_write_and_read_json(self, store):
+        data = {"name": "test", "count": 42, "items": [1, 2, 3]}
+        store.write_json(data, "some/folder/file.json")
+        assert store.read_json("some/folder/file.json") == data
 
-    def test_exists_dung_voi_key_co_va_khong_co(self, kho):
-        kho.write_json({"a": 1}, "co/that.json")
-        assert kho.exists("co/that.json") is True
-        assert kho.exists("khong/co.json") is False
+    def test_exists_is_correct_for_present_and_absent_keys(self, store):
+        store.write_json({"a": 1}, "present/file.json")
+        assert store.exists("present/file.json") is True
+        assert store.exists("absent/file.json") is False
 
-    def test_list_keys_theo_prefix(self, kho):
-        kho.write_json({}, "prefix-a/mot.json")
-        kho.write_json({}, "prefix-a/hai.json")
-        kho.write_json({}, "prefix-b/ba.json")
-        ket_qua = kho.list_keys("prefix-a/")
-        assert sorted(ket_qua) == ["prefix-a/hai.json", "prefix-a/mot.json"]
+    def test_list_keys_by_prefix(self, store):
+        store.write_json({}, "prefix-a/one.json")
+        store.write_json({}, "prefix-a/two.json")
+        store.write_json({}, "prefix-b/three.json")
+        result = store.list_keys("prefix-a/")
+        assert sorted(result) == ["prefix-a/one.json", "prefix-a/two.json"]
 
-    def test_list_keys_prefix_rong_tra_ve_danh_sach_rong(self, kho):
-        assert kho.list_keys("khong-ton-tai/") == []
+    def test_list_keys_missing_prefix_returns_empty_list(self, store):
+        assert store.list_keys("does-not-exist/") == []
 
-    def test_doc_key_khong_ton_tai_thi_bao_loi(self, kho):
-        with pytest.raises(FileNotFoundError, match="khong/co.parquet"):
-            kho.read_parquet("khong/co.parquet")
+    def test_reading_a_missing_key_raises(self, store):
+        with pytest.raises(FileNotFoundError, match="missing/file.parquet"):
+            store.read_parquet("missing/file.parquet")
 
-    def test_ghi_de_key_da_co(self, kho):
-        kho.write_json({"phien_ban": 1}, "file.json")
-        kho.write_json({"phien_ban": 2}, "file.json")
-        assert kho.read_json("file.json") == {"phien_ban": 2}
+    def test_overwriting_an_existing_key(self, store):
+        store.write_json({"version": 1}, "file.json")
+        store.write_json({"version": 2}, "file.json")
+        assert store.read_json("file.json") == {"version": 2}
 ```
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
@@ -1780,13 +1798,14 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.storage'`
 - [ ] **Step 3: Viết `common/ml_common/storage.py`**
 
 ```python
-"""Wrapper boto3 va TOAN BO convention duong dan tren MinIO/S3.
+"""boto3 wrapper and the ENTIRE path convention for MinIO/S3.
 
-Day la diem duy nhat trong he thong biet ve object storage. Khi migrate
-sang S3 that, chi can bo `endpoint_url` — khong file nao khac phai sua.
+This is the single place in the system that knows about object storage.
+When migrating to real S3, only `endpoint_url` needs to go away — no other
+file needs to change.
 
-Khong noi chuoi duong dan thu cong o bat ky dau khac: dung cac ham *_key()
-o day. Xem Global Constraints cua plan.
+Never concatenate paths by hand anywhere else: use the *_key() functions
+here. See the plan's Global Constraints.
 """
 
 from __future__ import annotations
@@ -1804,57 +1823,58 @@ _SPLITS = ("train", "test")
 
 
 def raw_key(dataset_version: str) -> str:
-    """Duong dan raw data cua mot phien ban dataset."""
+    """Path to the raw data of a dataset version."""
     return f"raw/{dataset_version}/data.parquet"
 
 
 def processed_key(fingerprint: str, split: str) -> str:
-    """Duong dan du lieu da xu ly, dat ten theo fingerprint cua raw data.
+    """Path to processed data, named after the raw data's fingerprint.
 
-    Fingerprint lam cache key: `preprocess` skip neu prefix nay da ton tai.
+    The fingerprint acts as a cache key: `preprocess` skips work if this
+    prefix already exists.
     """
     if split not in _SPLITS:
-        raise ValueError(f"split phai thuoc {_SPLITS}, nhan duoc: {split!r}")
+        raise ValueError(f"split must be one of {_SPLITS}, got: {split!r}")
     return f"processed/{fingerprint}/{split}.parquet"
 
 
 def processed_prefix(fingerprint: str) -> str:
-    """Prefix chua ca train va test cua mot fingerprint."""
+    """Prefix covering both train and test for a fingerprint."""
     return f"processed/{fingerprint}/"
 
 
 def baseline_key(model_name: str, version: int | str) -> str:
-    """Profile thong ke cua tap train, gan voi mot model version cu the."""
+    """Statistical profile of the train set, tied to a specific model version."""
     return f"monitoring-baseline/{model_name}/{version}/profile.json"
 
 
 def inference_log_key(model_name: str, day: date, part_id: str) -> str:
-    """Mot file log inference, phan vung theo ngay."""
+    """One inference log file, partitioned by day."""
     return f"inference-log/{model_name}/dt={day.isoformat()}/part-{part_id}.parquet"
 
 
 def inference_log_prefix(model_name: str, day: date) -> str:
-    """Prefix chua toan bo log inference cua mot ngay."""
+    """Prefix covering all inference logs for a day."""
     return f"inference-log/{model_name}/dt={day.isoformat()}/"
 
 
 def ground_truth_key(model_name: str, day: date, part_id: str) -> str:
-    """Mot file ground truth tu /feedback, phan vung theo ngay."""
+    """One ground-truth file from /feedback, partitioned by day."""
     return f"ground-truth/{model_name}/dt={day.isoformat()}/part-{part_id}.parquet"
 
 
 def ground_truth_prefix(model_name: str, day: date) -> str:
-    """Prefix chua toan bo ground truth cua mot ngay."""
+    """Prefix covering all ground truth for a day."""
     return f"ground-truth/{model_name}/dt={day.isoformat()}/"
 
 
 def report_key(model_name: str, run_id: str, ext: str) -> str:
-    """Report Evidently cua mot lan chay monitoring."""
+    """Evidently report for one monitoring run."""
     return f"reports/{model_name}/{run_id}/evidently.{ext}"
 
 
 class Storage:
-    """Doc/ghi parquet va json tren object storage tuong thich S3."""
+    """Reads/writes parquet and json on S3-compatible object storage."""
 
     def __init__(
         self,
@@ -1874,10 +1894,10 @@ class Storage:
 
     @classmethod
     def from_env(cls) -> Storage:
-        """Dung Storage tu bien moi truong.
+        """Builds a Storage from environment variables.
 
-        Trong container dung MINIO_ENDPOINT_INTERNAL (http://minio:9000);
-        chay tu may host thi dung MINIO_ENDPOINT (http://localhost:9000).
+        Inside a container, use MINIO_ENDPOINT_INTERNAL (http://minio:9000);
+        running from the host, use MINIO_ENDPOINT (http://localhost:9000).
         """
         endpoint = os.environ.get("MINIO_ENDPOINT_INTERNAL") or os.environ["MINIO_ENDPOINT"]
         return cls(
@@ -1888,50 +1908,50 @@ class Storage:
         )
 
     def write_parquet(self, df: pd.DataFrame, key: str) -> None:
-        """Ghi DataFrame duoi dang parquet (nen snappy)."""
-        bo_dem = io.BytesIO()
-        df.to_parquet(bo_dem, index=False, compression="snappy")
-        bo_dem.seek(0)
-        self._client.put_object(Bucket=self.bucket, Key=key, Body=bo_dem.getvalue())
+        """Writes a DataFrame as parquet (snappy compression)."""
+        buffer = io.BytesIO()
+        df.to_parquet(buffer, index=False, compression="snappy")
+        buffer.seek(0)
+        self._client.put_object(Bucket=self.bucket, Key=key, Body=buffer.getvalue())
 
     def read_parquet(self, key: str) -> pd.DataFrame:
-        """Doc mot file parquet thanh DataFrame."""
+        """Reads a parquet file into a DataFrame."""
         try:
-            phan_hoi = self._client.get_object(Bucket=self.bucket, Key=key)
-        except ClientError as loi:
-            if loi.response["Error"]["Code"] in ("NoSuchKey", "404"):
-                raise FileNotFoundError(f"Khong tim thay key: {key}") from loi
+            response = self._client.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as err:
+            if err.response["Error"]["Code"] in ("NoSuchKey", "404"):
+                raise FileNotFoundError(f"Key not found: {key}") from err
             raise
-        return pd.read_parquet(io.BytesIO(phan_hoi["Body"].read()))
+        return pd.read_parquet(io.BytesIO(response["Body"].read()))
 
     def write_json(self, obj: dict, key: str) -> None:
-        """Ghi mot dict duoi dang JSON UTF-8."""
-        noi_dung = json.dumps(obj, ensure_ascii=False, indent=2, default=str)
+        """Writes a dict as UTF-8 JSON."""
+        content = json.dumps(obj, ensure_ascii=False, indent=2, default=str)
         self._client.put_object(
             Bucket=self.bucket,
             Key=key,
-            Body=noi_dung.encode("utf-8"),
+            Body=content.encode("utf-8"),
             ContentType="application/json",
         )
 
     def read_json(self, key: str) -> dict:
-        """Doc mot file JSON thanh dict."""
+        """Reads a JSON file into a dict."""
         try:
-            phan_hoi = self._client.get_object(Bucket=self.bucket, Key=key)
-        except ClientError as loi:
-            if loi.response["Error"]["Code"] in ("NoSuchKey", "404"):
-                raise FileNotFoundError(f"Khong tim thay key: {key}") from loi
+            response = self._client.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as err:
+            if err.response["Error"]["Code"] in ("NoSuchKey", "404"):
+                raise FileNotFoundError(f"Key not found: {key}") from err
             raise
-        return json.loads(phan_hoi["Body"].read().decode("utf-8"))
+        return json.loads(response["Body"].read().decode("utf-8"))
 
     def write_bytes(self, data: bytes, key: str, content_type: str) -> None:
-        """Ghi bytes tho — dung cho report HTML cua Evidently o Plan 4."""
+        """Writes raw bytes — used for Evidently's HTML report in Plan 4."""
         self._client.put_object(
             Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
         )
 
     def exists(self, key: str) -> bool:
-        """True neu key ton tai."""
+        """True if the key exists."""
         try:
             self._client.head_object(Bucket=self.bucket, Key=key)
             return True
@@ -1939,13 +1959,13 @@ class Storage:
             return False
 
     def list_keys(self, prefix: str) -> list[str]:
-        """Danh sach key duoi mot prefix, co phan trang."""
-        ket_qua: list[str] = []
+        """List of keys under a prefix, with pagination."""
+        result: list[str] = []
         paginator = self._client.get_paginator("list_objects_v2")
-        for trang in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for obj in trang.get("Contents", []):
-                ket_qua.append(obj["Key"])
-        return ket_qua
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                result.append(obj["Key"])
+        return result
 ```
 
 - [ ] **Step 4: Chạy test để xác nhận nó pass**
@@ -1960,29 +1980,29 @@ Test ở Step 4 dùng `moto` (S3 giả lập trong bộ nhớ). Bước này xá
 Tạo `scripts/smoke_storage.py`:
 
 ```python
-"""Smoke test: ghi va doc mot file parquet tren MinIO that."""
+"""Smoke test: write and read a parquet file on real MinIO."""
 
 import os
 
 import pandas as pd
 
 os.environ["MINIO_ENDPOINT"] = "http://localhost:9000"
-os.environ.pop("MINIO_ENDPOINT_INTERNAL", None)  # chay tu host, khong phai trong container
+os.environ.pop("MINIO_ENDPOINT_INTERNAL", None)  # running from host, not inside a container
 os.environ["MINIO_ACCESS_KEY"] = "minioadmin"
 os.environ["MINIO_SECRET_KEY"] = "minioadmin"
 os.environ["ML_BUCKET"] = "ml-pipeline"
 
 from ml_common.storage import Storage  # noqa: E402
 
-kho = Storage.from_env()
-kho.write_parquet(pd.DataFrame({"a": [1, 2, 3]}), "smoke-test/thu.parquet")
-print(kho.read_parquet("smoke-test/thu.parquet"))
-print("keys:", kho.list_keys("smoke-test/"))
-print("exists:", kho.exists("smoke-test/thu.parquet"))
+store = Storage.from_env()
+store.write_parquet(pd.DataFrame({"a": [1, 2, 3]}), "smoke-test/sample.parquet")
+print(store.read_parquet("smoke-test/sample.parquet"))
+print("keys:", store.list_keys("smoke-test/"))
+print("exists:", store.exists("smoke-test/sample.parquet"))
 ```
 
 Run: `.venv\Scripts\python.exe scripts\smoke_storage.py`
-Expected: in ra DataFrame 3 dòng, danh sách key có `smoke-test/thu.parquet`, và `exists: True`
+Expected: in ra DataFrame 3 dòng, danh sách key có `smoke-test/sample.parquet`, và `exists: True`
 
 - [ ] **Step 6: Commit**
 
@@ -1996,10 +2016,12 @@ git commit -m "feat: wrapper storage va convention duong dan MinIO"
 ## Task 9: `profiling.py` — baseline profile
 
 **Files:**
+
 - Create: `common/ml_common/profiling.py`
 - Test: `common/tests/test_profiling.py`
 
 **Interfaces:**
+
 - Consumes: `ml_common.schema` (Task 2)
 - Produces:
   - `compute_profile(df: pd.DataFrame, columns: list[str], n_bins: int = 20) -> dict`
@@ -2011,18 +2033,18 @@ Cấu trúc dict trả về — Plan 4 đọc đúng cấu trúc này, nên nó 
     "n_rows": int,
     "computed_at": str,          # ISO 8601
     "columns": {
-        "<ten_cot>": {
+        "<column_name>": {
             "kind": "numeric",
             "missing_rate": float,
             "mean": float, "std": float, "min": float, "max": float,
             "quantiles": {"p25": float, "p50": float, "p75": float},
             "histogram": {"bin_edges": [float, ...], "counts": [int, ...]},
         },
-        "<ten_cot_khac>": {
+        "<other_column_name>": {
             "kind": "categorical",
             "missing_rate": float,
             "n_unique": int,
-            "distribution": {"<gia_tri>": float, ...},   # ty le, tong = 1.0
+            "distribution": {"<value>": float, ...},   # proportion, sums to 1.0
         },
     },
 }
@@ -2039,7 +2061,7 @@ import pandas as pd
 from ml_common import profiling
 
 
-def df_mau():
+def sample_df():
     rng = np.random.default_rng(7)
     return pd.DataFrame(
         {
@@ -2051,73 +2073,73 @@ def df_mau():
     )
 
 
-def test_co_metadata_chung():
-    profile = profiling.compute_profile(df_mau(), ["living_area_sqft", "city"])
+def test_has_common_metadata():
+    profile = profiling.compute_profile(sample_df(), ["living_area_sqft", "city"])
     assert profile["n_rows"] == 500
     assert isinstance(profile["computed_at"], str)
     assert set(profile["columns"]) == {"living_area_sqft", "city"}
 
 
-def test_cot_so_co_du_thong_ke():
-    profile = profiling.compute_profile(df_mau(), ["living_area_sqft"])
-    cot = profile["columns"]["living_area_sqft"]
-    assert cot["kind"] == "numeric"
-    assert 800 <= cot["mean"] <= 4000
-    assert cot["std"] > 0
-    assert cot["min"] >= 800
-    assert cot["max"] <= 4000
-    assert cot["quantiles"]["p25"] < cot["quantiles"]["p50"] < cot["quantiles"]["p75"]
+def test_numeric_column_has_full_stats():
+    profile = profiling.compute_profile(sample_df(), ["living_area_sqft"])
+    column = profile["columns"]["living_area_sqft"]
+    assert column["kind"] == "numeric"
+    assert 800 <= column["mean"] <= 4000
+    assert column["std"] > 0
+    assert column["min"] >= 800
+    assert column["max"] <= 4000
+    assert column["quantiles"]["p25"] < column["quantiles"]["p50"] < column["quantiles"]["p75"]
 
 
-def test_histogram_dung_so_bin():
-    profile = profiling.compute_profile(df_mau(), ["living_area_sqft"], n_bins=20)
+def test_histogram_has_the_requested_bin_count():
+    profile = profiling.compute_profile(sample_df(), ["living_area_sqft"], n_bins=20)
     hist = profile["columns"]["living_area_sqft"]["histogram"]
     assert len(hist["counts"]) == 20
     assert len(hist["bin_edges"]) == 21
     assert sum(hist["counts"]) == 500
 
 
-def test_cot_chu_co_phan_phoi_cong_bang_mot():
-    profile = profiling.compute_profile(df_mau(), ["city"])
-    cot = profile["columns"]["city"]
-    assert cot["kind"] == "categorical"
-    assert cot["n_unique"] == 3
-    assert abs(sum(cot["distribution"].values()) - 1.0) < 1e-9
+def test_categorical_column_distribution_sums_to_one():
+    profile = profiling.compute_profile(sample_df(), ["city"])
+    column = profile["columns"]["city"]
+    assert column["kind"] == "categorical"
+    assert column["n_unique"] == 3
+    assert abs(sum(column["distribution"].values()) - 1.0) < 1e-9
 
 
-def test_ty_le_thieu_duoc_tinh_dung():
+def test_missing_rate_is_computed_correctly():
     df = pd.DataFrame({"bedrooms": [1.0, 2.0, np.nan, np.nan]})
     profile = profiling.compute_profile(df, ["bedrooms"])
     assert profile["columns"]["bedrooms"]["missing_rate"] == 0.5
 
 
-def test_cot_toan_gia_tri_thieu_khong_lam_sap():
+def test_column_entirely_missing_does_not_crash():
     df = pd.DataFrame({"bedrooms": [np.nan, np.nan]})
     profile = profiling.compute_profile(df, ["bedrooms"])
-    cot = profile["columns"]["bedrooms"]
-    assert cot["missing_rate"] == 1.0
-    assert cot["mean"] is None
+    column = profile["columns"]["bedrooms"]
+    assert column["missing_rate"] == 1.0
+    assert column["mean"] is None
 
 
-def test_cot_khong_co_trong_df_bi_bo_qua():
-    profile = profiling.compute_profile(df_mau(), ["city", "cot_khong_ton_tai"])
+def test_column_not_in_df_is_skipped():
+    profile = profiling.compute_profile(sample_df(), ["city", "nonexistent_column"])
     assert set(profile["columns"]) == {"city"}
 
 
-def test_profile_serialise_duoc_thanh_json():
+def test_profile_is_json_serializable():
     import json
 
-    profile = profiling.compute_profile(df_mau(), ["living_area_sqft", "city"])
-    chuoi = json.dumps(profile)
-    assert json.loads(chuoi)["n_rows"] == 500
+    profile = profiling.compute_profile(sample_df(), ["living_area_sqft", "city"])
+    text = json.dumps(profile)
+    assert json.loads(text)["n_rows"] == 500
 
 
-def test_khong_con_kieu_numpy_trong_ket_qua():
-    """Kieu numpy khong serialise duoc bang json chuan."""
-    profile = profiling.compute_profile(df_mau(), ["living_area_sqft", "city"])
-    cot = profile["columns"]["living_area_sqft"]
-    assert type(cot["mean"]) is float
-    assert all(type(c) is int for c in cot["histogram"]["counts"])
+def test_no_numpy_types_remain_in_the_result():
+    """numpy types are not serializable by plain json."""
+    profile = profiling.compute_profile(sample_df(), ["living_area_sqft", "city"])
+    column = profile["columns"]["living_area_sqft"]
+    assert type(column["mean"]) is float
+    assert all(type(c) is int for c in column["histogram"]["counts"])
 ```
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
@@ -2128,14 +2150,14 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.profiling'
 - [ ] **Step 3: Viết `common/ml_common/profiling.py`**
 
 ```python
-"""Tinh profile thong ke cua mot DataFrame — dung lam baseline cho drift.
+"""Computes the statistical profile of a DataFrame — used as a drift baseline.
 
-Stage `register` goi ham nay tren tap train cua model vua duoc promote, roi
-ghi ket qua vao monitoring-baseline/{model}/{version}/profile.json. Nho vay
-baseline luon gan voi dung model version da dung no.
+The `register` stage calls this on the train set of a newly promoted model,
+then writes the result to monitoring-baseline/{model}/{version}/profile.json.
+This keeps the baseline tied to the exact model version that used it.
 
-Ket qua phai serialise duoc bang `json.dumps` chuan, nen moi kieu numpy
-deu duoc doi ve kieu Python goc.
+The result must be serializable by plain `json.dumps`, so every numpy type
+is converted back to a native Python type.
 """
 
 from __future__ import annotations
@@ -2147,82 +2169,84 @@ import pandas as pd
 
 from ml_common import schema
 
-_KIND_LA_SO = {"numeric", "money", "boolean"}
+_NUMERIC_KINDS = {"numeric", "money", "boolean"}
 
 
-def _so_thuc(value) -> float | None:
-    """Doi gia tri numpy ve float Python, NaN thanh None."""
+def _to_float(value) -> float | None:
+    """Converts a numpy value to a Python float, NaN to None."""
     if value is None or pd.isna(value):
         return None
     return float(value)
 
 
-def _profile_cot_so(chuoi: pd.Series, n_bins: int) -> dict:
-    hop_le = pd.to_numeric(chuoi, errors="coerce").dropna()
-    ket_qua: dict = {
+def _profile_numeric_column(series: pd.Series, n_bins: int) -> dict:
+    valid = pd.to_numeric(series, errors="coerce").dropna()
+    result: dict = {
         "kind": "numeric",
-        "missing_rate": float(1 - len(hop_le) / len(chuoi)) if len(chuoi) else 1.0,
-        "mean": _so_thuc(hop_le.mean()) if len(hop_le) else None,
-        "std": _so_thuc(hop_le.std()) if len(hop_le) else None,
-        "min": _so_thuc(hop_le.min()) if len(hop_le) else None,
-        "max": _so_thuc(hop_le.max()) if len(hop_le) else None,
+        "missing_rate": float(1 - len(valid) / len(series)) if len(series) else 1.0,
+        "mean": _to_float(valid.mean()) if len(valid) else None,
+        "std": _to_float(valid.std()) if len(valid) else None,
+        "min": _to_float(valid.min()) if len(valid) else None,
+        "max": _to_float(valid.max()) if len(valid) else None,
         "quantiles": {
-            "p25": _so_thuc(hop_le.quantile(0.25)) if len(hop_le) else None,
-            "p50": _so_thuc(hop_le.quantile(0.50)) if len(hop_le) else None,
-            "p75": _so_thuc(hop_le.quantile(0.75)) if len(hop_le) else None,
+            "p25": _to_float(valid.quantile(0.25)) if len(valid) else None,
+            "p50": _to_float(valid.quantile(0.50)) if len(valid) else None,
+            "p75": _to_float(valid.quantile(0.75)) if len(valid) else None,
         },
         "histogram": {"bin_edges": [], "counts": []},
     }
-    if len(hop_le):
-        counts, bin_edges = np.histogram(hop_le, bins=n_bins)
-        ket_qua["histogram"] = {
+    if len(valid):
+        counts, bin_edges = np.histogram(valid, bins=n_bins)
+        result["histogram"] = {
             "bin_edges": [float(x) for x in bin_edges],
             "counts": [int(x) for x in counts],
         }
-    return ket_qua
+    return result
 
 
-def _profile_cot_chu(chuoi: pd.Series) -> dict:
-    hop_le = chuoi.dropna()
-    phan_phoi = (
-        {str(k): float(v) for k, v in hop_le.value_counts(normalize=True).items()}
-        if len(hop_le)
+def _profile_categorical_column(series: pd.Series) -> dict:
+    valid = series.dropna()
+    distribution = (
+        {str(k): float(v) for k, v in valid.value_counts(normalize=True).items()}
+        if len(valid)
         else {}
     )
     return {
         "kind": "categorical",
-        "missing_rate": float(1 - len(hop_le) / len(chuoi)) if len(chuoi) else 1.0,
-        "n_unique": int(hop_le.nunique()),
-        "distribution": phan_phoi,
+        "missing_rate": float(1 - len(valid) / len(series)) if len(series) else 1.0,
+        "n_unique": int(valid.nunique()),
+        "distribution": distribution,
     }
 
 
 def compute_profile(df: pd.DataFrame, columns: list[str], n_bins: int = 20) -> dict:
-    """Tinh profile thong ke cho cac cot chi dinh.
+    """Computes the statistical profile for the given columns.
 
     Args:
-        df: DataFrame da lam sach.
-        columns: danh sach cot can profile. Cot khong co trong df bi bo qua.
-        n_bins: so bin cua histogram cho cot so.
+        df: cleaned DataFrame.
+        columns: list of columns to profile. Columns missing from df are skipped.
+        n_bins: number of histogram bins for numeric columns.
 
     Returns:
-        Dict serialise duoc bang json.dumps — xem cau truc o phan Interfaces.
+        A dict serializable by json.dumps — see the Interfaces section for its shape.
     """
-    ket_qua_cot: dict[str, dict] = {}
-    for ten_cot in columns:
-        if ten_cot not in df.columns:
+    column_profiles: dict[str, dict] = {}
+    for column_name in columns:
+        if column_name not in df.columns:
             continue
-        spec = schema.COLUMNS.get(ten_cot)
-        la_so = spec.kind in _KIND_LA_SO if spec else pd.api.types.is_numeric_dtype(df[ten_cot])
-        if la_so:
-            ket_qua_cot[ten_cot] = _profile_cot_so(df[ten_cot], n_bins)
+        spec = schema.COLUMNS.get(column_name)
+        is_numeric = (
+            spec.kind in _NUMERIC_KINDS if spec else pd.api.types.is_numeric_dtype(df[column_name])
+        )
+        if is_numeric:
+            column_profiles[column_name] = _profile_numeric_column(df[column_name], n_bins)
         else:
-            ket_qua_cot[ten_cot] = _profile_cot_chu(df[ten_cot])
+            column_profiles[column_name] = _profile_categorical_column(df[column_name])
 
     return {
         "n_rows": int(len(df)),
         "computed_at": datetime.now(timezone.utc).isoformat(),
-        "columns": ket_qua_cot,
+        "columns": column_profiles,
     }
 ```
 
@@ -2248,10 +2272,12 @@ git commit -m "feat: tinh baseline profile cho drift detection"
 ## Task 10: Hạ tầng — MLflow
 
 **Files:**
+
 - Create: `docker/mlflow/Dockerfile`
 - Modify: `docker-compose.yml` (thêm service `mlflow`)
 
 **Interfaces:**
+
 - Consumes: Task 7 (Postgres và MinIO đang chạy)
 - Produces: MLflow Tracking Server ở `http://localhost:5000`, backend store là Postgres database `mlflow`, artifact store là `s3://ml-pipeline/artifacts/`.
 
@@ -2319,7 +2345,7 @@ Expected: `mlops-mlflow` ở trạng thái `running (healthy)`. Lần đầu bui
 Tạo `scripts/smoke_mlflow.py`:
 
 ```python
-"""Smoke test: log mot run va mot model vao MLflow that."""
+"""Smoke test: log a run and a model to real MLflow."""
 
 import mlflow
 import mlflow.sklearn
@@ -2334,15 +2360,16 @@ y = pd.Series([10.0, 20.0, 30.0])
 model = DummyRegressor().fit(X, y)
 
 with mlflow.start_run() as run:
-    mlflow.log_param("thu_nghiem", "smoke")
+    mlflow.log_param("trial", "smoke")
     mlflow.log_metric("rmse", 1.23)
-    # MLflow 2.x dung `artifact_path`; tham so `name` chi co tu MLflow 3.
+    # MLflow 2.x uses `artifact_path`; the `name` param only exists from MLflow 3.
     mlflow.sklearn.log_model(model, artifact_path="model")
     print("run_id:", run.info.run_id)
     print("artifact_uri:", mlflow.get_artifact_uri())
 ```
 
 Run:
+
 ```powershell
 .venv\Scripts\python.exe -m pip install "mlflow>=2.14,<3"
 .venv\Scripts\python.exe scripts\smoke_mlflow.py
@@ -2369,16 +2396,18 @@ git commit -m "feat: MLflow tracking server voi backend Postgres va artifact Min
 ## Task 11: Hạ tầng — Airflow
 
 **Files:**
+
 - Modify: `docker-compose.yml` (thêm `airflow-init`, `airflow-scheduler`, `airflow-webserver`)
 - Create: `dags/smoke_dag.py`
 
 **Interfaces:**
+
 - Consumes: Task 7 (Postgres đang chạy)
 - Produces: Airflow Webserver ở `http://localhost:8080`, LocalExecutor, metadata trong Postgres database `airflow`, thư mục `dags/` được mount vào container.
 
 - [ ] **Step 1: Kiểm tra dung lượng đĩa**
 
-Run: `.venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB trong')"`
+Run: `.venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB free')"`
 Expected: ≥ 5 GB. Image Airflow khoảng 2GB.
 
 - [ ] **Step 2: Tạo thư mục và đặt quyền**
@@ -2463,9 +2492,9 @@ Chèn vào dưới service `mlflow`, trước khối `volumes:`:
 DAG này chứng minh Airflow đọc được thư mục `dags/` và chạy được task. Nó bị xoá ở Plan 2.
 
 ```python
-"""DAG smoke test — chung minh Airflow doc duoc thu muc dags/ va chay duoc task.
+"""Smoke test DAG — proves Airflow can read dags/ and run a task.
 
-DAG nay bi xoa o Plan 2 khi ml_pipeline_dag.py ra doi.
+This DAG is deleted in Plan 2 once ml_pipeline_dag.py exists.
 """
 
 from __future__ import annotations
@@ -2483,21 +2512,21 @@ from airflow.decorators import dag, task
 )
 def smoke_test():
     @task
-    def chao():
-        print("Airflow doc duoc dags/ va chay duoc task.")
+    def hello():
+        print("Airflow can read dags/ and run a task.")
         return "ok"
 
     @task
-    def kiem_tra_bien_moi_truong():
+    def check_env_vars():
         import os
 
-        for ten in ("MLFLOW_TRACKING_URI", "MINIO_ENDPOINT_INTERNAL", "ML_BUCKET"):
-            gia_tri = os.environ.get(ten)
-            print(f"{ten} = {gia_tri}")
-            assert gia_tri, f"Thieu bien moi truong {ten}"
+        for name in ("MLFLOW_TRACKING_URI", "MINIO_ENDPOINT_INTERNAL", "ML_BUCKET"):
+            value = os.environ.get(name)
+            print(f"{name} = {value}")
+            assert value, f"Missing environment variable {name}"
         return "ok"
 
-    chao() >> kiem_tra_bien_moi_truong()
+    hello() >> check_env_vars()
 
 
 smoke_test()
@@ -2530,9 +2559,9 @@ docker compose exec airflow-scheduler airflow dags list
 docker compose exec airflow-scheduler airflow dags test smoke_test 2026-09-17
 ```
 
-Expected: cả hai task `chao` và `kiem_tra_bien_moi_truong` đều `success`, log in ra ba biến môi trường có giá trị.
+Expected: cả hai task `hello` và `check_env_vars` đều `success`, log in ra ba biến môi trường có giá trị.
 
-Nếu `kiem_tra_bien_moi_truong` thất bại, biến môi trường chưa truyền được vào container — kiểm tra lại khối `&airflow-env` và file `.env`.
+Nếu `check_env_vars` thất bại, biến môi trường chưa truyền được vào container — kiểm tra lại khối `&airflow-env` và file `.env`.
 
 - [ ] **Step 7: Commit**
 
@@ -2546,42 +2575,44 @@ git commit -m "feat: Airflow LocalExecutor va DAG smoke test"
 ## Task 12: Image nền cho các stage
 
 **Files:**
+
 - Create: `stages/base/Dockerfile`
 - Create: `stages/base/README.md`
 - Create: `scripts/build_base_image.ps1`
 
 **Interfaces:**
+
 - Consumes: `common/` (Task 1-9)
 - Produces: image local tên `ml-base:latest` chứa Python 3.12 + `ml_common` đã cài. Mọi stage ở Plan 2 dùng `FROM ml-base:latest`.
 
 - [ ] **Step 1: Tạo `stages/base/Dockerfile`**
 
 ```dockerfile
-# Image nen cho moi stage cua pipeline.
+# Base image for every stage of the pipeline.
 #
-# Ly do ton tai: neu moi stage tu cai pandas/scikit-learn rieng thi build
-# rat lau va version de lech giua cac stage. Version scikit-learn lech giua
-# luc train va luc serve la kieu bug kho tim nhat — model unpickle ra sai
-# hoac khong unpickle duoc.
+# Why this exists: if each stage installed its own pandas/scikit-learn, the
+# build would be slow and versions would drift between stages. A
+# scikit-learn version mismatch between train time and serve time is the
+# hardest kind of bug to find — the model unpickles wrong or not at all.
 #
-# Python 3.12 (khong phai 3.13): khop voi image Airflow va voi serving.
+# Python 3.12 (not 3.13): matches the Airflow image and serving.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Cai dependency truoc, copy code sau: doi code khong lam mat cache lop nay.
+# Install dependencies first, copy code after: code changes don't bust this layer's cache.
 COPY common/pyproject.toml /app/common/pyproject.toml
 RUN mkdir -p /app/common/ml_common \
     && touch /app/common/ml_common/__init__.py \
     && pip install --no-cache-dir -e /app/common
 
-# Gio moi copy code that
+# Now copy the actual code
 COPY common/ /app/common/
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-CMD ["python", "-c", "import ml_common; print('ml-base san sang, ml_common', ml_common.__version__)"]
+CMD ["python", "-c", "import ml_common; print('ml-base ready, ml_common', ml_common.__version__)"]
 ```
 
 - [ ] **Step 2: Tạo `scripts/build_base_image.ps1`**
@@ -2589,7 +2620,7 @@ CMD ["python", "-c", "import ml_common; print('ml-base san sang, ml_common', ml_
 Build phải chạy từ thư mục gốc của repo vì Dockerfile tham chiếu `common/`.
 
 ```powershell
-# Build image nen. Chay tu thu muc goc cua repo.
+# Build the base image. Run from the repo root.
 docker build -f stages/base/Dockerfile -t ml-base:latest .
 ```
 
@@ -2601,16 +2632,18 @@ Expected: build thành công, dòng cuối `naming to docker.io/library/ml-base:
 - [ ] **Step 4: Xác nhận `ml_common` import được trong image**
 
 Run: `docker run --rm ml-base:latest`
-Expected: `ml-base san sang, ml_common 0.1.0`
+Expected: `ml-base ready, ml_common 0.1.0`
 
 - [ ] **Step 5: Xác nhận test suite chạy được bên trong image**
 
 Đây là bước quan trọng: nó chứng minh `common/` hoạt động trên Python 3.12 (môi trường thật) chứ không chỉ trên Python 3.13 của máy dev.
 
 Run:
+
 ```powershell
 docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3]>=5.0' && python -m pytest /app/common/tests -q"
 ```
+
 Expected: toàn bộ test PASS.
 
 Nếu có test nào pass ở local mà fail trong container, dừng lại và sửa — đó chính là loại khác biệt môi trường sẽ gây lỗi khó hiểu ở Plan 2 và Plan 3.
@@ -2640,6 +2673,7 @@ tự thấy thay đổi cho tới khi image nền được build lại.
 Python phải là 3.12, khớp với image Airflow và với serving. Model pickle
 bởi scikit-learn chỉ load lại được bởi cùng minor version Python và cùng
 version scikit-learn.
+
 ```
 
 - [ ] **Step 7: Commit**
@@ -2654,41 +2688,43 @@ git commit -m "feat: image nen ml-base cho cac stage"
 ## Task 13: Tài liệu và xác nhận toàn bộ
 
 **Files:**
+
 - Create: `README.md` (ghi đè file rỗng nếu đã có)
 - Create: `scripts/verify_foundation.ps1`
 
 **Interfaces:**
+
 - Consumes: mọi task trước
 - Produces: một lệnh duy nhất xác nhận toàn bộ nền tảng hoạt động.
 
 - [ ] **Step 1: Tạo `scripts/verify_foundation.ps1`**
 
 ```powershell
-# Xac nhan toan bo nen tang Plan 1 hoat dong.
+# Verifies the entire Plan 1 foundation works.
 $ErrorActionPreference = "Stop"
 
-Write-Host "== 1/5 Test suite local ==" -ForegroundColor Cyan
+Write-Host "== 1/5 Local test suite ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m pytest common/ -q
 
 Write-Host "== 2/5 Lint ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m ruff check common/
 
-Write-Host "== 3/5 Container dang chay ==" -ForegroundColor Cyan
+Write-Host "== 3/5 Containers running ==" -ForegroundColor Cyan
 docker compose ps
 
-Write-Host "== 4/5 Storage noi duoc toi MinIO that ==" -ForegroundColor Cyan
+Write-Host "== 4/5 Storage can reach real MinIO ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe scripts\smoke_storage.py
 
-Write-Host "== 5/5 Test suite trong image Python 3.12 ==" -ForegroundColor Cyan
+Write-Host "== 5/5 Test suite inside the Python 3.12 image ==" -ForegroundColor Cyan
 docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3]>=5.0' && python -m pytest /app/common/tests -q"
 
-Write-Host "`nNen tang san sang cho Plan 2." -ForegroundColor Green
+Write-Host "`nFoundation ready for Plan 2." -ForegroundColor Green
 ```
 
 - [ ] **Step 2: Chạy script xác nhận**
 
 Run: `powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1`
-Expected: cả 5 mục đều pass, dòng cuối `Nen tang san sang cho Plan 2.`
+Expected: cả 5 mục đều pass, dòng cuối `Foundation ready for Plan 2.`
 
 - [ ] **Step 3: Viết `README.md`**
 
@@ -2720,10 +2756,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
 
 ## Giao diện
 
-| Service | URL | Đăng nhập |
-| --- | --- | --- |
-| Airflow | http://localhost:8080 | admin / admin |
-| MLflow | http://localhost:5000 | — |
+| Service       | URL                   | Đăng nhập            |
+| ------------- | --------------------- | ----------------------- |
+| Airflow       | http://localhost:8080 | admin / admin           |
+| MLflow        | http://localhost:5000 | —                      |
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
 
 ## Kiểm tra
@@ -2734,20 +2770,21 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1
 
 ## Cấu trúc
 
-| Thư mục | Nội dung |
-| --- | --- |
-| `common/` | Package `ml_common` — schema, parser, transformer, storage, profiling |
-| `dags/` | DAG của Airflow |
-| `docker/` | Dockerfile cho hạ tầng |
-| `stages/base/` | Image nền cho các stage |
-| `scripts/` | Script smoke test và tiện ích |
-| `docs/superpowers/` | Spec và implementation plan |
+| Thư mục             | Nội dung                                                               |
+| --------------------- | ----------------------------------------------------------------------- |
+| `common/`           | Package`ml_common` — schema, parser, transformer, storage, profiling |
+| `dags/`             | DAG của Airflow                                                        |
+| `docker/`           | Dockerfile cho hạ tầng                                                |
+| `stages/base/`      | Image nền cho các stage                                               |
+| `scripts/`          | Script smoke test và tiện ích                                        |
+| `docs/superpowers/` | Spec và implementation plan                                            |
 
 ## Lưu ý về RAM
 
 Máy 16GB chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi phát triển,
 đặt `SAMPLE_ROWS=200000` trong `.env` để không load toàn bộ 2 triệu dòng.
 Xoá biến đó khi chạy thật.
+
 ```
 
 - [ ] **Step 4: Commit**
@@ -2767,7 +2804,7 @@ Plan 1 hoàn thành khi:
 - [ ] `http://localhost:8080` đăng nhập được, DAG `smoke_test` chạy thành công
 - [ ] `http://localhost:5000` hiện experiment `smoke-test` với artifact nằm trên MinIO
 - [ ] `http://localhost:9001` có bucket `ml-pipeline`
-- [ ] `docker run --rm ml-base:latest` in ra `ml-base san sang, ml_common 0.1.0`
+- [ ] `docker run --rm ml-base:latest` in ra `ml-base ready, ml_common 0.1.0`
 - [ ] Test suite pass ở cả Python 3.13 (local) lẫn Python 3.12 (container)
 - [ ] Toàn bộ 8 loại dirty của dataset đều có test tương ứng trong `common/tests/`
 
@@ -2786,11 +2823,11 @@ Plan 1 hoàn thành khi:
 
 ## Bản đồ các plan tiếp theo
 
-| Plan | Nội dung | Phụ thuộc |
-| --- | --- | --- |
-| 2 — Batch pipeline | `stages/` extract, validate, preprocess (có cache fingerprint), train, evaluate (2 cổng), register (+ baseline profile); `ml_pipeline` DAG cho regression | Plan 1 |
-| 3 — Serving | `services/serving/` với `/predict` `/reload` `/health`, ghi inference log theo batch; task `deploy`; nhánh classification | Plan 2 |
-| 4 — Monitoring | `services/agent/` với `drift_scenario`; `/feedback` + ground truth; `stages/monitor/` với Evidently; `monitoring_dag` | Plan 3 |
-| 5 — Dashboard | `services/api/` theo contract mục 8.3; nối `dashboard/` bỏ mock JS | Plan 4 |
+| Plan                | Nội dung                                                                                                                                                       | Phụ thuộc |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 2 — Batch pipeline | `stages/` extract, validate, preprocess (có cache fingerprint), train, evaluate (2 cổng), register (+ baseline profile); `ml_pipeline` DAG cho regression | Plan 1      |
+| 3 — Serving        | `services/serving/` với `/predict` `/reload` `/health`, ghi inference log theo batch; task `deploy`; nhánh classification                           | Plan 2      |
+| 4 — Monitoring     | `services/agent/` với `drift_scenario`; `/feedback` + ground truth; `stages/monitor/` với Evidently; `monitoring_dag`                               | Plan 3      |
+| 5 — Dashboard      | `services/api/` theo contract mục 8.3; nối `dashboard/` bỏ mock JS                                                                                       | Plan 4      |
 
 Mỗi plan được viết sau khi plan trước chạy xong, vì mỗi lần chạy sẽ lộ ra thứ cần điều chỉnh cho plan kế tiếp.

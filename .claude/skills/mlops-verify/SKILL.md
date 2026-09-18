@@ -92,12 +92,12 @@ Kỳ vọng: cả hai task đều `success`, log in ra ba biến môi trường 
 docker run --rm ml-base:latest
 ```
 
-Kỳ vọng: `ml-base san sang, ml_common 0.1.0`
+Kỳ vọng: `ml-base ready, ml_common 0.1.0`
 
 ### 10. Dung lượng đĩa
 
 ```powershell
-.venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB trong')"
+.venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB free')"
 ```
 
 ## Đối chiếu Definition of Done

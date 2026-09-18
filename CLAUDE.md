@@ -54,12 +54,14 @@ Python 3.12. Máy dev chạy 3.13 để test logic thuần.
 
 ## Quy ước viết code
 
-- **Dấu tiếng Việt:** file markdown có dấu. Code, comment, docstring, commit
-  message **không dấu** — tránh lỗi encoding khi chạy qua terminal Windows và
-  trong log container.
-- **Tên biến/hàm trong `common/`:** tiếng Việt không dấu cho biến cục bộ
-  (`ket_qua`, `so_dong_xoa`), tiếng Anh cho API công khai (`compute_profile`,
-  `build_pipeline`) vì chúng xuất hiện trong traceback và tài liệu.
+- **Dấu tiếng Việt:** file markdown có dấu. Commit message tiếng Việt **không
+  dấu** — tránh lỗi encoding khi chạy qua terminal Windows và trong log
+  container.
+- **Ngôn ngữ trong code:** toàn bộ code — biến cục bộ lẫn API công khai, comment,
+  docstring, error message — viết **tiếng Anh tự nhiên**, đặt tên sao cho dễ
+  đọc (vd `result`, `deleted_row_count`, `compute_profile`, `build_pipeline`),
+  không dịch word-by-word từ tiếng Việt. Lý do: traceback, log container, và
+  tài liệu sklearn/MLflow đều tiếng Anh — trộn ngôn ngữ làm code khó đọc hơn.
 - **Giá trị thiếu:** dùng `None` / `np.nan`. Không dùng chuỗi rỗng hay sentinel
   như `-1`.
 - **Chuẩn hoá text:** categorical về chữ thường, dấu cách đơn, gạch dưới và gạch
