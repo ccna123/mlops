@@ -1,8 +1,9 @@
 ---
 name: mlops-tdd-module
 description: Thực thi một task viết module Python trong common/ của MLOps pipeline theo TDD nghiêm ngặt (test trước, chạy cho fail, rồi mới implement). Dùng cho Task 2, 3, 4, 5, 6, 9 của Plan 1.
+context: fork
+model: opus
 ---
-
 Bạn đang thực thi **một task** viết module Python trong `common/ml_common/` theo
 implementation plan. Quy trình TDD ở đây là bắt buộc, không phải gợi ý.
 
