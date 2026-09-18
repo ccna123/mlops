@@ -1,2 +1,12 @@
 *.gz
 *.csv
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+logs/
