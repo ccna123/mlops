@@ -5,7 +5,7 @@ code tối thiểu. Xem `mlops-pipeline-design.md` để biết thiết kế đ�
 
 ## Trạng thái
 
-Plan 1/5 (Foundation) — hạ tầng và package `common/`.
+Plan 2/5 — batch pipeline chạy được cho regression.
 
 ## Yêu cầu
 
@@ -21,6 +21,8 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e "common[dev]"
 docker compose up -d
 powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build_stage_images.ps1
+.venv\Scripts\python.exe scripts\seed_raw_data.py
 ```
 
 ## Giao diện
@@ -35,6 +37,21 @@ powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1
+```
+
+## Chạy pipeline
+
+Trên Airflow UI, bật DAG `ml_pipeline` rồi Trigger DAG w/ config:
+
+    {"task_type": "regression", "estimator_name": "hist_gradient_boosting"}
+
+Tham số: `task_type` (bắt buộc), `estimator_name`, `force_reprocess`,
+`dataset_version`.
+
+Xác nhận pipeline:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify_pipeline.ps1
 ```
 
 ## Cấu trúc
