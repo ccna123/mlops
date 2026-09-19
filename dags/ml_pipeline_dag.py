@@ -23,7 +23,12 @@ NETWORK = "mlops_default"
 
 MODEL_NAME_BY_TASK_TYPE = {
     "regression": "house_price_regressor",
-    "classification": "house_sold_fast_classifier",
+    "classification": "house_needs_renovation_classifier",
+}
+
+DEFAULT_ESTIMATOR_BY_TASK_TYPE = {
+    "regression": "ridge",
+    "classification": "logistic",
 }
 
 # Passed into every stage container. Read from the scheduler's own environment,
@@ -69,7 +74,8 @@ def stage_result(lines: list[str]) -> dict:
 FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['fingerprint'] }}"
 RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | stage_result)['run_id'] }}"
 TASK_TYPE = "{{ params.task_type }}"
-MODEL_NAME = "{{ params.model_name }}"
+MODEL_NAME = "{{ model_name_for(params.task_type) }}"
+ESTIMATOR_NAME = "{{ params.estimator_name or default_estimator_for(params.task_type) }}"
 
 
 def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
@@ -108,8 +114,13 @@ with DAG(
         "task_type": "regression",
         "force_reprocess": False,
         "dataset_version": "v1",
-        "estimator_name": "ridge",
-        "model_name": MODEL_NAME_BY_TASK_TYPE["regression"],
+        "estimator_name": None,
+    },
+    # model_name is derived, never passed: a run that names the wrong registered
+    # model does not fail, it quietly registers a classifier under the regressor.
+    user_defined_macros={
+        "model_name_for": MODEL_NAME_BY_TASK_TYPE.__getitem__,
+        "default_estimator_for": DEFAULT_ESTIMATOR_BY_TASK_TYPE.__getitem__,
     },
     # Airflow 2.10 has no built-in JSON filter, so register the scan-for-result
     # helper (see stage_result() above) as a Jinja filter for use in templates.
@@ -147,7 +158,7 @@ with DAG(
             "FINGERPRINT": FINGERPRINT,
             "TASK_TYPE": TASK_TYPE,
             "MODEL_NAME": MODEL_NAME,
-            "ESTIMATOR_NAME": "{{ params.estimator_name }}",
+            "ESTIMATOR_NAME": ESTIMATOR_NAME,
         },
     )
 
