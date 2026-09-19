@@ -111,24 +111,26 @@ Expected: PASS, 2 test
 Thêm vào `common/tests/test_storage.py`. Bộ test này đã dùng `moto` — tra cách các test khác dựng fixture rồi theo đúng pattern đó:
 
 ```python
-def test_object_etag_changes_when_content_changes(storage_client):
+def test_object_etag_changes_when_content_changes(store):
     first = pd.DataFrame({"a": [1, 2, 3]})
     second = pd.DataFrame({"a": [9, 9, 9]})
 
-    storage_client.write_parquet(first, "raw/v1/data.parquet")
-    etag_before = storage_client.object_etag("raw/v1/data.parquet")
+    store.write_parquet(first, "raw/v1/data.parquet")
+    etag_before = store.object_etag("raw/v1/data.parquet")
 
-    storage_client.write_parquet(second, "raw/v1/data.parquet")
-    etag_after = storage_client.object_etag("raw/v1/data.parquet")
+    store.write_parquet(second, "raw/v1/data.parquet")
+    etag_after = store.object_etag("raw/v1/data.parquet")
 
     assert etag_before != etag_after
     assert '"' not in etag_before
 
 
-def test_object_etag_missing_key_raises(storage_client):
+def test_object_etag_missing_key_raises(store):
     with pytest.raises(FileNotFoundError):
-        storage_client.object_etag("raw/nope/data.parquet")
+        store.object_etag("raw/nope/data.parquet")
 ```
+
+Fixture trong file này tên là `store` (xem `common/tests/test_storage.py:13`) — dùng đúng tên đó.
 
 - [ ] **Step 6: Chạy test để xác nhận fail**
 
@@ -314,11 +316,21 @@ from ml_common.validation import validate_dataframe
 
 
 def _valid_frame(row_count: int = 4) -> pd.DataFrame:
-    """A frame with every schema column present and a usable target."""
+    """A frame with every schema column present, in bounds, and a usable target.
+
+    The id column gets distinct values on purpose: giving every row the same id
+    would make the duplicate count equal row_count - 1 and quietly break the
+    tests that assert on it.
+    """
     data = {}
     for column_name, spec in schema.COLUMNS.items():
-        if spec.kind == "numeric":
-            data[column_name] = [1] * row_count
+        if spec.kind == "id":
+            data[column_name] = [f"P{index}" for index in range(row_count)]
+        elif spec.kind == "numeric":
+            # Start at the column's own lower bound so nothing is out of bounds
+            # before a test deliberately puts it there.
+            base = spec.min_value if spec.min_value is not None else 1
+            data[column_name] = [base] * row_count
         elif spec.kind == "money":
             data[column_name] = ["$100,000"] * row_count
         elif spec.kind == "boolean":
@@ -1309,20 +1321,20 @@ Expected: ≥ 8 GB. Ít hơn thì dừng và báo.
 Thêm vào `common/tests/test_storage.py`. Bộ test này đã dùng `moto` — tra cách các test khác dựng fixture rồi theo đúng pattern đó:
 
 ```python
-def test_upload_file_puts_the_bytes_on_storage(storage_client, tmp_path):
+def test_upload_file_puts_the_bytes_on_storage(store, tmp_path):
     local = tmp_path / "data.parquet"
     pd.DataFrame({"a": [1, 2, 3]}).to_parquet(local, index=False)
 
-    storage_client.upload_file(str(local), "raw/v1/data.parquet")
+    store.upload_file(str(local), "raw/v1/data.parquet")
 
-    assert storage_client.exists("raw/v1/data.parquet")
-    restored = storage_client.read_parquet("raw/v1/data.parquet")
+    assert store.exists("raw/v1/data.parquet")
+    restored = store.read_parquet("raw/v1/data.parquet")
     assert list(restored["a"]) == [1, 2, 3]
 
 
-def test_upload_file_missing_local_path_raises(storage_client, tmp_path):
+def test_upload_file_missing_local_path_raises(store, tmp_path):
     with pytest.raises(FileNotFoundError):
-        storage_client.upload_file(str(tmp_path / "nope.parquet"), "raw/v1/data.parquet")
+        store.upload_file(str(tmp_path / "nope.parquet"), "raw/v1/data.parquet")
 ```
 
 - [ ] **Step 3: Chạy test để xác nhận fail**
