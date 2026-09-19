@@ -2,15 +2,15 @@
 
 Ngày: 2026-09-19. Tiếp nối Plan 2 (Batch pipeline) đã hoàn thành và merge vào `main`.
 
-Tài liệu này là spec cho Plan 3. Nguồn sự thật gốc vẫn là `mlops-pipeline-design.md`;
-chỗ nào tài liệu này lệch khỏi nó đều ghi rõ ở mục 8 kèm lý do.
+Tài liệu này là spec cho Plan 3. Nguồn sự thật vẫn là `mlops-pipeline-design.md`;
+chỗ nào lệch khỏi tài liệu gốc đều ghi rõ ở mục 8 kèm lý do.
 
 ## 1. Phạm vi
 
 **Trong phạm vi:**
 
 - `services/serving/` với `/predict/{model}`, `/reload`, `/health`
-- Ghi inference log theo lô lên MinIO
+- Ghi inference log theo batch lên MinIO
 - Task `deploy` nối vào cuối DAG `ml_pipeline`
 - **Cho nhánh classification chạy thật** tới khi có champion trong Registry
 
@@ -65,12 +65,12 @@ chưa tồn tại cho tới khi nhánh đó chạy, và ngay cả sau đó nó v
 dựng serving trước khi có đủ model. Lazy-load thì `/health` không nói được gì trước khi
 có traffic — mà `/health` chính là thứ dashboard ở Plan 5 đọc.
 
-### 2.4. Inference log: lô, có trần, mất mát nhìn thấy được
+### 2.4. Inference log: batch, có trần, mất mát nhìn thấy được
 
 Buffer trong bộ nhớ, flush khi **đủ 500 record hoặc quá 30 giây**, ghi một file parquet
 qua `storage.inference_log_key()` (đã có từ Plan 1).
 
-**Vì sao theo lô:** agent ở Plan 4 bắn vài nghìn request. Ghi một object mỗi request thì
+**Vì sao theo batch:** agent simulator ở Plan 4 bắn vài nghìn request. Ghi một object mỗi request thì
 MinIO đầy object vụn và `monitoring_dag` phải mở vài nghìn file để đọc.
 
 Ba quy tắc, theo thứ tự ưu tiên:
@@ -92,27 +92,74 @@ hệ thống.
 Mỗi bản ghi gồm: `request_id`, `timestamp`, `raw_input`, `prediction`, `model_name`,
 `model_version` — đúng mục 7.6 của spec gốc.
 
-### 2.5. Cổng classification đổi từ F1 sang AUC
+### 2.5. Đổi bài toán classification sang `needs_renovation`
 
-**Đây là sửa một lỗ hổng an toàn, không phải hiệu chỉnh ngưỡng.**
+**Bài toán cũ `sold_within_30_days` bị loại sau khi đo.**
 
-Đo trên 48.000 dòng thật, lần đầu nhánh classification được chạy:
+Nó phụ thuộc gần như hoàn toàn vào `days_on_market` — mà cột đó **bắt buộc phải loại**,
+vì `sold_within_30_days` suy trực tiếp ra từ nó (leakage, `schema.py` đã khai báo). Bỏ nó
+đi thì không còn gì: toàn bộ 19 feature còn lại gộp lại chỉ đạt **AUC 0.58**.
 
-| Model | F1 | AUC | Cổng F1 ≥ 0.70 |
-| --- | --- | --- | --- |
-| `dummy` | **0.7186** | **0.5000** | **LỌT** |
-| `logistic` | 0.6982 | 0.5872 | bị chặn |
-| `hist_gradient_boosting` | 0.6980 | 0.5827 | bị chặn |
+Một target mà bỏ một cột là hết tín hiệu thì không dạy được gì về feature engineering, và
+cũng không cho monitoring ở Plan 4 thứ gì đáng theo dõi.
 
-`DummyClassifier(strategy="prior")` phán **"có bán trong 30 ngày"** cho mọi căn nhà, không
-nhìn dữ liệu. Vì 55,8% số căn thực sự bán trong 30 ngày:
+**Bài toán mới:** `needs_renovation` = `condition` ∈ {`poor`, `fair`}. Chiếm **25,1%** dữ liệu.
 
-- precision = 0.558
-- recall = **1.0** — nó bắt hết ca dương, bởi nó phán dương hết
-- F1 = 2 × 0.558 × 1 / 1.558 = **0.716**
+| | AUC |
+| --- | --- |
+| **GBM, 19 feature hợp lệ** | **0.7061** |
+| `list_price` một mình | 0.5619 |
+| `stories` một mình | 0.5061 |
+| `listing_year` một mình | 0.5039 |
+| `has_pool` một mình | 0.5010 |
+| `property_type` một mình | 0.5004 |
+| `dummy` | 0.5000 |
 
-Ngưỡng F1 ≥ 0.70 vì thế **ưu tiên model rác và chặn model thật**. `AUC = 0.5000` của
-`dummy` mới là con số nói thật: khả năng phân biệt bằng không.
+**Không cột nào một mình mang tín hiệu.** Cột mạnh nhất đạt 0.56, phần còn lại gần như
+đúng 0.50 — riêng lẻ thì vô dụng. Gộp lại mới ra 0.71. Tín hiệu nằm ở **tương tác giữa
+các feature**, không ở một cột chủ đạo.
+
+**Ý nghĩa nghiệp vụ:** `condition` trong thực tế do người bán tự khai, thường thiếu hoặc
+lạc quan quá mức — chính dataset này cũng có ~10% giá trị bẩn ở cột đó. Dự đoán nó từ
+thuộc tính khách quan (tuổi nhà, diện tích, khu vực, giá rao, điểm trường, chỉ số tội
+phạm) phục vụ: nền tảng BĐS gắn cờ tin cần thẩm định kỹ, ngân hàng đánh giá tài sản thế
+chấp, nhà đầu tư săn nhà cần cải tạo.
+
+**Hai ứng viên khác đã đo và loại:**
+
+- **"Bán trên giá rao"** (`sale_price > list_price`) — nghe hợp lý nhất về nghiệp vụ, nhưng
+  **AUC 0.4972**: generator tạo hoàn toàn ngẫu nhiên. Không có gì để học.
+- **"Là chung cư"** (`property_type == "condo"`) — AUC 0.68, tín hiệu cũng phân tán, nhưng
+  dự đoán loại bất động sản là vô nghĩa: người ta luôn biết sẵn.
+
+### 2.6. Cổng classification đổi từ F1 sang AUC
+
+F1 làm ngưỡng sàn **hỏng theo hai hướng ngược nhau**, cả hai đều đã đo được:
+
+**Hướng 1 — cho model rác lọt.** Trên target cũ `sold_within_30_days` (55,8% dương):
+
+| Model | F1 | AUC |
+| --- | --- | --- |
+| `dummy` | **0.7186** | **0.5000** |
+| `logistic` | 0.6982 | 0.5872 |
+
+`DummyClassifier(strategy="prior")` phán dương cho **mọi** căn nhà. Recall = 1.0 vì nó bắt
+hết ca dương; precision = 0.558 đúng bằng tỷ lệ lớp; F1 = 2×0.558×1/1.558 = **0.716**. Nó
+vượt ngưỡng F1 ≥ 0.70 mà không hề nhìn dữ liệu, trong khi model thật trượt.
+
+**Hướng 2 — chặn nhầm model tốt.** Trên target mới `needs_renovation` (25,1% dương):
+
+| Model | F1 | AUC |
+| --- | --- | --- |
+| GBM | **0.1592** | **0.7061** |
+| `dummy` | 0.0000 | 0.5000 |
+
+Lớp dương chỉ chiếm 25% nên ở ngưỡng quyết định mặc định 0.5, model hiếm khi phán dương →
+F1 thấp. Ngưỡng F1 ≥ 0.70 sẽ **chặn một model có AUC 0.71**.
+
+**Nguyên nhân chung:** F1 phụ thuộc vào **ngưỡng quyết định** và **tỷ lệ lớp**. Một con số
+F1 cố định vì thế chỉ đúng cho đúng một phân bố dữ liệu, và hỏng âm thầm khi phân bố đổi —
+mà drift làm phân bố đổi chính là thứ Plan 4 tồn tại để phát hiện.
 
 **Cổng mới:**
 
@@ -121,29 +168,12 @@ Ngưỡng F1 ≥ 0.70 vì thế **ưu tiên model rác và chặn model thật**
 | Ngưỡng sàn classification | F1 ≥ 0.70 | **AUC ≥ 0.55** |
 | So với champion | F1 cao hơn | **AUC cao hơn** |
 
-AUC của **mọi** model đoán hằng số đều đúng 0.5 theo định nghĩa, nên nó không gian lận
-được bằng cách khai thác tỷ lệ lớp. F1 thì có — và mức độ gian lận thay đổi theo tỷ lệ
-lớp của dataset, nghĩa là ngưỡng F1 sẽ **âm thầm hỏng lại** nếu dữ liệu đổi phân bố.
+AUC không phụ thuộc ngưỡng quyết định, và mọi model đoán hằng số đều cho đúng 0.5 theo
+định nghĩa. Model thật đạt 0.71 nên vượt thoải mái; `dummy` đúng 0.50 nên bị chặn.
 
 F1 và accuracy **vẫn được tính và log vào MLflow** để báo cáo. Chỉ đổi thứ dùng làm cổng.
 
 Regression giữ nguyên R² ≥ 0.75 và so RMSE — ở đó `dummy` ra R² ≈ 0 nên cổng đã chặn đúng.
-
-### 2.6. Model classification yếu, và đó là tính chất dataset
-
-Với ngưỡng AUC ≥ 0.55, model thật (0.58) qua và `dummy` (0.50) bị chặn — cổng làm đúng
-việc. Nhưng phải ghi thẳng: **AUC 0.58 là model yếu**, chỉ nhỉnh hơn tung đồng xu khoảng
-8 điểm phần trăm.
-
-Nguyên nhân là dataset, không phải code. `sold_within_30_days` gần như không suy được từ
-bộ feature còn lại sau khi loại `days_on_market` — mà `days_on_market` **bắt buộc phải
-loại**, vì `sold_within_30_days` suy trực tiếp ra từ nó (leakage, `schema.py` đã khai báo).
-
-Đây đúng là tình huống mục 7.5 của spec gốc đã lường: *"Con số threshold ở trên là điểm
-khởi đầu, sẽ hiệu chỉnh sau lần train đầu tiên khi biết baseline thực tế của dataset."*
-
-Mục đích của Plan 3 là đường ống serving chạy đúng, không phải model classification tốt.
-Một model yếu nhưng thật vẫn phục vụ đủ cho việc đó, và cho monitoring ở Plan 4.
 
 ### 2.7. Task `deploy` không có image riêng
 
@@ -154,7 +184,7 @@ với `urllib` trong thư viện chuẩn.
 image để gửi một request là thừa". Dùng `PythonOperator` thay vì `HttpOperator` để khỏi
 phải cấu hình một Airflow Connection cho đúng một URL nội bộ cố định.
 
-## 3. Hợp đồng API
+## 3. API Endpoint
 
 ### `GET /health`
 
@@ -192,11 +222,11 @@ Với classification, `prediction` là boolean và có thêm `probability` (floa
 
 Mã lỗi:
 
-| Mã | Khi nào |
-| --- | --- |
-| 503 | `model` hợp lệ nhưng chưa load được champion |
+| Mã | Khi nào                                                                        |
+| --- | ------------------------------------------------------------------------------- |
+| 503 | `model` hợp lệ nhưng chưa load được champion                           |
 | 422 | `model` không thuộc hai giá trị cho phép, hoặc body không phải object |
-| 500 | Model load rồi nhưng `predict` ném lỗi |
+| 500 | Model load rồi nhưng`predict` ném lỗi                                     |
 
 Record thiếu cột **không** phải lỗi 4xx: `RawRecordCleaner` bỏ qua cột vắng mặt và
 `SimpleImputer` điền giá trị — đúng thiết kế, vì serving phải chịu được record thật
@@ -226,6 +256,50 @@ sau này ai đó thêm một classifier không có `predict_proba`, `gates.evalu
 `KeyError: 'auc'` — đúng như thiết kế (thà nổ còn hơn promote một model không ai đo), nhưng
 thông báo lỗi sẽ khó hiểu. Plan 3 phải có test khẳng định hành vi này, để lần sau người đọc
 traceback hiểu ngay vì sao.
+
+### 4.1b. `schema.py` — target classification mới
+
+```python
+TARGET_CLASSIFICATION = "needs_renovation"
+```
+
+`needs_renovation` **không tồn tại trong raw data** — nó được sinh ra từ `condition`. Vì
+vậy `condition` trở thành **cột leakage** của bài toán classification: nó chính là nguồn
+của target.
+
+Leakage classification sau khi đổi:
+
+| Cột | Vì sao loại |
+| --- | --- |
+| `property_id` | Định danh, không phải feature |
+| `condition` | **Nguồn sinh ra target** |
+| `sale_price` | Chỉ biết sau khi bán |
+| `days_on_market` | Chỉ biết sau khi bán |
+| `sold_within_30_days` | Chỉ biết sau khi bán |
+| `price_category` | Suy ra từ `sale_price` |
+
+`list_price` **được giữ** — tại thời điểm đăng tin nó đã biết, và nó là feature đơn lẻ
+mạnh nhất (AUC 0.56).
+
+Tên registered model đổi: `house_sold_fast_classifier` → `house_needs_renovation_classifier`.
+
+### 4.1c. `targets.py` — sinh target thay vì chỉ parse
+
+Hiện `parse_target(series, task_type)` nhận sẵn cột target. Regression vẫn thế
+(`sale_price` có trong raw). Classification thì không — target phải **sinh ra** từ
+`condition`.
+
+Thêm `derive_target(df, task_type) -> pd.Series`:
+
+- regression: `parse_target(df["sale_price"], "regression")` như cũ
+- classification: chuẩn hoá `condition` rồi trả `condition ∈ {"poor", "fair"}`;
+  `condition` thiếu hoặc không đọc được thì trả **null**, để `rowops` loại dòng đó
+
+`prepare_dataset_for_train` gọi `derive_target` thay vì `parse_target`, gán vào cột
+`needs_renovation`, rồi mới `drop_rows_missing_target` và split như cũ.
+
+Hàm không được đoán: `condition` là `"unknown"` hay rác thì trả null, đúng quy ước
+"parser không bao giờ đoán" trong `CLAUDE.md`.
 
 ### 4.2. DAG suy `model_name` từ `task_type`
 
@@ -297,7 +371,8 @@ serving đưa cho nó một hàm flush. Nhờ vậy test được bằng danh s�
 - [ ] `/predict/regression` với record **thô** trả prediction hợp lý (hàng trăm nghìn đô)
 - [ ] `/predict/classification` trả boolean kèm `probability`
 - [ ] `/predict` tới model chưa load trả **503**, không phải 500
-- [ ] Champion classification tồn tại với AUC ≥ 0.55, và `dummy` **bị cổng chặn**
+- [ ] Champion `house_needs_renovation_classifier` tồn tại với **AUC ≥ 0.70**, và `dummy` **bị cổng chặn**
+- [ ] Không cột đơn lẻ nào đạt AUC > 0.60 — xác nhận tín hiệu thật sự phân tán
 - [ ] Inference log nằm thật trên MinIO, đọc lại bằng pandas ra đủ 6 cột
 - [ ] Buffer vượt trần thì `dropped` tăng và hiện ở `/health`
 - [ ] DAG chạy full tới `deploy`, `/health` phản ánh version vừa register
@@ -310,12 +385,12 @@ vẹn, không phải chỉ chạy được.
 
 ## 8. Chỗ tài liệu này lệch khỏi `mlops-pipeline-design.md`
 
-| Mục | Spec gốc | Tài liệu này | Lý do |
-| --- | --- | --- | --- |
-| 7.5 | Classification: F1 ≥ 0.70 | **AUC ≥ 0.55**, so champion bằng AUC | F1 ≥ 0.70 cho `dummy` (0.719) lọt và chặn model thật (0.698); đo trên 48k dòng |
-| 7.6 | Load bản `Production` | Load alias `@champion` | Đã đổi ở Plan 2 mục 2.3; MLflow 2.22 deprecate stage |
-| 7.6 | Bảng endpoint có `/feedback` | `/feedback` để Plan 4 | Mục 7.6 mô tả trạng thái cuối; bản đồ plan xếp thứ tự |
-| 7.6 | "buffer và flush khi đủ 500 record hoặc quá 30 giây" | Thêm **trần 5000 + đếm số bỏ** | Spec không nói flush hỏng thì làm gì; giữ vô hạn là hết RAM |
-| — | Không nói thiếu model thì sao | Khởi động degraded, `/predict` trả 503 | Lỗ hổng trong spec gốc |
+| Mục | Spec gốc                                                  | Tài liệu này                              | Lý do                                                                                  |
+| ---- | ---------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 7.5  | Classification: F1 ≥ 0.70                                 | **AUC ≥ 0.55**, so champion bằng AUC | F1 ≥ 0.70 cho`dummy` (0.719) lọt và chặn model thật (0.698); đo trên 48k dòng |
+| 7.6  | Load bản`Production`                                    | Load alias`@champion`                      | Đã đổi ở Plan 2 mục 2.3; MLflow 2.22 deprecate stage                              |
+| 7.6  | Bảng endpoint có`/feedback`                            | `/feedback` để Plan 4                    | Mục 7.6 mô tả trạng thái cuối; bản đồ plan xếp thứ tự                       |
+| 7.6  | "buffer và flush khi đủ 500 record hoặc quá 30 giây" | Thêm**trần 5000 + đếm số bỏ**    | Spec không nói flush hỏng thì làm gì; giữ vô hạn là hết RAM                  |
+| —   | Không nói thiếu model thì sao                          | Khởi động degraded,`/predict` trả 503  | Lỗ hổng trong spec gốc                                                               |
 
 `mlops-pipeline-design.md` mục 7.5 và 7.6 sẽ được cập nhật theo bảng này khi Plan 3 bắt đầu.
