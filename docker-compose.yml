@@ -148,6 +148,39 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  serving:
+    build:
+      context: .
+      dockerfile: services/serving/Dockerfile
+    image: ml-serving:latest
+    container_name: mlops-serving
+    depends_on:
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT_INTERNAL: ${MINIO_ENDPOINT_INTERNAL}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      ML_BUCKET: ${ML_BUCKET}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      # MLflow reaches MinIO through boto3, which reads the AWS names, not the
+      # MINIO ones. Without these three, loading a model's artifact fails with
+      # AccessDenied while the tracking call succeeds.
+      MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT_INTERNAL}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:
