@@ -10,5 +10,6 @@ __pycache__/
 htmlcov/
 .env
 logs/
+plugins/
 
 .superpowers/
