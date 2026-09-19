@@ -134,17 +134,58 @@ có giá trị thì lấy `head(n)`, để trống thì lấy hết.
 200k dòng sẽ ăn nhầm cache `processed/` của lần chạy 2 triệu dòng — và sai kiểu
 này im lặng, model train trên tập khác tập mà người chạy tưởng.
 
-### 2.6. Target log được xử lý bên trong Pipeline
+### 2.6. Không biến đổi target — regression dự đoán thẳng đô la
 
-Regression bọc estimator bằng
-`TransformedTargetRegressor(regressor=estimator, func=np.log1p, inverse_func=np.expm1)`,
-đặt **bên trong** Pipeline.
+`build_estimator` trả về estimator trần. Không bọc `TransformedTargetRegressor`.
 
-**Lý do:** spec mục 5 yêu cầu train trên `log(sale_price)` nhưng metric báo cáo
-phải quy về đô la. Nếu nghịch đảo làm ở ngoài, thì `evaluate` phải biết nghịch
-đảo, và serving ở Plan 3 cũng phải biết — hai bản logic phải giữ đồng bộ. Đặt bên
-trong Pipeline thì `model.predict()` trả thẳng đô la và không ai ở hạ nguồn cần
-biết chuyện gì đã xảy ra.
+**Quyết định này thay thế thiết kế ban đầu, sau khi đo trên dữ liệu thật.**
+
+Bản đầu của spec này yêu cầu train trên `log(sale_price)` rồi nghịch đảo bằng
+`expm1` bên trong Pipeline, theo đúng mục 5 của `mlops-pipeline-design.md`, với
+lý do giảm skew. Đo trên 48.000 dòng thật thì nó làm điều ngược lại:
+
+| Estimator | Có log-target | Không log-target |
+| --- | --- | --- |
+| Ridge | R² = **−0.399**, dự đoán cao nhất **28,3 triệu $** | R² = **0.680**, cao nhất 2,97 triệu $ |
+| HistGradientBoosting | R² = 0.947 | R² = 0.947 |
+
+Giá thật cao nhất trong tập là 2,39 triệu $.
+
+**Nguyên nhân:** model tuyến tính fit rất tốt trong thang log, nhưng `expm1`
+khuếch đại sai số theo cấp số nhân ở đuôi giá cao — lệch 1.6 trong thang log
+thành lệch hàng triệu đô. Vài dự đoán nổ đó đủ đẩy tổng bình phương sai số vượt
+tổng bình phương độ lệch so với trung bình, nên R² âm. Cây quyết định dự đoán
+theo vùng nên miễn nhiễm, vì vậy GBM không đổi.
+
+Tóm lại: wrapper **không mang lại lợi ích đo được nào** và **phá một trong hai
+estimator**. Bỏ nó đi cũng đơn giản hoá hạ nguồn — `evaluate`, `register` và
+serving ở Plan 3 đều nhận đô la trực tiếp, không ai phải biết tới phép biến đổi
+nào.
+
+`common/tests/test_estimators.py` có một test canh chừng khẳng định dự đoán
+không vượt quá ba lần giá trị lớn nhất của target, để wrapper không lặng lẽ quay
+lại.
+
+**Cần sửa `mlops-pipeline-design.md` mục 5** cho khớp — chỗ đó vẫn đang yêu cầu
+train trên log.
+
+### 2.7. Có một estimator cố tình yếu, để cổng được chạy thật
+
+`ESTIMATOR_NAMES` có `hist_gradient_boosting_weak` — chính là
+`HistGradientBoostingRegressor(max_iter=10)`.
+
+Nó tồn tại vì Definition of Done yêu cầu chứng minh **cả hai** cổng hoạt động,
+mà với dữ liệu thật thì không có model nào tự nhiên rơi vào khoảng giữa:
+
+| Estimator | R² trên test | Số phận |
+| --- | --- | --- |
+| `dummy` | −0.000 | Cổng 1 chặn |
+| `ridge` | 0.680 | Cổng 1 chặn |
+| `hist_gradient_boosting_weak` | **0.769** | Qua cổng 1 |
+| `hist_gradient_boosting` | **0.947** | Qua cổng 1, thắng cổng 2 |
+
+Nhờ đó Task 16 chạy được đủ bốn nhánh của `gates.py` trên dữ liệu thật: bị chặn
+bởi ngưỡng sàn, thành champion khi chưa có ai, thắng champion, và thua champion.
 
 ## 3. Luồng chạy
 

@@ -551,6 +551,15 @@ git commit -m "feat: luat kiem tra dataset cho stage validate"
 
 ## Task 3: `estimators.py` — dựng estimator theo task_type
 
+> **SỬA ĐỔI 2026-09-19, sau khi Task 11 chạy và đo trên dữ liệu thật.**
+> Task này ban đầu bọc regression trong `TransformedTargetRegressor(func=np.log1p,
+> inverse_func=np.expm1)`. Đo trên 48.000 dòng thật: Ridge ra **R² = −0.399** với dự
+> đoán tới **28,3 triệu $** (giá thật cao nhất 2,39 triệu), còn GBM **không đổi**
+> (0.947 cả hai cách). Wrapper đã bị **bỏ**, và thêm estimator
+> `hist_gradient_boosting_weak` (`max_iter=10`, R² = 0.769) để cổng 2 có gì để so.
+> Code thật hiện nằm ở `common/ml_common/estimators.py`; xem mục 2.6 và 2.7 của spec.
+> Khối code bên dưới giữ nguyên để ghi lại lịch sử, **không phải bản đang chạy**.
+
 **Files:**
 - Create: `common/ml_common/estimators.py`
 - Test: `common/tests/test_estimators.py`
@@ -2793,46 +2802,60 @@ Expected: in `OK: 20 raw records, identical predictions both ways` và ba con s�
 
 Nếu hai bên lệch nhau, **dừng lại** — đó là training/serving skew, và Plan 3 sẽ thừa hưởng nó.
 
-- [ ] **Step 3: Train GBM và xác nhận nó phải THẮNG Ridge mới được promote**
+- [ ] **Step 3: Dựng champion đầu tiên bằng model yếu**
 
-Champion hiện tại là Ridge. Chạy DAG với GBM:
+Ngưỡng sàn là R² ≥ 0.75. Đo trên dữ liệu thật: `dummy` ra −0.000, `ridge` ra 0.680 —
+**cả hai đều không qua sàn**, nên không cái nào làm champion được. `hist_gradient_boosting_weak`
+ra **0.769**, vừa đủ qua sàn, và đó chính là champion đầu tiên để model đầy đủ đánh bại.
+
+```powershell
+docker compose exec -T airflow-scheduler airflow dags test ml_pipeline 2026-09-19 --conf '{\"estimator_name\": \"hist_gradient_boosting_weak\"}'
+```
+Expected: `evaluate` in `"passed": true`, `"champion_metrics": null` (chưa có ai để so),
+nhánh đi vào `register`. Ghi lại R² và RMSE.
+
+- [ ] **Step 4: Train model đầy đủ, nó phải THẮNG champion ở cổng 2**
 
 ```powershell
 docker compose exec -T airflow-scheduler airflow dags test ml_pipeline 2026-09-19 --conf '{\"estimator_name\": \"hist_gradient_boosting\"}'
 ```
-Expected: task `evaluate` in `"champion_metrics"` khác `null` (đã so với Ridge), và nhánh đi vào `register` nếu GBM thắng.
+Expected: `"champion_metrics"` khác `null` (đã so với model yếu), `"passed": true`,
+nhánh vào `register`. **Đây là lần đầu cổng 2 được chạy thật.**
 
-Ghi lại RMSE của cả hai. **Đây là lần đầu cổng thứ hai được chạy thật** — trước đó chưa có champion nào để so.
-
-- [ ] **Step 4: Xác nhận alias đã chuyển sang version mới**
+Xác nhận alias đã chuyển:
 
 ```powershell
-.venv\Scripts\python.exe -c "import mlflow; from mlflow import MlflowClient; mlflow.set_tracking_uri('http://localhost:5000'); c=MlflowClient(); v=c.get_model_version_by_alias('house_price_regressor','champion'); r=c.get_run(v.run_id); print('version', v.version, '| estimator', r.data.params['estimator'], '| test_rmse', r.data.metrics.get('test_rmse'))"
+.venv\Scripts\python.exe -c "import mlflow; from mlflow import MlflowClient; mlflow.set_tracking_uri('http://localhost:5000'); c=MlflowClient(); v=c.get_model_version_by_alias('house_price_regressor','champion'); r=c.get_run(v.run_id); print('version', v.version, '| estimator', r.data.params['estimator'], '| test_r2', r.data.metrics.get('test_r2'))"
 ```
-Expected: version 2, estimator `hist_gradient_boosting`.
+Expected: estimator là `hist_gradient_boosting`.
 
-Nếu GBM **không** thắng Ridge thì alias vẫn ở version 1 — đó cũng là kết quả hợp lệ, cổng đang làm đúng việc. Ghi lại con số và báo, đừng ép nó thắng.
+- [ ] **Step 5: Model yếu chạy lại phải THUA champion và bị chặn ở cổng 2**
 
-- [ ] **Step 5: Chứng minh cổng chặn được model rác**
+```powershell
+docker compose exec -T airflow-scheduler airflow dags test ml_pipeline 2026-09-19 --conf '{\"estimator_name\": \"hist_gradient_boosting_weak\"}'
+```
+Expected: `"passed": false`, `reason` nhắc tới `champion`, nhánh vào **`stop_no_deploy`**,
+`register` bị skip, **không task nào fail**.
 
-Đây là mục quan trọng nhất của cả plan. Train một `DummyRegressor` — nó chắc chắn có R² quanh 0:
+Đây là nhánh "qua sàn nhưng thua champion" — thứ ngăn một model tàm tạm hất cẳng model
+tốt hơn đang chạy.
+
+- [ ] **Step 6: Model rác phải bị chặn ngay ở cổng 1, và champion không đổi**
 
 ```powershell
 docker compose exec -T airflow-scheduler airflow dags test ml_pipeline 2026-09-19 --conf '{\"estimator_name\": \"dummy\"}'
 ```
-Expected:
-- `evaluate` in `"passed": false` và `reason` nhắc tới `floor`
-- nhánh đi vào **`stop_no_deploy`**, task `register` bị skip
-- **không task nào fail** — trượt cổng là kết quả, không phải lỗi
+Expected: `"passed": false`, `reason` nhắc tới `floor`, nhánh vào `stop_no_deploy`.
 
-- [ ] **Step 6: Xác nhận champion KHÔNG đổi sau lần chạy model rác**
+Rồi xác nhận champion **không hề đổi**:
 
 ```powershell
-.venv\Scripts\python.exe -c "import mlflow; from mlflow import MlflowClient; mlflow.set_tracking_uri('http://localhost:5000'); c=MlflowClient(); v=c.get_model_version_by_alias('house_price_regressor','champion'); r=c.get_run(v.run_id); print('champion version', v.version, '| estimator', r.data.params['estimator'])"
+.venv\Scripts\python.exe -c "import mlflow; from mlflow import MlflowClient; mlflow.set_tracking_uri('http://localhost:5000'); c=MlflowClient(); v=c.get_model_version_by_alias('house_price_regressor','champion'); r=c.get_run(v.run_id); print('champion estimator:', r.data.params['estimator'])"
 ```
-Expected: vẫn là version và estimator của Step 4, **không phải `dummy`**.
+Expected: vẫn là `hist_gradient_boosting`, **không phải `dummy`**.
 
-Nếu champion đã thành `dummy` thì cổng vô dụng — dừng lại và sửa.
+Bốn step trên chạy đủ **cả bốn nhánh** của `gates.py` trên dữ liệu thật: bị sàn chặn,
+thành champion khi chưa có ai, thắng champion, và thua champion.
 
 - [ ] **Step 7: Viết `scripts/verify_pipeline.ps1`**
 
