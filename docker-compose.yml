@@ -53,6 +53,33 @@ services:
       echo 'Bucket ${ML_BUCKET} ready'
       "
 
+  mlflow:
+    build: ./docker/mlflow
+    container_name: mlops-mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT_INTERNAL}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+    command:
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      - --default-artifact-root=s3://${ML_BUCKET}/artifacts/
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:
