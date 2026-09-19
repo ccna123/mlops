@@ -123,3 +123,42 @@ def test_stats_is_json_serializable():
 def test_flush_size_must_be_at_most_max_size():
     with pytest.raises(ValueError, match="flush_size"):
         InferenceLogBuffer(flush_size=10, max_size=5)
+
+
+def test_concurrent_adds_and_takes_lose_nothing():
+    """Serving adds from request threads while the flusher takes from another.
+
+    take() copies then clears; without a lock, a record added between those two
+    steps is cleared without ever being handed out.
+    """
+    import threading
+
+    buffer = InferenceLogBuffer(flush_size=5000, max_size=5000, clock=FakeClock())
+    per_thread = 2000
+    thread_count = 4
+    taken: list[dict] = []
+    stop = threading.Event()
+
+    def producer(offset: int) -> None:
+        for index in range(per_thread):
+            buffer.add(_record(offset + index))
+
+    def consumer() -> None:
+        while not stop.is_set():
+            taken.extend(buffer.take())
+
+    consumer_thread = threading.Thread(target=consumer)
+    consumer_thread.start()
+    producers = [
+        threading.Thread(target=producer, args=(n * per_thread,)) for n in range(thread_count)
+    ]
+    for thread in producers:
+        thread.start()
+    for thread in producers:
+        thread.join()
+    stop.set()
+    consumer_thread.join()
+    taken.extend(buffer.take())
+
+    assert buffer.stats()["dropped"] == 0
+    assert len(taken) == per_thread * thread_count
