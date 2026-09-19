@@ -17,7 +17,7 @@ trước khi sửa bất cứ thứ gì.
    ```powershell
    .venv\Scripts\python.exe -c "import shutil; print(f'{shutil.disk_usage(\"C:/\").free/2**30:.1f} GB free')"
    ```
-   Ổ C của máy này đã dùng 93%. Dưới 8GB trống thì dừng lại và báo.
+   Ổ C của máy này đã dùng 94%. Dưới 8GB trống thì dừng lại và báo.
 
 Nếu prompt không nói rõ task số mấy, hỏi lại chứ đừng đoán.
 

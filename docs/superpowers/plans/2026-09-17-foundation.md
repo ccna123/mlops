@@ -25,7 +25,7 @@
 - **Đường dẫn MinIO:** chỉ được tạo qua hàm trong `ml_common/storage.py`, không nối chuỗi thủ công ở bất kỳ đâu.
 - **Encoding file:** mọi file text ghi bằng UTF-8, không BOM.
 - **Commit:** mỗi task kết thúc bằng đúng một commit. Message tiếng Việt, theo Conventional Commits (`feat:`, `test:`, `chore:`, `docs:`).
-- **Dung lượng đĩa:** ổ C còn ~21GB. Trước mỗi task pull image, kiểm tra còn tối thiểu 8GB trống.
+- **Dung lượng đĩa:** ổ C còn ~16GB (đo ngày 2026-09-19, sau khi Plan 1 pull hết image). Trước mỗi task pull image, kiểm tra còn tối thiểu 8GB trống.
 
 ---
 
@@ -1603,7 +1603,8 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    # MinIO da go image khoi Docker Hub; quay.io la registry chinh thuc hien nay.
+    image: quay.io/minio/minio:latest
     container_name: mlops-minio
     command: server /data --console-address ":9001"
     environment:
@@ -1622,7 +1623,7 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: mlops-minio-init
     depends_on:
       minio:
@@ -2443,16 +2444,11 @@ Chèn vào dưới service `mlflow`, trước khối `volumes:`:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     user: "${AIRFLOW_UID:-50000}:0"
+    # Giữ nguyên MỘT dòng. YAML folded scalar (`>`) không gộp các dòng được thụt
+    # sâu hơn — bash sẽ nhận newline thật và tách `airflow users create` khỏi
+    # tham số của nó, container thoát với mã 2 ("--username: command not found").
     entrypoint: >
-      /bin/bash -c "
-      airflow db migrate &&
-      airflow users create
-        --username ${AIRFLOW_ADMIN_USER}
-        --password ${AIRFLOW_ADMIN_PASSWORD}
-        --firstname Admin --lastname User
-        --role Admin --email admin@example.com
-      || true
-      "
+      /bin/bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Admin --lastname User --role Admin --email admin@example.com || true"
 
   airflow-scheduler:
     image: apache/airflow:2.10.3-python3.12

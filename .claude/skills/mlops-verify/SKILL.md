@@ -1,8 +1,6 @@
 ---
 name: mlops-verify
 description: Xác nhận toàn bộ nền tảng MLOps pipeline hoạt động — chạy test ở cả Python local lẫn trong container, kiểm tra 4 service và Definition of Done của plan. Dùng cho Task 13 của Plan 1 và bất cứ khi nào cần kiểm tra lại trạng thái hệ thống.
-context: fork
-model: sonnet
 ---
 Bạn đang xác nhận nền tảng MLOps pipeline hoạt động đầy đủ. Nhiệm vụ ở đây là
 **tìm ra chỗ hỏng**, không phải xác nhận mọi thứ ổn. Một lần verify kết thúc

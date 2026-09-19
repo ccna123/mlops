@@ -103,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
 
 - **RAM 16GB** chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi dev, đặt
   `SAMPLE_ROWS=200000` trong `.env`. Xoá biến đó khi chạy thật.
-- **Ổ C còn ~21GB (93% đã dùng).** Kiểm tra dung lượng trước khi pull image lớn.
+- **Ổ C còn ~16GB (94% đã dùng, đo ngày 2026-09-19).** Kiểm tra dung lượng trước khi pull image lớn.
   `docker system prune -a` nếu cần chỗ.
 - `house_pricing_dirty.csv` (373MB) và bản `.gz` đã được gitignore. Không bao giờ
   commit chúng.
@@ -123,6 +123,9 @@ Chỉ commit khi được yêu cầu hoặc khi plan nói rõ ở step đó.
 
 ## Trạng thái
 
-Plan 1/5 (Foundation). Bốn plan còn lại: batch pipeline, serving, monitoring,
-dashboard — xem bản đồ ở cuối file plan. Mỗi plan viết sau khi plan trước chạy
-xong.
+Plan 1/5 (Foundation) **đã xong** — 13/13 task, `scripts\verify_foundation.ps1`
+xanh toàn bộ. Postgres, MinIO, MLflow, Airflow chạy được; `ml-base:latest` build
+được; 148 test pass ở cả Python 3.13 (local) lẫn 3.12 (container).
+
+Bốn plan còn lại: batch pipeline, serving, monitoring, dashboard — xem bản đồ ở
+cuối file plan. Mỗi plan viết sau khi plan trước chạy xong.
