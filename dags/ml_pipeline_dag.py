@@ -60,13 +60,19 @@ def last_json(lines: list[str]):
     of them instead of trusting position. Confirmed empirically: replaying the
     same extract container five times through DockerOperator's own attach
     call put the JSON line last only 2 times out of 5.
+    Scanned from the end, and only a JSON *object* counts. Both matter: every
+    stage writes exactly one result and writes it last, so the last match is
+    the right one; and json.loads("800") succeeds and returns an int, so a log
+    line carrying a bare number would otherwise be mistaken for the result.
     """
-    for line in lines:
+    for line in reversed(lines):
         try:
-            return json.loads(line)
+            parsed = json.loads(line)
         except (json.JSONDecodeError, TypeError):
             continue
-    raise ValueError(f"no JSON line found in stage output: {lines!r}")
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError(f"no JSON object found in stage output: {lines!r}")
 
 
 FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | last_json)['fingerprint'] }}"
