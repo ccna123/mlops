@@ -10,6 +10,7 @@ from __future__ import annotations
 import pandas as pd
 
 from . import schema
+from .targets import TARGET_SOURCE
 
 MAX_TARGET_MISSING_RATE = 0.5
 
@@ -60,12 +61,15 @@ def validate_dataframe(df: pd.DataFrame, task_type: str) -> dict:
     if row_count == 0:
         fatal.append("the dataset has no rows")
 
-    target = schema.target_column(task_type)
-    if target in df.columns and row_count > 0:
-        target_missing = _missing_rate(df[target])
-        if target_missing > MAX_TARGET_MISSING_RATE:
+    # Check the column the target is built FROM, not the target itself: validate
+    # runs before prepare_dataset_for_train, so a derived target such as
+    # needs_renovation does not exist yet and the rule would silently never run.
+    target_source = TARGET_SOURCE[task_type]
+    if target_source in df.columns and row_count > 0:
+        missing_rate = _missing_rate(df[target_source])
+        if missing_rate > MAX_TARGET_MISSING_RATE:
             fatal.append(
-                f"target {target!r} is missing in {target_missing:.1%} of rows, "
+                f"target source {target_source!r} is missing in {missing_rate:.1%} of rows, "
                 f"above the {MAX_TARGET_MISSING_RATE:.0%} limit"
             )
 

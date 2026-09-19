@@ -117,3 +117,19 @@ def test_report_is_json_serializable():
 def test_invalid_task_type_raises():
     with pytest.raises(ValueError, match="task_type"):
         validate_dataframe(_valid_frame(), "clustering")
+
+
+def test_classification_checks_the_source_column_not_the_derived_one():
+    """needs_renovation does not exist yet when validate runs; condition does."""
+    df = _valid_frame(row_count=10)
+    df.loc[0:5, "condition"] = None
+    report = validate_dataframe(df, "classification")
+    assert report["ok"] is False
+    assert any("condition" in reason for reason in report["fatal"])
+
+
+def test_classification_passes_when_condition_is_mostly_present():
+    df = _valid_frame(row_count=10)
+    df.loc[0:2, "condition"] = None
+    report = validate_dataframe(df, "classification")
+    assert report["ok"] is True
