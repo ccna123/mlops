@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.request
 
 import pendulum
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
-from airflow.operators.python import BranchPythonOperator
+from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 
 DOCKER_URL = "unix://var/run/docker.sock"
@@ -104,6 +105,22 @@ def choose_branch(ti) -> str:
     return "register" if verdict["passed"] else "stop_no_deploy"
 
 
+SERVING_RELOAD_URL = os.environ.get("SERVING_URL", "http://serving:8000").rstrip("/") + "/reload"
+
+
+def reload_serving() -> str:
+    """Tells serving to pick up the version that was just registered.
+
+    One HTTP call, so no image and no Airflow Connection: a PythonOperator with
+    the standard library is the whole task.
+    """
+    request = urllib.request.Request(SERVING_RELOAD_URL, data=b"", method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read().decode("utf-8")
+    print(f"serving reloaded: {body}")
+    return body
+
+
 with DAG(
     dag_id="ml_pipeline",
     schedule=None,
@@ -188,5 +205,8 @@ with DAG(
 
     stop_no_deploy = EmptyOperator(task_id="stop_no_deploy")
 
+    deploy = PythonOperator(task_id="deploy", python_callable=reload_serving)
+
     extract >> validate >> prepare_dataset >> train >> evaluate >> branch
     branch >> [register, stop_no_deploy]
+    register >> deploy

@@ -98,6 +98,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       ML_BUCKET: ${ML_BUCKET}
       SAMPLE_ROWS: ${SAMPLE_ROWS}
+      SERVING_URL: ${SERVING_URL}
     volumes: &airflow-volumes
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
