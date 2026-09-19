@@ -2366,9 +2366,11 @@ Expected: in ra version và `run_id` khớp với `<RUN_ID>`.
 - [ ] **Step 6: Xác nhận baseline profile nằm thật trên MinIO và đọc được**
 
 ```powershell
-.venv\Scripts\python.exe -c "from ml_common.storage import Storage, baseline_key; s=Storage.from_env(); p=s.read_json(baseline_key('house_price_regressor', 1)); print(len(p), 'columns profiled'); print(list(p)[:5])"
+.venv\Scripts\python.exe -c "from ml_common.storage import Storage, baseline_key; s=Storage.from_env(); p=s.read_json(baseline_key('house_price_regressor', 1)); print(len(p['columns']), 'columns profiled'); print('n_rows', p['n_rows'])"
 ```
-Expected: in ra số cột đã profile và vài tên cột. Số cột phải khớp `len(schema.feature_columns("regression"))`.
+Expected: `20 columns profiled` và `n_rows` bằng số dòng của **train.parquet** (không phải test).
+
+`compute_profile` trả về `{n_rows, computed_at, columns}`, nên số cột là `len(p['columns'])` — `len(p)` sẽ ra 3. Số cột phải khớp `len(schema.feature_columns("regression"))` = 20, và `sale_price` **không** được có mặt vì nó là target chứ không phải feature.
 
 - [ ] **Step 7: Commit**
 
@@ -2545,12 +2547,22 @@ MODEL_NAME_BY_TASK_TYPE = {
 
 # Passed into every stage container. Read from the scheduler's own environment,
 # which docker-compose fills from .env.
+_MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT_INTERNAL", "http://minio:9000")
+_MINIO_KEY = os.environ.get("MINIO_ACCESS_KEY", "")
+_MINIO_SECRET = os.environ.get("MINIO_SECRET_KEY", "")
+
 BASE_ENV = {
-    "MINIO_ENDPOINT_INTERNAL": os.environ.get("MINIO_ENDPOINT_INTERNAL", "http://minio:9000"),
-    "MINIO_ACCESS_KEY": os.environ.get("MINIO_ACCESS_KEY", ""),
-    "MINIO_SECRET_KEY": os.environ.get("MINIO_SECRET_KEY", ""),
+    "MINIO_ENDPOINT_INTERNAL": _MINIO_ENDPOINT,
+    "MINIO_ACCESS_KEY": _MINIO_KEY,
+    "MINIO_SECRET_KEY": _MINIO_SECRET,
     "ML_BUCKET": os.environ.get("ML_BUCKET", "ml-pipeline"),
     "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
+    # MLflow reaches MinIO through boto3, which reads the AWS names, not the MINIO ones.
+    # Without these three, train/evaluate/register fail with AccessDenied the moment they
+    # touch an artifact — the tracking call succeeds, so the failure looks unrelated.
+    "MLFLOW_S3_ENDPOINT_URL": _MINIO_ENDPOINT,
+    "AWS_ACCESS_KEY_ID": _MINIO_KEY,
+    "AWS_SECRET_ACCESS_KEY": _MINIO_SECRET,
 }
 
 FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | fromjson)['fingerprint'] }}"
@@ -2801,6 +2813,20 @@ Run: `.venv\Scripts\python.exe scripts\smoke_round_trip.py`
 Expected: in `OK: 20 raw records, identical predictions both ways` và ba con số dự đoán hàng trăm nghìn.
 
 Nếu hai bên lệch nhau, **dừng lại** — đó là training/serving skew, và Plan 3 sẽ thừa hưởng nó.
+
+- [ ] **Step 2b: Xoá registry về trạng thái sạch trước khi diễn kịch bản cổng**
+
+Task 13 đã chạy tay `register` trên một model 800 dòng để kiểm thử stage đó, nên alias
+`champion` hiện đang trỏ vào một model không liên quan. Kịch bản bốn nhánh dưới đây cần bắt
+đầu từ chỗ **chưa có champion nào**, nếu không Step 3 sẽ không đi vào nhánh "chưa có ai để so".
+
+```powershell
+.venv\Scripts\python.exe -c "from mlflow import MlflowClient; import mlflow; mlflow.set_tracking_uri('http://localhost:5000'); c=MlflowClient(); c.delete_registered_model('house_price_regressor'); print('registry reset')"
+```
+Expected: `registry reset`. Nếu báo không tồn tại thì cũng được — nghĩa là đã sạch sẵn.
+
+Việc này chỉ xoá **registry entry**, không xoá run hay artifact — lịch sử experiment vẫn còn
+nguyên trong MLflow.
 
 - [ ] **Step 3: Dựng champion đầu tiên bằng model yếu**
 
