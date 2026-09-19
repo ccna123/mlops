@@ -54,15 +54,13 @@ def test_tying_the_champion_is_not_beating_it():
     assert result["passed"] is False
 
 
-def test_classification_uses_f1_for_both_gates():
-    result = evaluate_gates(
-        "classification", candidate={"f1": 0.75}, champion={"f1": 0.70}
-    )
+def test_classification_uses_auc_for_both_gates():
+    result = evaluate_gates("classification", candidate={"auc": 0.72}, champion={"auc": 0.65})
     assert result["passed"] is True
 
 
 def test_classification_below_floor_is_blocked():
-    result = evaluate_gates("classification", candidate={"f1": 0.65}, champion=None)
+    result = evaluate_gates("classification", candidate={"auc": 0.52}, champion=None)
     assert result["passed"] is False
 
 
@@ -84,3 +82,31 @@ def test_missing_metric_raises_rather_than_guessing():
 def test_invalid_task_type_raises():
     with pytest.raises(ValueError, match="task_type"):
         evaluate_gates("clustering", candidate={"r2": 0.9}, champion=None)
+
+
+def test_a_constant_predictor_cannot_pass_the_classification_floor():
+    """A model that predicts one class for everything scores AUC 0.5 by definition.
+
+    The old F1 floor let exactly such a model through: predicting the majority
+    class on a 55.8%-positive target gives recall 1.0 and F1 0.719, above the
+    old 0.70 bar, while its AUC was 0.500.
+    """
+    result = evaluate_gates("classification", candidate={"auc": 0.50}, champion=None)
+    assert result["passed"] is False
+    assert "floor" in result["reason"].lower()
+
+
+def test_a_good_model_with_low_f1_still_passes():
+    """F1 collapses on an imbalanced target at the default 0.5 threshold.
+
+    The real classifier scores AUC 0.706 but F1 0.159 on a 25%-positive target.
+    The gate must judge it on AUC, or it would block a genuinely good model.
+    """
+    result = evaluate_gates("classification", candidate={"auc": 0.706}, champion=None)
+    assert result["passed"] is True
+
+
+def test_classification_missing_auc_raises():
+    """AUC is now load-bearing: evaluate must always supply it, or we stop."""
+    with pytest.raises(KeyError):
+        evaluate_gates("classification", candidate={"f1": 0.9}, champion=None)

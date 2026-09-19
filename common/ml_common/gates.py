@@ -3,6 +3,13 @@
 Gate one blocks junk on an absolute threshold. Gate two blocks a model that is
 merely adequate from replacing a better one already in production — both
 measured on the same test split, which is why that split has a fixed seed.
+
+Classification is judged on AUC, not F1. F1 depends on both the decision
+threshold and the class balance, and it failed in both directions on real data:
+a constant predictor scored F1 0.719 on a 55.8%-positive target (above the old
+0.70 bar) while its AUC was 0.500, and a genuine model scored F1 0.159 on a
+25%-positive target while its AUC was 0.706. AUC is threshold-independent, and
+any constant predictor scores exactly 0.5 by construction.
 """
 
 from __future__ import annotations
@@ -11,12 +18,12 @@ from . import schema
 
 FLOOR: dict[str, tuple[str, float]] = {
     "regression": ("r2", 0.75),
-    "classification": ("f1", 0.70),
+    "classification": ("auc", 0.55),
 }
 
 COMPARISON: dict[str, tuple[str, str]] = {
     "regression": ("rmse", "lower"),
-    "classification": ("f1", "higher"),
+    "classification": ("auc", "higher"),
 }
 
 
