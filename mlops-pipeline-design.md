@@ -170,7 +170,7 @@ Với regression, **không biến đổi target** — train thẳng trên `sale_
 ```
 Task 1: extract         → đọc raw data từ MinIO, ghi parquet
 Task 2: validate        → check schema (common/schema.py), đếm missing/outlier, fail nếu vi phạm nghiêm trọng
-Task 3: prepare_dataset_for_train      → cache-aware: tính fingerprint của raw, skip nếu processed/{fingerprint}/ đã tồn tại
+Task 3: prepare_dataset_for_train      → cache-aware: tính fingerprint của raw, skip nếu processed/{fingerprint}/{task_type}/ đã tồn tại
 Task 4: train           → train theo task_type, log Pipeline + params + metrics vào MLflow
 Task 5: evaluate        → hai cổng: threshold sàn + phải hơn model Production (mục 7.5)
 Task 6: [branch]        → pass → register; fail → dừng (không deploy)
@@ -234,7 +234,7 @@ Cài bằng `pip install -e common/` vào image `stages/base/` và image serving
 ```
 s3://ml-pipeline/
 ├── raw/{dataset_version}/data.parquet
-├── processed/{raw_fingerprint}/
+├── processed/{raw_fingerprint}/{task_type}/
 │   ├── train.parquet
 │   └── test.parquet
 ├── artifacts/                                          # MLflow artifact store
@@ -252,7 +252,13 @@ Code dùng `boto3` với `endpoint_url` trỏ vào MinIO; khi migrate chỉ đ�
 
 ### 7.4. Cache của `prepare_dataset_for_train`
 
-`prepare_dataset_for_train` tính fingerprint của raw data (hash nội dung hoặc `dataset_version` + etag của object) và ghi ra `processed/{fingerprint}/`. Đầu task kiểm tra: nếu prefix đó đã tồn tại và đủ file thì skip.
+`prepare_dataset_for_train` tính fingerprint của raw data (hash nội dung hoặc `dataset_version` + etag của object) và ghi ra `processed/{fingerprint}/{task_type}/`. Đầu task kiểm tra: nếu prefix đó đã tồn tại và đủ file thì skip.
+
+**`task_type` nằm trong đường dẫn** (thêm ở Plan 3). Fingerprint chỉ băm raw data nên hai
+task dùng chung nó, nhưng file processed của chúng khác nhau: target khác (`needs_renovation`
+được sinh từ `condition`), dòng bị loại vì thiếu target cũng khác. Chung một đường dẫn thì
+task này sẽ âm thầm dùng cache của task kia. Phần đắt nhất — đọc raw và lấy mẫu — vẫn được
+cache chung ở `extracted/{fingerprint}/`.
 
 Lý do: mỗi lần đổi `task_type` để thử model khác, ba stage đầu sẽ cày lại 2 triệu dòng dù dữ liệu không đổi — đó là phần tốn thời gian nhất của cả pipeline. Có cache thì lần chạy thứ hai nhảy thẳng vào `train`.
 

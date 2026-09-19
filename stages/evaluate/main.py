@@ -52,7 +52,7 @@ def main() -> int:
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 
     storage = Storage.from_env()
-    test_df = storage.read_parquet(processed_key(fingerprint, "test"))
+    test_df = storage.read_parquet(processed_key(fingerprint, task_type, "test"))
     target = schema.target_column(task_type)
     features = test_df.drop(columns=[target])
     y_true = test_df[target]

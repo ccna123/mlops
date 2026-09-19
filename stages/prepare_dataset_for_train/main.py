@@ -30,8 +30,8 @@ def main() -> int:
     force = os.environ.get("FORCE_REPROCESS", "false").strip().lower() == "true"
     storage = Storage.from_env()
 
-    train_destination = processed_key(fingerprint, "train")
-    test_destination = processed_key(fingerprint, "test")
+    train_destination = processed_key(fingerprint, task_type, "train")
+    test_destination = processed_key(fingerprint, task_type, "test")
 
     already_there = storage.exists(train_destination) and storage.exists(test_destination)
     if already_there and not force:

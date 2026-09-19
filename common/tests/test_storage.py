@@ -28,12 +28,34 @@ class TestKeyHelpers:
         assert storage.raw_key("v1") == "raw/v1/data.parquet"
 
     def test_processed_key(self):
-        assert storage.processed_key("abc123", "train") == "processed/abc123/train.parquet"
-        assert storage.processed_key("abc123", "test") == "processed/abc123/test.parquet"
+        result = storage.processed_key("abc123", "regression", "train")
+        assert result == "processed/abc123/regression/train.parquet"
+        result = storage.processed_key("abc123", "classification", "test")
+        assert result == "processed/abc123/classification/test.parquet"
+
+    def test_processed_key_separates_task_types(self):
+        """The fingerprint hashes only the raw data, so two task types share it.
+
+        Their processed files differ (different target, different rows dropped),
+        so they must not share a path: one would silently reuse the other's cache.
+        """
+        regression = storage.processed_key("abc123", "regression", "train")
+        classification = storage.processed_key("abc123", "classification", "train")
+        assert regression != classification
+
+    def test_processed_prefix_covers_both_splits_of_one_task_type(self):
+        prefix = storage.processed_prefix("abc123", "classification")
+        assert storage.processed_key("abc123", "classification", "train").startswith(prefix)
+        assert storage.processed_key("abc123", "classification", "test").startswith(prefix)
+        assert not storage.processed_key("abc123", "regression", "test").startswith(prefix)
 
     def test_processed_key_invalid_split_raises(self):
         with pytest.raises(ValueError, match="split"):
-            storage.processed_key("abc123", "validation")
+            storage.processed_key("abc123", "regression", "validation")
+
+    def test_processed_key_invalid_task_type_raises(self):
+        with pytest.raises(ValueError, match="task_type"):
+            storage.processed_key("abc123", "clustering", "train")
 
     def test_baseline_key(self):
         result = storage.baseline_key("house_price_regressor", 3)
@@ -54,7 +76,7 @@ class TestKeyHelpers:
     def test_no_key_starts_with_a_slash(self):
         keys = [
             storage.raw_key("v1"),
-            storage.processed_key("a", "train"),
+            storage.processed_key("a", "regression", "train"),
             storage.baseline_key("m", 1),
             storage.inference_log_key("m", date(2026, 1, 1), "0001"),
             storage.ground_truth_key("m", date(2026, 1, 1), "0001"),
