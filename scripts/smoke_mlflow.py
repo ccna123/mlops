@@ -1,9 +1,18 @@
 """Smoke test: log a run and a model to real MLflow."""
 
+import os
+
 import mlflow
 import mlflow.sklearn
 import pandas as pd
 from sklearn.dummy import DummyRegressor
+
+# Run from the host, so MinIO is reached on the published port rather than on the
+# compose-internal hostname the containers use. Without these the upload fails with
+# a real AccessDenied even though the run itself is created successfully.
+os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "minioadmin")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "minioadmin")
 
 mlflow.set_tracking_uri("http://localhost:5000")
 mlflow.set_experiment("smoke-test")
