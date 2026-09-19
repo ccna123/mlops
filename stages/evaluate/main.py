@@ -10,7 +10,6 @@ DAG branch on what it reports.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
@@ -19,6 +18,7 @@ import mlflow.sklearn
 from ml_common import schema
 from ml_common.gates import evaluate_gates
 from ml_common.metrics import compute_metrics
+from ml_common.stageio import emit_result
 from ml_common.storage import Storage, processed_key
 from mlflow.exceptions import MlflowException
 
@@ -86,15 +86,13 @@ def main() -> int:
             }
         )
 
-    print(
-        json.dumps(
-            {
-                "passed": decision["passed"],
-                "reason": decision["reason"],
-                "metrics": candidate_metrics,
-                "champion_metrics": champion_metrics,
-            }
-        )
+    emit_result(
+        {
+            "passed": decision["passed"],
+            "reason": decision["reason"],
+            "metrics": candidate_metrics,
+            "champion_metrics": champion_metrics,
+        }
     )
     return 0
 

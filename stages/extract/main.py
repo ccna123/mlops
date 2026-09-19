@@ -7,11 +7,11 @@ every later stage uses to find its input.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
 from ml_common.fingerprint import compute_fingerprint
+from ml_common.stageio import emit_result
 from ml_common.storage import Storage, extracted_key, raw_key
 
 
@@ -46,7 +46,7 @@ def main() -> int:
         row_count = len(df)
         print(f"wrote {row_count} rows to {destination}", file=sys.stderr)
 
-    print(json.dumps({"fingerprint": fingerprint, "row_count": int(row_count)}))
+    emit_result({"fingerprint": fingerprint, "row_count": int(row_count)})
     return 0
 
 

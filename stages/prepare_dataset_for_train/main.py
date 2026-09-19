@@ -10,12 +10,12 @@ so parsing it here cannot drift from anything.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
 from ml_common import schema
 from ml_common.rowops import drop_duplicates, drop_rows_missing_target
+from ml_common.stageio import emit_result
 from ml_common.storage import Storage, extracted_key, processed_key
 from ml_common.targets import parse_target
 from sklearn.model_selection import train_test_split
@@ -38,9 +38,7 @@ def main() -> int:
         train_rows = len(storage.read_parquet(train_destination))
         test_rows = len(storage.read_parquet(test_destination))
         print(f"cache hit for {fingerprint}, skipping", file=sys.stderr)
-        print(
-            json.dumps({"skipped": True, "train_rows": train_rows, "test_rows": test_rows})
-        )
+        emit_result({"skipped": True, "train_rows": train_rows, "test_rows": test_rows})
         return 0
 
     if already_there:
@@ -67,16 +65,14 @@ def main() -> int:
     storage.write_parquet(test_df, test_destination)
     print(f"wrote {len(train_df)} train / {len(test_df)} test rows", file=sys.stderr)
 
-    print(
-        json.dumps(
-            {
-                "skipped": False,
-                "train_rows": len(train_df),
-                "test_rows": len(test_df),
-                "dropped_duplicates": int(duplicate_count),
-                "dropped_missing_target": int(missing_target_count),
-            }
-        )
+    emit_result(
+        {
+            "skipped": False,
+            "train_rows": len(train_df),
+            "test_rows": len(test_df),
+            "dropped_duplicates": int(duplicate_count),
+            "dropped_missing_target": int(missing_target_count),
+        }
     )
     return 0
 

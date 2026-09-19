@@ -47,36 +47,27 @@ BASE_ENV = {
 }
 
 
-def last_json(lines: list[str]):
-    """Pick out the one JSON result line a stage wrote, regardless of position.
+# Kept in sync with ml_common.stageio.RESULT_PREFIX by a test in common/tests.
+# The DAG cannot import ml_common: it runs in the Airflow image, which has no
+# ml_common installed, only the stage images do.
+RESULT_PREFIX = "XCOM_RESULT "
 
-    DockerOperator merges a container's stdout and stderr into a single XCom
-    value. Every stage writes its human-readable progress to stderr and its
-    JSON result to stdout as the final statement in the script — but stdout
-    and stderr are separate pipes, and when the last stderr line and the JSON
-    print happen microseconds apart (the common case: no I/O between them),
-    the Docker daemon can interleave the two streams either way. So the JSON
-    line is not reliably the literal last line in the merged list — scan all
-    of them instead of trusting position. Confirmed empirically: replaying the
-    same extract container five times through DockerOperator's own attach
-    call put the JSON line last only 2 times out of 5.
-    Scanned from the end, and only a JSON *object* counts. Both matter: every
-    stage writes exactly one result and writes it last, so the last match is
-    the right one; and json.loads("800") succeeds and returns an int, so a log
-    line carrying a bare number would otherwise be mistaken for the result.
+
+def stage_result(lines: list[str]) -> dict:
+    """Finds the line a stage marked as its result, wherever it landed.
+
+    DockerOperator merges stdout and stderr, and the daemon does not guarantee
+    the order of two writes microseconds apart on different pipes. The result
+    marks itself rather than relying on position; see ml_common.stageio.
     """
     for line in reversed(lines):
-        try:
-            parsed = json.loads(line)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    raise ValueError(f"no JSON object found in stage output: {lines!r}")
+        if isinstance(line, str) and line.strip().startswith(RESULT_PREFIX):
+            return json.loads(line.strip()[len(RESULT_PREFIX) :])
+    raise ValueError(f"no {RESULT_PREFIX.strip()} line in stage output: {lines!r}")
 
 
-FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | last_json)['fingerprint'] }}"
-RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | last_json)['run_id'] }}"
+FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['fingerprint'] }}"
+RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | stage_result)['run_id'] }}"
 TASK_TYPE = "{{ params.task_type }}"
 MODEL_NAME = "{{ params.model_name }}"
 
@@ -85,7 +76,7 @@ def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
     """One stage: run an image, stream its logs, take every log line as XCom.
 
     xcom_all=True (rather than the default last-line-only) is required so
-    last_json() above has the full set of lines to scan — see its docstring.
+    stage_result() above has the full set of lines to scan — see its docstring.
     """
     return DockerOperator(
         task_id=task_id,
@@ -102,7 +93,7 @@ def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
 
 def choose_branch(ti) -> str:
     """Reads the evaluate verdict and picks which way the DAG goes."""
-    verdict = last_json(ti.xcom_pull(task_ids="evaluate"))
+    verdict = stage_result(ti.xcom_pull(task_ids="evaluate"))
     print(f"evaluate said: {verdict['reason']}")
     return "register" if verdict["passed"] else "stop_no_deploy"
 
@@ -120,9 +111,9 @@ with DAG(
         "estimator_name": "ridge",
         "model_name": MODEL_NAME_BY_TASK_TYPE["regression"],
     },
-    # Airflow 2.10 has no built-in JSON filter, so register the scan-for-JSON
-    # helper (see last_json() above) as a Jinja filter for use in templates.
-    user_defined_filters={"last_json": last_json},
+    # Airflow 2.10 has no built-in JSON filter, so register the scan-for-result
+    # helper (see stage_result() above) as a Jinja filter for use in templates.
+    user_defined_filters={"stage_result": stage_result},
 ) as dag:
     extract = stage(
         "extract",

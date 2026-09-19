@@ -7,7 +7,6 @@ record and serving never needs a second copy of that logic.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
@@ -17,6 +16,7 @@ from ml_common import schema
 from ml_common.estimators import build_estimator
 from ml_common.features import build_pipeline
 from ml_common.metrics import compute_metrics
+from ml_common.stageio import emit_result
 from ml_common.storage import Storage, processed_key
 
 
@@ -60,7 +60,7 @@ def main() -> int:
         run_id = run.info.run_id
 
     print(f"run_id={run_id} train_metrics={train_metrics}", file=sys.stderr)
-    print(json.dumps({"run_id": run_id, "experiment": model_name, "metrics": train_metrics}))
+    emit_result({"run_id": run_id, "experiment": model_name, "metrics": train_metrics})
     return 0
 
 

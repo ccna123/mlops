@@ -7,10 +7,10 @@ reasons, all of them "there is nothing here to train on".
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
+from ml_common.stageio import emit_result
 from ml_common.storage import Storage, extracted_key, validation_report_key
 from ml_common.validation import validate_dataframe
 
@@ -39,7 +39,7 @@ def main() -> int:
     for reason in report["fatal"]:
         print(f"FATAL: {reason}", file=sys.stderr)
 
-    print(json.dumps({"ok": report["ok"], "row_count": report["row_count"]}))
+    emit_result({"ok": report["ok"], "row_count": report["row_count"]})
     return 0 if report["ok"] else 1
 
 

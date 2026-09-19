@@ -8,13 +8,13 @@ pointed at.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
 import mlflow
 from ml_common import schema
 from ml_common.profiling import compute_profile
+from ml_common.stageio import emit_result
 from ml_common.storage import Storage, baseline_key, processed_key
 from mlflow import MlflowClient
 
@@ -47,7 +47,7 @@ def main() -> int:
     storage.write_json(profile, destination)
     print(f"baseline profile written to {destination}", file=sys.stderr)
 
-    print(json.dumps({"version": str(version), "baseline_key": destination}))
+    emit_result({"version": str(version), "baseline_key": destination})
     return 0
 
 
