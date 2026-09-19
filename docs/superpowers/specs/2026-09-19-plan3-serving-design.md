@@ -105,15 +105,15 @@ cũng không cho monitoring ở Plan 4 thứ gì đáng theo dõi.
 
 **Bài toán mới:** `needs_renovation` = `condition` ∈ {`poor`, `fair`}. Chiếm **25,1%** dữ liệu.
 
-| | AUC |
-| --- | --- |
+|                                    | AUC              |
+| ---------------------------------- | ---------------- |
 | **GBM, 19 feature hợp lệ** | **0.7061** |
-| `list_price` một mình | 0.5619 |
-| `stories` một mình | 0.5061 |
-| `listing_year` một mình | 0.5039 |
-| `has_pool` một mình | 0.5010 |
-| `property_type` một mình | 0.5004 |
-| `dummy` | 0.5000 |
+| `list_price` một mình          | 0.5619           |
+| `stories` một mình             | 0.5061           |
+| `listing_year` một mình        | 0.5039           |
+| `has_pool` một mình            | 0.5010           |
+| `property_type` một mình       | 0.5004           |
+| `dummy`                          | 0.5000           |
 
 **Không cột nào một mình mang tín hiệu.** Cột mạnh nhất đạt 0.56, phần còn lại gần như
 đúng 0.50 — riêng lẻ thì vô dụng. Gộp lại mới ra 0.71. Tín hiệu nằm ở **tương tác giữa
@@ -138,10 +138,10 @@ F1 làm ngưỡng sàn **hỏng theo hai hướng ngược nhau**, cả hai đ�
 
 **Hướng 1 — cho model rác lọt.** Trên target cũ `sold_within_30_days` (55,8% dương):
 
-| Model | F1 | AUC |
-| --- | --- | --- |
-| `dummy` | **0.7186** | **0.5000** |
-| `logistic` | 0.6982 | 0.5872 |
+| Model        | F1               | AUC              |
+| ------------ | ---------------- | ---------------- |
+| `dummy`    | **0.7186** | **0.5000** |
+| `logistic` | 0.6982           | 0.5872           |
 
 `DummyClassifier(strategy="prior")` phán dương cho **mọi** căn nhà. Recall = 1.0 vì nó bắt
 hết ca dương; precision = 0.558 đúng bằng tỷ lệ lớp; F1 = 2×0.558×1/1.558 = **0.716**. Nó
@@ -149,10 +149,10 @@ vượt ngưỡng F1 ≥ 0.70 mà không hề nhìn dữ liệu, trong khi model
 
 **Hướng 2 — chặn nhầm model tốt.** Trên target mới `needs_renovation` (25,1% dương):
 
-| Model | F1 | AUC |
-| --- | --- | --- |
-| GBM | **0.1592** | **0.7061** |
-| `dummy` | 0.0000 | 0.5000 |
+| Model     | F1               | AUC              |
+| --------- | ---------------- | ---------------- |
+| GBM       | **0.1592** | **0.7061** |
+| `dummy` | 0.0000           | 0.5000           |
 
 Lớp dương chỉ chiếm 25% nên ở ngưỡng quyết định mặc định 0.5, model hiếm khi phán dương →
 F1 thấp. Ngưỡng F1 ≥ 0.70 sẽ **chặn một model có AUC 0.71**.
@@ -163,10 +163,10 @@ mà drift làm phân bố đổi chính là thứ Plan 4 tồn tại để phát
 
 **Cổng mới:**
 
-| | Cũ | Mới |
-| --- | --- | --- |
-| Ngưỡng sàn classification | F1 ≥ 0.70 | **AUC ≥ 0.55** |
-| So với champion | F1 cao hơn | **AUC cao hơn** |
+|                              | Cũ         | Mới                   |
+| ---------------------------- | ----------- | ---------------------- |
+| Ngưỡng sàn classification | F1 ≥ 0.70  | **AUC ≥ 0.55**  |
+| So với champion             | F1 cao hơn | **AUC cao hơn** |
 
 AUC không phụ thuộc ngưỡng quyết định, và mọi model đoán hằng số đều cho đúng 0.5 theo
 định nghĩa. Model thật đạt 0.71 nên vượt thoải mái; `dummy` đúng 0.50 nên bị chặn.
@@ -269,14 +269,14 @@ của target.
 
 Leakage classification sau khi đổi:
 
-| Cột | Vì sao loại |
-| --- | --- |
-| `property_id` | Định danh, không phải feature |
-| `condition` | **Nguồn sinh ra target** |
-| `sale_price` | Chỉ biết sau khi bán |
-| `days_on_market` | Chỉ biết sau khi bán |
-| `sold_within_30_days` | Chỉ biết sau khi bán |
-| `price_category` | Suy ra từ `sale_price` |
+| Cột                    | Vì sao loại                     |
+| ----------------------- | --------------------------------- |
+| `property_id`         | Định danh, không phải feature |
+| `condition`           | **Nguồn sinh ra target**   |
+| `sale_price`          | Chỉ biết sau khi bán           |
+| `days_on_market`      | Chỉ biết sau khi bán           |
+| `sold_within_30_days` | Chỉ biết sau khi bán           |
+| `price_category`      | Suy ra từ`sale_price`          |
 
 `list_price` **được giữ** — tại thời điểm đăng tin nó đã biết, và nó là feature đơn lẻ
 mạnh nhất (AUC 0.56).
@@ -390,7 +390,7 @@ vẹn, không phải chỉ chạy được.
 | 7.5  | Classification: F1 ≥ 0.70                                 | **AUC ≥ 0.55**, so champion bằng AUC | F1 ≥ 0.70 cho`dummy` (0.719) lọt và chặn model thật (0.698); đo trên 48k dòng |
 | 7.6  | Load bản`Production`                                    | Load alias`@champion`                      | Đã đổi ở Plan 2 mục 2.3; MLflow 2.22 deprecate stage                              |
 | 7.6  | Bảng endpoint có`/feedback`                            | `/feedback` để Plan 4                    | Mục 7.6 mô tả trạng thái cuối; bản đồ plan xếp thứ tự                       |
-| 7.6  | "buffer và flush khi đủ 500 record hoặc quá 30 giây" | Thêm**trần 5000 + đếm số bỏ**    | Spec không nói flush hỏng thì làm gì; giữ vô hạn là hết RAM                  |
+| 7.6  | "buffer và flush khi đủ 500 record hoặc quá 30 giây" | Thêm **trần 5000 + đếm số bỏ**  | Spec không nói flush hỏng thì làm gì; giữ vô hạn là hết RAM                  |
 | —   | Không nói thiếu model thì sao                          | Khởi động degraded,`/predict` trả 503  | Lỗ hổng trong spec gốc                                                               |
 
 `mlops-pipeline-design.md` mục 7.5 và 7.6 sẽ được cập nhật theo bảng này khi Plan 3 bắt đầu.
