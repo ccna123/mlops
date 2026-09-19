@@ -14,7 +14,8 @@ WORKDIR /app
 COPY common/pyproject.toml /app/common/pyproject.toml
 RUN mkdir -p /app/common/ml_common \
     && touch /app/common/ml_common/__init__.py \
-    && pip install --no-cache-dir -e /app/common
+    && pip install --no-cache-dir -e /app/common \
+    && pip install --no-cache-dir "mlflow>=2.14,<3"
 
 # Now copy the actual code
 COPY common/ /app/common/

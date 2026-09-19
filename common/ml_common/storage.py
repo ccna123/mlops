@@ -164,6 +164,16 @@ class Storage:
             Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
         )
 
+    def upload_file(self, local_path: str, key: str) -> None:
+        """Uploads a file from disk without reading it into memory first.
+
+        Used for seeding raw data: the source CSV is hundreds of megabytes, and
+        materializing it as a DataFrame just to upload it would not fit.
+        """
+        if not os.path.isfile(local_path):
+            raise FileNotFoundError(f"Local file not found: {local_path}")
+        self._client.upload_file(local_path, self.bucket, key)
+
     def object_etag(self, key: str) -> str:
         """ETag of an object, used as a cheap content fingerprint.
 

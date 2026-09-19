@@ -126,3 +126,19 @@ def test_object_etag_changes_when_content_changes(store):
 def test_object_etag_missing_key_raises(store):
     with pytest.raises(FileNotFoundError):
         store.object_etag("raw/nope/data.parquet")
+
+
+def test_upload_file_puts_the_bytes_on_storage(store, tmp_path):
+    local = tmp_path / "data.parquet"
+    pd.DataFrame({"a": [1, 2, 3]}).to_parquet(local, index=False)
+
+    store.upload_file(str(local), "raw/v1/data.parquet")
+
+    assert store.exists("raw/v1/data.parquet")
+    restored = store.read_parquet("raw/v1/data.parquet")
+    assert list(restored["a"]) == [1, 2, 3]
+
+
+def test_upload_file_missing_local_path_raises(store, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        store.upload_file(str(tmp_path / "nope.parquet"), "raw/v1/data.parquet")
