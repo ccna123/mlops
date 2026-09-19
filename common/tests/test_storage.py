@@ -99,3 +99,46 @@ class TestStorage:
         store.write_json({"version": 1}, "file.json")
         store.write_json({"version": 2}, "file.json")
         assert store.read_json("file.json") == {"version": 2}
+
+
+def test_extracted_key():
+    assert storage.extracted_key("abc123") == "extracted/abc123/data.parquet"
+
+
+def test_validation_report_key():
+    assert storage.validation_report_key("abc123") == "reports/validation/abc123.json"
+
+
+def test_object_etag_changes_when_content_changes(store):
+    first = pd.DataFrame({"a": [1, 2, 3]})
+    second = pd.DataFrame({"a": [9, 9, 9]})
+
+    store.write_parquet(first, "raw/v1/data.parquet")
+    etag_before = store.object_etag("raw/v1/data.parquet")
+
+    store.write_parquet(second, "raw/v1/data.parquet")
+    etag_after = store.object_etag("raw/v1/data.parquet")
+
+    assert etag_before != etag_after
+    assert '"' not in etag_before
+
+
+def test_object_etag_missing_key_raises(store):
+    with pytest.raises(FileNotFoundError):
+        store.object_etag("raw/nope/data.parquet")
+
+
+def test_upload_file_puts_the_bytes_on_storage(store, tmp_path):
+    local = tmp_path / "data.parquet"
+    pd.DataFrame({"a": [1, 2, 3]}).to_parquet(local, index=False)
+
+    store.upload_file(str(local), "raw/v1/data.parquet")
+
+    assert store.exists("raw/v1/data.parquet")
+    restored = store.read_parquet("raw/v1/data.parquet")
+    assert list(restored["a"]) == [1, 2, 3]
+
+
+def test_upload_file_missing_local_path_raises(store, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        store.upload_file(str(tmp_path / "nope.parquet"), "raw/v1/data.parquet")

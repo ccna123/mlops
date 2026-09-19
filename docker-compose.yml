@@ -97,6 +97,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       ML_BUCKET: ${ML_BUCKET}
+      SAMPLE_ROWS: ${SAMPLE_ROWS}
     volumes: &airflow-volumes
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -111,8 +112,18 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-    environment: *airflow-env
-    volumes: *airflow-volumes
+    environment:
+      <<: *airflow-env
+      _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-docker==3.14.0
+    # LocalExecutor runs tasks inside the scheduler, so this is the only service
+    # that needs the Docker socket. The leading double slash is required on
+    # Windows: without it the path is rewritten to a Windows path and the mount
+    # silently points at nothing.
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - //var/run/docker.sock:/var/run/docker.sock
     user: "${AIRFLOW_UID:-50000}:0"
     command: scheduler
     restart: unless-stopped

@@ -43,6 +43,20 @@ def processed_prefix(fingerprint: str) -> str:
     return f"processed/{fingerprint}/"
 
 
+def extracted_key(fingerprint: str) -> str:
+    """Path to the sampled working copy that `extract` writes.
+
+    Separate from `raw/`: raw holds the full dataset as it arrived, while this
+    holds exactly the rows this pipeline run will use, after SAMPLE_ROWS.
+    """
+    return f"extracted/{fingerprint}/data.parquet"
+
+
+def validation_report_key(fingerprint: str) -> str:
+    """Path to the counts `validate` produces for one fingerprint."""
+    return f"reports/validation/{fingerprint}.json"
+
+
 def baseline_key(model_name: str, version: int | str) -> str:
     """Statistical profile of the train set, tied to a specific model version."""
     return f"monitoring-baseline/{model_name}/{version}/profile.json"
@@ -149,6 +163,30 @@ class Storage:
         self._client.put_object(
             Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
         )
+
+    def upload_file(self, local_path: str, key: str) -> None:
+        """Uploads a file from disk without reading it into memory first.
+
+        Used for seeding raw data: the source CSV is hundreds of megabytes, and
+        materializing it as a DataFrame just to upload it would not fit.
+        """
+        if not os.path.isfile(local_path):
+            raise FileNotFoundError(f"Local file not found: {local_path}")
+        self._client.upload_file(local_path, self.bucket, key)
+
+    def object_etag(self, key: str) -> str:
+        """ETag of an object, used as a cheap content fingerprint.
+
+        S3 quotes the ETag in the response; the quotes are stripped so the
+        value can go straight into a path or a hash.
+        """
+        try:
+            response = self._client.head_object(Bucket=self.bucket, Key=key)
+        except ClientError as err:
+            if err.response["Error"]["Code"] in ("NoSuchKey", "404", "NoSuchBucket"):
+                raise FileNotFoundError(f"Key not found: {key}") from err
+            raise
+        return response["ETag"].strip('"')
 
     def exists(self, key: str) -> bool:
         """True if the key exists."""

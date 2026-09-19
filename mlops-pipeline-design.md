@@ -147,7 +147,7 @@ Hai bài toán này đo hai thứ khác nhau (giá bán vs tốc độ bán) nê
 
 **Cột `list_price` cần một quyết định riêng, không phải leakage.** Tại thời điểm dự đoán, giá rao bán đã biết — dùng nó là hợp lệ. Nhưng `sale_price ≈ list_price` với sai số nhỏ, nên đưa vào là bài toán trở nên tầm thường: model sẽ chỉ học một hệ số nhân và R² gần 1 mà không học được gì từ các feature còn lại. Giai đoạn 1 **loại `list_price` khỏi feature** của model regression để bài toán có nội dung thật; giữ lại cho model classification vì tương quan giữa giá rao và tốc độ bán là tín hiệu hữu ích chứ không tầm thường.
 
-Với regression, train trên `log(sale_price)` để giảm skew, nhưng **metric báo cáo phải quy về thang gốc** (RMSE tính bằng đô la) — nếu không thì con số trên dashboard không đọc được, và so sánh champion/challenger cũng sai.
+Với regression, **không biến đổi target** — train thẳng trên `sale_price` và báo cáo metric bằng đô la. Bản v2 của tài liệu này yêu cầu train trên `log(sale_price)` để giảm skew; đo trên 48.000 dòng thật ở Plan 2 cho thấy `expm1` khuếch đại sai số ở đuôi giá cao tới mức Ridge ra R² âm và dự đoán 28 triệu đô, trong khi GBM không đổi. Xem mục 2.6 của `docs/superpowers/specs/2026-09-19-plan2-batch-pipeline-design.md`.
 
 ---
 

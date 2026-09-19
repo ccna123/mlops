@@ -1,0 +1,92 @@
+"""Rules for the validate stage: measure the data, block only what is unusable.
+
+This dataset is dirty on purpose — eight documented kinds of mess are the
+exercise, not an incident. So validation counts everything and reports it, but
+fails the run only when the data cannot be trained on at all.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from . import schema
+
+MAX_TARGET_MISSING_RATE = 0.5
+
+
+def _missing_rate(series: pd.Series) -> float:
+    if len(series) == 0:
+        return 0.0
+    return float(series.isna().mean())
+
+
+def _out_of_bounds_count(series: pd.Series, spec: schema.ColumnSpec) -> int:
+    """Counts values outside the schema bounds, ignoring anything non-numeric.
+
+    Values that cannot be read as numbers are not counted here: they are missing
+    or mistyped, which the missing rate and the parsers already cover.
+    """
+    if spec.min_value is None and spec.max_value is None:
+        return 0
+    numeric = pd.to_numeric(series, errors="coerce")
+    outside = pd.Series(False, index=series.index)
+    if spec.min_value is not None:
+        outside |= numeric < spec.min_value
+    if spec.max_value is not None:
+        outside |= numeric > spec.max_value
+    return int(outside.fillna(False).sum())
+
+
+def validate_dataframe(df: pd.DataFrame, task_type: str) -> dict:
+    """Measures a raw dataset and decides whether the run may continue.
+
+    Args:
+        df: the raw DataFrame, straight from `extracted/`.
+        task_type: "regression" or "classification".
+
+    Returns:
+        A JSON-serializable report. `ok` is False when `fatal` is non-empty.
+    """
+    if task_type not in schema.TASK_TYPES:
+        raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")
+
+    fatal: list[str] = []
+    row_count = int(len(df))
+
+    missing_columns = sorted(set(schema.COLUMNS) - set(df.columns))
+    if missing_columns:
+        fatal.append(f"missing columns required by the schema: {', '.join(missing_columns)}")
+
+    if row_count == 0:
+        fatal.append("the dataset has no rows")
+
+    target = schema.target_column(task_type)
+    if target in df.columns and row_count > 0:
+        target_missing = _missing_rate(df[target])
+        if target_missing > MAX_TARGET_MISSING_RATE:
+            fatal.append(
+                f"target {target!r} is missing in {target_missing:.1%} of rows, "
+                f"above the {MAX_TARGET_MISSING_RATE:.0%} limit"
+            )
+
+    columns: dict[str, dict] = {}
+    for column_name, spec in schema.COLUMNS.items():
+        if column_name not in df.columns:
+            continue
+        series = df[column_name]
+        columns[column_name] = {
+            "missing_rate": round(_missing_rate(series), 6),
+            "out_of_bounds": _out_of_bounds_count(series, spec),
+        }
+
+    duplicate_rows = 0
+    if schema.ID_COLUMN in df.columns:
+        duplicate_rows = int(df[schema.ID_COLUMN].duplicated().sum())
+
+    return {
+        "ok": not fatal,
+        "fatal": fatal,
+        "row_count": row_count,
+        "duplicate_rows": duplicate_rows,
+        "columns": columns,
+    }
