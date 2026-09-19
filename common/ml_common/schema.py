@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 
 TARGET_REGRESSION = "sale_price"
-TARGET_CLASSIFICATION = "sold_within_30_days"
+TARGET_CLASSIFICATION = "needs_renovation"
 ID_COLUMN = "property_id"
 
 TASK_TYPES = ("regression", "classification")
@@ -86,9 +86,10 @@ _EXCLUDED: dict[str, frozenset[str]] = {
     "classification": frozenset(
         {
             ID_COLUMN,
-            TARGET_CLASSIFICATION,
-            "days_on_market",  # sold_within_30_days is derived directly from this
+            "condition",  # the column needs_renovation is derived from
             "sale_price",  # only known after the sale
+            "days_on_market",  # only known after the sale
+            "sold_within_30_days",  # only known after the sale
             "price_category",  # derived from sale_price
         }
     ),

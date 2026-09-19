@@ -45,7 +45,7 @@ def test_drop_rows_missing_target_regression():
 
 
 def test_drop_rows_missing_target_classification():
-    df = pd.DataFrame({"sold_within_30_days": [True, None, False]})
+    df = pd.DataFrame({"needs_renovation": [True, None, False]})
     result, dropped_count = rowops.drop_rows_missing_target(df, "classification")
     assert len(result) == 2
     assert dropped_count == 1
