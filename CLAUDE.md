@@ -19,10 +19,10 @@ nhau, đó là bug của một trong hai, phải báo chứ không tự chọn b
 ### 1. Thao tác theo cột và thao tác theo dòng phải tách biệt
 
 - `common/ml_common/cleaning.py` — transformer **theo cột**, nằm trong sklearn
-  `Pipeline`, được đóng gói cùng model vào MLflow. Chạy ở cả `preprocess`
+  `Pipeline`, được đóng gói cùng model vào MLflow. Chạy ở cả `prepare_dataset_for_train`
   (2 triệu dòng) lẫn serving (một record).
 - `common/ml_common/rowops.py` — thao tác **theo dòng** (dedup, loại dòng hỏng).
-  Chỉ được gọi từ stage `preprocess`.
+  Chỉ được gọi từ stage `prepare_dataset_for_train`.
 
 Một transformer xoá dòng lọt vào `Pipeline` sẽ chạy đúng suốt lúc train rồi làm
 serving sập khi `/predict` gọi nó với một record: DataFrame trả về rỗng.

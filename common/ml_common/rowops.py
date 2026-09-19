@@ -1,4 +1,4 @@
-"""ROW-wise operations — only ever called from the `preprocess` stage.
+"""ROW-wise operations — only ever called from the `prepare_dataset_for_train` stage.
 
 This file is deliberately kept separate from `cleaning.py`: the functions
 here drop rows, so they must NEVER be placed in a sklearn Pipeline. Serving
@@ -19,7 +19,7 @@ def drop_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """Drops rows with a duplicate `property_id`, keeping the first one.
 
     Handles dirty type 2 (~0.6% of rows are duplicated). Returns
-    (new df, dropped row count) so the `preprocess` stage can log the count.
+    (new df, dropped row count) so the `prepare_dataset_for_train` stage can log the count.
     """
     row_count_before = len(df)
     result = df.drop_duplicates(subset=[schema.ID_COLUMN], keep="first").reset_index(drop=True)

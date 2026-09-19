@@ -17,7 +17,7 @@
 2. **Tương thích S3 ngay từ đầu.** Dùng MinIO (S3-compatible) thay vì filesystem thường, để code đọc/ghi qua `boto3` không cần sửa khi chuyển sang S3 thật.
 3. **Tách biệt orchestration – tracking – serving – monitoring.** Mỗi thành phần dùng đúng tool chuyên trách, không gộp chung.
 4. **Idempotent & retryable.** Mỗi task chạy lại được mà không gây side-effect sai. Cụ thể: output ghi vào đường dẫn xác định theo input (content-addressed), chạy lại thì ghi đè chính nó hoặc skip nếu đã có.
-5. **Một bản logic duy nhất cho data cleaning.** Logic làm sạch nằm trong package `common/`, được dùng bởi cả stage `preprocess` lẫn service serving. Không bao giờ có hai bản chép tay của cùng một phép biến đổi.
+5. **Một bản logic duy nhất cho data cleaning.** Logic làm sạch nằm trong package `common/`, được dùng bởi cả stage `prepare_dataset_for_train` lẫn service serving. Không bao giờ có hai bản chép tay của cùng một phép biến đổi.
 6. **Pipeline chạy khi người dùng bấm, không tự chạy.** Ngoại lệ duy nhất là `monitoring_dag` — monitoring bản chất là việc liên tục.
 
 ---
@@ -26,48 +26,48 @@
 
 ### 3.1. Frontend (Dashboard / Control Room)
 
-| Thành phần | Lựa chọn | Ghi chú |
-| --- | --- | --- |
-| Ngôn ngữ/nền tảng | ReactJS + TailwindCSS | Bản hiện tại đã build theo hướng này, không phụ thuộc framework |
-| Biểu đồ | Chart.js | Vẽ histogram so sánh phân phối cho Drift Detection |
-| Giao tiếp với backend | `axios` gọi REST API | Xem API contract ở mục 8.3 |
-| State/lưu tạm phía client | `localStorage` | Chỉ dùng cho tiện ích cá nhân (theme, tab đang mở); dữ liệu pipeline thật phải lấy từ backend |
-| Đóng gói/serve | nginx container cho offline | Không cần build step phức tạp |
+| Thành phần                 | Lựa chọn                  | Ghi chú                                                                                                    |
+| ---------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Ngôn ngữ/nền tảng        | ReactJS + TailwindCSS       | Bản hiện tại đã build theo hướng này, không phụ thuộc framework                                  |
+| Biểu đồ                   | Chart.js                    | Vẽ histogram so sánh phân phối cho Drift Detection                                                      |
+| Giao tiếp với backend      | `axios` gọi REST API     | Xem API contract ở mục 8.3                                                                                |
+| State/lưu tạm phía client | `localStorage`            | Chỉ dùng cho tiện ích cá nhân (theme, tab đang mở); dữ liệu pipeline thật phải lấy từ backend |
+| Đóng gói/serve            | nginx container cho offline | Không cần build step phức tạp                                                                           |
 
 ### 3.2. Backend & hạ tầng
 
-| Vai trò | Công nghệ | Ghi chú |
-| --- | --- | --- |
-| API layer cho Dashboard | FastAPI (Python) — `services/api/` | Đứng giữa Dashboard và Airflow/MLflow/MinIO, trả JSON, xử lý auth |
-| Orchestration | Apache Airflow (LocalExecutor) | Điều phối các stage, expose REST API cho API layer gọi |
-| Chạy từng stage | Docker container riêng (`DockerOperator`) | Mỗi stage 1 image, dễ migrate sang SageMaker Processing/Training Job |
-| Logic ML dùng chung | Package `common/` (cài `pip install -e`) | Schema, transformer, storage wrapper, profiling — xem mục 7.1 |
-| Object storage | MinIO (S3-compatible) | Raw/processed data, artifacts, inference log, report |
-| Experiment tracking & Model Registry | MLflow (self-host, Postgres làm backend store) | API để API layer đọc/ghi model version |
-| Model serving | FastAPI + Uvicorn — `services/serving/` | Load model từ MLflow Registry, expose `/predict`, `/feedback`, `/reload` |
-| Sinh traffic mô phỏng | AI agent nghiệp vụ BĐS — `services/agent/` | Bắn request `/predict` và trả ground truth trễ qua `/feedback`; có tham số `drift_scenario` |
-| Monitoring / Drift | Evidently AI | So inference log với baseline profile của model đang Production |
-| Metadata DB | PostgreSQL | **Hai database tách biệt** trên cùng instance: `airflow` và `mlflow` |
-| Auth | API key qua FastAPI | Chưa cần nếu chỉ chạy local 1 người dùng; bắt buộc trước khi expose ra ngoài |
-| Containerize / hạ tầng offline | Docker Compose | Toàn bộ service trong 1 `docker-compose.yml` |
-| Chất lượng code | `pre-commit` (ruff) + `pytest` chạy local | GitHub Actions chỉ bật khi repo đã push lên GitHub — xem mục 7.8 |
+| Vai trò                             | Công nghệ                                     | Ghi chú                                                                                               |
+| ------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| API layer cho Dashboard              | FastAPI (Python) —`services/api/`            | Đứng giữa Dashboard và Airflow/MLflow/MinIO, trả JSON, xử lý auth                               |
+| Orchestration                        | Apache Airflow (LocalExecutor)                  | Điều phối các stage, expose REST API cho API layer gọi                                            |
+| Chạy từng stage                    | Docker container riêng (`DockerOperator`)    | Mỗi stage 1 image, dễ migrate sang SageMaker Processing/Training Job                                 |
+| Logic ML dùng chung                 | Package`common/` (cài `pip install -e`)    | Schema, transformer, storage wrapper, profiling — xem mục 7.1                                        |
+| Object storage                       | MinIO (S3-compatible)                           | Raw/processed data, artifacts, inference log, report                                                   |
+| Experiment tracking & Model Registry | MLflow (self-host, Postgres làm backend store) | API để API layer đọc/ghi model version                                                             |
+| Model serving                        | FastAPI + Uvicorn —`services/serving/`       | Load model từ MLflow Registry, expose`/predict`, `/feedback`, `/reload`                         |
+| Sinh traffic mô phỏng              | AI agent nghiệp vụ BĐS —`services/agent/` | Bắn request`/predict` và trả ground truth trễ qua `/feedback`; có tham số `drift_scenario` |
+| Monitoring / Drift                   | Evidently AI                                    | So inference log với baseline profile của model đang Production                                     |
+| Metadata DB                          | PostgreSQL                                      | **Hai database tách biệt** trên cùng instance: `airflow` và `mlflow`                    |
+| Auth                                 | API key qua FastAPI                             | Chưa cần nếu chỉ chạy local 1 người dùng; bắt buộc trước khi expose ra ngoài              |
+| Containerize / hạ tầng offline     | Docker Compose                                  | Toàn bộ service trong 1`docker-compose.yml`                                                        |
+| Chất lượng code                   | `pre-commit` (ruff) + `pytest` chạy local  | GitHub Actions chỉ bật khi repo đã push lên GitHub — xem mục 7.8                                |
 
 **Không dùng ở giai đoạn 1:** Feature Store (Feast). Lý do ở mục 11.
 
 ### 3.3. Tech stack tương ứng khi migrate lên AWS
 
-| Offline | AWS |
-| --- | --- |
-| FastAPI (API layer riêng) | Giữ nguyên FastAPI, deploy trên ECS/Fargate hoặc Lambda |
-| Airflow (LocalExecutor) | MWAA (Managed Workflows for Apache Airflow) |
-| MinIO | S3 |
-| MLflow self-host | MLflow trên EC2/ECS, hoặc chuyển sang SageMaker Experiments/Model Registry |
-| FastAPI serving + `/reload` | SageMaker Endpoint (update endpoint thay cho `/reload`) |
-| Inference log tự ghi lên MinIO | SageMaker Data Capture |
-| Baseline profile tự tính | SageMaker Model Monitor baseline job |
-| Evidently AI (DAG riêng có schedule) | SageMaker Model Monitor schedule |
-| Docker Compose | ECS/EKS hoặc SageMaker managed containers |
-| PostgreSQL tự host | Aurora |
+| Offline                                | AWS                                                                           |
+| -------------------------------------- | ----------------------------------------------------------------------------- |
+| FastAPI (API layer riêng)             | Giữ nguyên FastAPI, deploy trên ECS/Fargate hoặc Lambda                   |
+| Airflow (LocalExecutor)                | MWAA (Managed Workflows for Apache Airflow)                                   |
+| MinIO                                  | S3                                                                            |
+| MLflow self-host                       | MLflow trên EC2/ECS, hoặc chuyển sang SageMaker Experiments/Model Registry |
+| FastAPI serving +`/reload`           | SageMaker Endpoint (update endpoint thay cho`/reload`)                      |
+| Inference log tự ghi lên MinIO       | SageMaker Data Capture                                                        |
+| Baseline profile tự tính             | SageMaker Model Monitor baseline job                                          |
+| Evidently AI (DAG riêng có schedule) | SageMaker Model Monitor schedule                                              |
+| Docker Compose                         | ECS/EKS hoặc SageMaker managed containers                                    |
+| PostgreSQL tự host                    | Aurora                                                                        |
 
 ---
 
@@ -114,22 +114,23 @@
 ```
 
 **Lưu ý có hai service FastAPI khác nhau**, đừng nhầm làm một:
+
 - `services/api/` — backend của Dashboard, không biết gì về model.
 - `services/serving/` — phục vụ dự đoán, không biết gì về Dashboard.
 
 ### Bảng mapping Offline ↔ AWS
 
-| Vai trò | Offline (giai đoạn 1) | AWS (giai đoạn 2) |
-| --- | --- | --- |
-| Dashboard / UI quản lý | Web app + API layer riêng | Giữ nguyên frontend, API trỏ sang AWS services |
-| Object storage | MinIO | S3 |
-| Orchestration | Airflow (Docker Compose, LocalExecutor) | MWAA (Managed Airflow) |
-| Training | Container riêng (`DockerOperator`) | SageMaker Training Job |
-| Experiment tracking | MLflow (self-host) | MLflow trên EC2/ECS, hoặc SageMaker Experiments |
-| Model registry | MLflow Model Registry | SageMaker Model Registry |
-| Serving | FastAPI + Docker | SageMaker Endpoint |
-| Monitoring | Evidently AI (DAG riêng) | SageMaker Model Monitor |
-| CI/CD trigger | Trigger thủ công từ Dashboard | CodePipeline + EventBridge |
+| Vai trò                 | Offline (giai đoạn 1)                 | AWS (giai đoạn 2)                               |
+| ------------------------ | --------------------------------------- | ------------------------------------------------- |
+| Dashboard / UI quản lý | Web app + API layer riêng              | Giữ nguyên frontend, API trỏ sang AWS services |
+| Object storage           | MinIO                                   | S3                                                |
+| Orchestration            | Airflow (Docker Compose, LocalExecutor) | MWAA (Managed Airflow)                            |
+| Training                 | Container riêng (`DockerOperator`)   | SageMaker Training Job                            |
+| Experiment tracking      | MLflow (self-host)                      | MLflow trên EC2/ECS, hoặc SageMaker Experiments |
+| Model registry           | MLflow Model Registry                   | SageMaker Model Registry                          |
+| Serving                  | FastAPI + Docker                        | SageMaker Endpoint                                |
+| Monitoring               | Evidently AI (DAG riêng)               | SageMaker Model Monitor                           |
+| CI/CD trigger            | Trigger thủ công từ Dashboard        | CodePipeline + EventBridge                        |
 
 ---
 
@@ -137,9 +138,9 @@
 
 Pipeline phục vụ **hai model** trên cùng một nguồn dữ liệu:
 
-| Model | Loại | Target | Metric chính | Feature phải loại bỏ (leakage) |
-| --- | --- | --- | --- | --- |
-| `house_price_regressor` | Regression | `sale_price` | RMSE, MAE, R² | `price_category` |
+| Model                          | Loại                   | Target                  | Metric chính     | Feature phải loại bỏ (leakage)                      |
+| ------------------------------ | ----------------------- | ----------------------- | ----------------- | ------------------------------------------------------ |
+| `house_price_regressor`      | Regression              | `sale_price`          | RMSE, MAE, R²    | `price_category`                                     |
 | `house_sold_fast_classifier` | Classification (binary) | `sold_within_30_days` | F1, AUC, accuracy | `days_on_market`, `sale_price`, `price_category` |
 
 Hai bài toán này đo hai thứ khác nhau (giá bán vs tốc độ bán) nên bổ sung cho nhau. `price_category` không được chọn làm target vì nó suy trực tiếp ra từ `sale_price`, tức là lặp lại bài regression.
@@ -158,16 +159,16 @@ Với regression, train trên `log(sale_price)` để giảm skew, nhưng **metr
 
 **Tham số truyền qua `dag_run.conf`:**
 
-| Tham số | Kiểu | Mô tả |
-| --- | --- | --- |
-| `task_type` | `"regression"` \| `"classification"` | Bắt buộc. Quyết định nhánh nào chạy. |
-| `force_reprocess` | bool, mặc định `false` | Bỏ qua cache, chạy lại `preprocess` từ đầu. |
-| `dataset_version` | string, mặc định `"latest"` | Chọn phiên bản raw data. |
+| Tham số            | Kiểu                                    | Mô tả                                            |
+| ------------------- | ---------------------------------------- | -------------------------------------------------- |
+| `task_type`       | `"regression"` \| `"classification"` | Bắt buộc. Quyết định nhánh nào chạy.       |
+| `force_reprocess` | bool, mặc định`false`               | Bỏ qua cache, chạy lại`prepare_dataset_for_train` từ đầu. |
+| `dataset_version` | string, mặc định`"latest"`          | Chọn phiên bản raw data.                        |
 
 ```
 Task 1: extract         → đọc raw data từ MinIO, ghi parquet
 Task 2: validate        → check schema (common/schema.py), đếm missing/outlier, fail nếu vi phạm nghiêm trọng
-Task 3: preprocess      → cache-aware: tính fingerprint của raw, skip nếu processed/{fingerprint}/ đã tồn tại
+Task 3: prepare_dataset_for_train      → cache-aware: tính fingerprint của raw, skip nếu processed/{fingerprint}/ đã tồn tại
 Task 4: train           → train theo task_type, log Pipeline + params + metrics vào MLflow
 Task 5: evaluate        → hai cổng: threshold sàn + phải hơn model Production (mục 7.5)
 Task 6: [branch]        → pass → register; fail → dừng (không deploy)
@@ -178,7 +179,7 @@ Task 8: deploy          → POST /reload vào serving
 Dependency:
 
 ```
-extract → validate → preprocess → train → evaluate → branch ─┬─ register → deploy
+extract → validate → prepare_dataset_for_train → train → evaluate → branch ─┬─ register → deploy
                                                              └─ stop_no_deploy
 ```
 
@@ -202,19 +203,19 @@ Không tự trigger retrain. Khi mức độ là `high`, Dashboard hiện cảnh
 
 ### 7.1. Package `common/` — nền của cả hệ thống
 
-Đây là thành phần quan trọng nhất về mặt thiết kế. Nó ngăn **training/serving skew**: nếu logic làm sạch bị chép hai bản (một trong `preprocess.py`, một trong `serve/app.py`), chúng sẽ lệch nhau và model sẽ nhận đầu vào khác với lúc train mà không ai phát hiện.
+Đây là thành phần quan trọng nhất về mặt thiết kế. Nó ngăn **training/serving skew**: nếu logic làm sạch bị chép hai bản (một trong `prepare_dataset_for_train.py`, một trong `serve/app.py`), chúng sẽ lệch nhau và model sẽ nhận đầu vào khác với lúc train mà không ai phát hiện.
 
-| Module | Trách nhiệm |
-| --- | --- |
-| `schema.py` | Định nghĩa cột, dtype, ràng buộc hợp lệ (`year_built` ≤ năm hiện tại, `bedrooms` ≥ 0, `zipcode` khớp `^\d{5}$`...), và danh sách cột leakage theo từng bài toán. Dùng bởi cả `validate` lẫn `/predict`. |
-| `parsers.py` | Hàm parse thuần trên **một giá trị đơn lẻ**: `"$450,000"` → float, `has_pool` từ 8 cách biểu diễn, 3 format `listing_date`, zipcode, chuẩn hoá text. Không biết gì về pandas — test được bằng bảng tham số. |
-| `cleaning.py` | Các sklearn transformer áp parser lên DataFrame **theo cột**: `RawRecordCleaner`, `OutlierClipper`, `DateFeatures`. |
-| `rowops.py` | Thao tác **theo dòng**: `drop_duplicates`, `drop_rows_missing_target`. |
-| `features.py` | Dựng `sklearn.Pipeline(transformers + estimator)` theo `task_type`. |
-| `storage.py` | Wrapper `boto3` + convention đường dẫn. **Đây là điểm duy nhất phải sửa khi migrate sang S3.** |
-| `profiling.py` | Tính baseline profile từ một DataFrame. |
+| Module           | Trách nhiệm                                                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema.py`    | Định nghĩa cột, dtype, ràng buộc hợp lệ (`year_built` ≤ năm hiện tại, `bedrooms` ≥ 0, `zipcode` khớp `^\d{5}$`...), và danh sách cột leakage theo từng bài toán. Dùng bởi cả `validate` lẫn `/predict`.       |
+| `parsers.py`   | Hàm parse thuần trên**một giá trị đơn lẻ**: `"$450,000"` → float, `has_pool` từ 8 cách biểu diễn, 3 format `listing_date`, zipcode, chuẩn hoá text. Không biết gì về pandas — test được bằng bảng tham số. |
+| `cleaning.py`  | Các sklearn transformer áp parser lên DataFrame**theo cột**: `RawRecordCleaner`, `OutlierClipper`, `DateFeatures`.                                                                                                                |
+| `rowops.py`    | Thao tác**theo dòng**: `drop_duplicates`, `drop_rows_missing_target`.                                                                                                                                                                 |
+| `features.py`  | Dựng`sklearn.Pipeline(transformers + estimator)` theo `task_type`.                                                                                                                                                                           |
+| `storage.py`   | Wrapper`boto3` + convention đường dẫn. **Đây là điểm duy nhất phải sửa khi migrate sang S3.**                                                                                                                                 |
+| `profiling.py` | Tính baseline profile từ một DataFrame.                                                                                                                                                                                                        |
 
-**Ranh giới giữa `cleaning.py` và `rowops.py` là ràng buộc kiến trúc, không phải sở thích tổ chức file.** Transformer trong `cleaning.py` nằm trong `Pipeline` và được đóng gói cùng model, nên chúng chạy ở cả `preprocess` (2 triệu dòng) lẫn serving (một record). Một transformer xoá dòng sẽ trả về DataFrame rỗng khi `/predict` gọi nó và làm serving sập. Tách thành hai file khiến không ai vô tình import nhầm.
+**Ranh giới giữa `cleaning.py` và `rowops.py` là ràng buộc kiến trúc, không phải sở thích tổ chức file.** Transformer trong `cleaning.py` nằm trong `Pipeline` và được đóng gói cùng model, nên chúng chạy ở cả `prepare_dataset_for_train` (2 triệu dòng) lẫn serving (một record). Một transformer xoá dòng sẽ trả về DataFrame rỗng khi `/predict` gọi nó và làm serving sập. Tách thành hai file khiến không ai vô tình import nhầm.
 
 Cài bằng `pip install -e common/` vào image `stages/base/` và image serving. `train.py` log nguyên `Pipeline` vào MLflow qua `mlflow.sklearn.log_model` → model trong Registry tự chứa toàn bộ logic clean, và `/predict` nhận record **thô** (đúng như dữ liệu người dùng thật có trong tay).
 
@@ -247,9 +248,9 @@ s3://ml-pipeline/
 
 Code dùng `boto3` với `endpoint_url` trỏ vào MinIO; khi migrate chỉ đổi endpoint sang S3 thật.
 
-### 7.4. Cache của `preprocess`
+### 7.4. Cache của `prepare_dataset_for_train`
 
-`preprocess` tính fingerprint của raw data (hash nội dung hoặc `dataset_version` + etag của object) và ghi ra `processed/{fingerprint}/`. Đầu task kiểm tra: nếu prefix đó đã tồn tại và đủ file thì skip.
+`prepare_dataset_for_train` tính fingerprint của raw data (hash nội dung hoặc `dataset_version` + etag của object) và ghi ra `processed/{fingerprint}/`. Đầu task kiểm tra: nếu prefix đó đã tồn tại và đủ file thì skip.
 
 Lý do: mỗi lần đổi `task_type` để thử model khác, ba stage đầu sẽ cày lại 2 triệu dòng dù dữ liệu không đổi — đó là phần tốn thời gian nhất của cả pipeline. Có cache thì lần chạy thứ hai nhảy thẳng vào `train`.
 
@@ -276,12 +277,12 @@ Con số threshold ở trên là điểm khởi đầu, sẽ hiệu chỉnh sau 
 
 Image serving **không chứa model**. Lúc khởi động nó load bản `Production` mới nhất của cả hai model từ MLflow Registry vào bộ nhớ.
 
-| Endpoint | Mô tả |
-| --- | --- |
+| Endpoint                  | Mô tả                                                                                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /predict/{model}` | `model` ∈ `regression` \| `classification`. Nhận record **thô** (chưa clean). Trả prediction + `request_id` + `model_version`. Ghi vào inference log. |
-| `POST /feedback` | Nhận `{request_id, actual_value}` từ agent. Ghi vào `ground-truth/`. |
-| `POST /reload` | Tải lại bản Production mới nhất và swap in-memory. Task `deploy` gọi endpoint này. |
-| `GET /health` | Model nào đang load, version bao nhiêu. |
+| `POST /feedback`        | Nhận`{request_id, actual_value}` từ agent. Ghi vào `ground-truth/`.                                                                                                  |
+| `POST /reload`          | Tải lại bản Production mới nhất và swap in-memory. Task`deploy` gọi endpoint này.                                                                                 |
+| `GET /health`           | Model nào đang load, version bao nhiêu.                                                                                                                                  |
 
 Một container duy nhất phục vụ cả hai model.
 
@@ -297,12 +298,12 @@ Sinh traffic thật cho serving, thay cho việc giả lập drift bằng cách 
 - Sau N ngày mô phỏng, báo kết quả thực tế về `POST /feedback` (giá bán thật, hoặc có bán trong 30 ngày không) — đây là nguồn ground truth, join với inference log qua `request_id`.
 - **Tham số `drift_scenario`** — bắt buộc phải có:
 
-| Scenario | Mô phỏng |
-| --- | --- |
-| `none` | Cùng phân phối với tập train — dùng để kiểm tra false positive |
-| `price_inflation` | Đẩy mặt bằng giá lên ~20% |
-| `market_shift` | Đổi tỉ lệ `city`, dồn giao dịch về thành phố khác |
-| `new_segment` | Xuất hiện `property_type` model chưa từng thấy |
+| Scenario            | Mô phỏng                                                               |
+| ------------------- | ------------------------------------------------------------------------ |
+| `none`            | Cùng phân phối với tập train — dùng để kiểm tra false positive |
+| `price_inflation` | Đẩy mặt bằng giá lên ~20%                                          |
+| `market_shift`    | Đổi tỉ lệ`city`, dồn giao dịch về thành phố khác             |
+| `new_segment`     | Xuất hiện`property_type` model chưa từng thấy                     |
 
 Nếu agent chỉ sinh dữ liệu từ đúng phân phối của tập train thì drift sẽ không bao giờ xảy ra, badge lúc nào cũng xanh, và không kiểm chứng được là hệ thống phát hiện đúng. Có scenario thì mới test được cả true positive lẫn false positive.
 
@@ -318,11 +319,11 @@ Hai hệ quả quan trọng: baseline **tự sinh cùng lúc model được regi
 
 `monitoring_dag` so **ba loại drift**, không phải một:
 
-| Loại | So cái gì | Khi nào có | Preset Evidently |
-| --- | --- | --- | --- |
-| **Feature drift** | Phân phối input trong log vs baseline profile | Ngay lập tức | `DataDriftPreset` |
-| **Prediction drift** | Phân phối output `/predict` vs phân phối prediction lúc train | Ngay lập tức | `TargetDriftPreset` trên cột prediction |
-| **Performance drift** | Prediction vs giá bán thật (join `request_id`) | Chỉ khi có ground truth | Metric hồi quy/phân loại trên cửa sổ |
+| Loại                       | So cái gì                                                         | Khi nào có              | Preset Evidently                            |
+| --------------------------- | ------------------------------------------------------------------- | ------------------------- | ------------------------------------------- |
+| **Feature drift**     | Phân phối input trong log vs baseline profile                     | Ngay lập tức            | `DataDriftPreset`                         |
+| **Prediction drift**  | Phân phối output`/predict` vs phân phối prediction lúc train | Ngay lập tức            | `TargetDriftPreset` trên cột prediction |
+| **Performance drift** | Prediction vs giá bán thật (join`request_id`)                  | Chỉ khi có ground truth | Metric hồi quy/phân loại trên cửa sổ  |
 
 Phân biệt ba loại này là phần đáng học nhất của cả dự án. Feature drift và prediction drift đo được ngay vì không cần nhãn. Performance drift mới là thứ thực sự quan trọng, nhưng nó **luôn đến trễ** — lúc agent hỏi giá một căn nhà, chưa ai biết nó bán được bao nhiêu.
 
@@ -343,7 +344,7 @@ Output: report HTML + JSON lên `reports/`, kèm mức độ tổng hợp `ok` /
 `tests/` tập trung vào `common/`, vì đó là chỗ bug sẽ âm thầm làm hỏng cả model lẫn serving.
 
 - Mỗi loại dirty trong dataset (8 loại liệt kê ở `house_pricing_README.md`) có ít nhất một test khẳng định transformer xử lý đúng: `"$450,000"` → `450000.0`, `"Y"`/`"True"`/`"1"` → `True`, `"NEW YORK"`/`"new_york"`/`" New York "` → `"new york"`, cả 3 format ngày parse được, zipcode 4 số bị bắt.
-- Test round-trip: cùng một record thô đi qua `preprocess` và đi qua `Pipeline` trong model phải ra kết quả giống nhau.
+- Test round-trip: cùng một record thô đi qua `prepare_dataset_for_train` và đi qua `Pipeline` trong model phải ra kết quả giống nhau.
 - Chạy bằng `pytest`, kèm `pre-commit` (ruff lint + format).
 - GitHub Actions chỉ cấu hình khi repo đã push lên GitHub — nó là dịch vụ cloud, không chạy offline được.
 
@@ -357,14 +358,14 @@ Bản frontend hiện tại: [MLOps Control Room](https://claude.ai/artifact/Tam
 
 ### 8.1. Các màn hình
 
-| Màn hình | Chức năng | Thay đổi so với bản frontend hiện tại |
-| --- | --- | --- |
-| Tổng quan | Chọn loại model (regression/classification) → trigger chạy pipeline; xem trạng thái + log gần đây từng stage | **Thêm dropdown chọn `task_type`** và checkbox "Xử lý lại dữ liệu từ đầu" |
-| Stages & Logs | Lọc log theo stage / level / từ khoá | Đọc log thật từ Airflow |
-| Dữ liệu | Upload CSV, xem preview + thống kê từng cột | Parse bằng pandas ở backend, không parse trong JS |
-| Models | Xem model version (tên, version, metric, stage), promote lên production | **Cột metric động theo loại model**: rmse/mae/r2 cho regression, f1/auc/accuracy cho classification — không hardcode accuracy/f1 nữa |
-| Drift Detection | Hiển thị report Evidently: 3 loại drift, badge ok/warning/high, histogram | Đọc report có sẵn, không tính drift bằng JS; **thêm nút "Retrain ngay"** khi mức độ là `high` |
-| ~~Feature Store~~ | Bỏ khỏi giai đoạn 1 | Xem mục 11 |
+| Màn hình         | Chức năng                                                                                                            | Thay đổi so với bản frontend hiện tại                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tổng quan         | Chọn loại model (regression/classification) → trigger chạy pipeline; xem trạng thái + log gần đây từng stage | **Thêm dropdown chọn `task_type`** và checkbox "Xử lý lại dữ liệu từ đầu"                                                      |
+| Stages & Logs      | Lọc log theo stage / level / từ khoá                                                                                | Đọc log thật từ Airflow                                                                                                                       |
+| Dữ liệu          | Upload CSV, xem preview + thống kê từng cột                                                                        | Parse bằng pandas ở backend, không parse trong JS                                                                                              |
+| Models             | Xem model version (tên, version, metric, stage), promote lên production                                              | **Cột metric động theo loại model**: rmse/mae/r2 cho regression, f1/auc/accuracy cho classification — không hardcode accuracy/f1 nữa |
+| Drift Detection    | Hiển thị report Evidently: 3 loại drift, badge ok/warning/high, histogram                                           | Đọc report có sẵn, không tính drift bằng JS;**thêm nút "Retrain ngay"** khi mức độ là `high`                                 |
+| ~~Feature Store~~ | Bỏ khỏi giai đoạn 1                                                                                                | Xem mục 11                                                                                                                                       |
 
 ### 8.2. Vì sao cần API layer
 
@@ -376,19 +377,19 @@ Gọi thẳng Airflow/MLflow REST API từ browser không dùng được: creden
 
 Đây là hợp đồng frontend gọi vào. Cột cuối là thứ API layer gọi tiếp ở phía sau.
 
-| Method | Endpoint | Mô tả | Gọi xuống |
-| --- | --- | --- | --- |
-| `POST` | `/api/pipeline/run` | Body: `{task_type, force_reprocess}`. Trả `run_id` | Airflow `POST /dags/ml_pipeline/dagRuns` |
-| `GET` | `/api/pipeline/runs` | Danh sách run gần đây + trạng thái | Airflow REST |
-| `GET` | `/api/pipeline/runs/{run_id}` | Trạng thái từng task của một run | Airflow REST |
-| `GET` | `/api/pipeline/runs/{run_id}/logs` | Query: `stage`, `level`, `q` | Airflow task log |
-| `POST` | `/api/data/upload` | Upload CSV → MinIO `raw/`, trả `dataset_version` | MinIO |
-| `GET` | `/api/data/{dataset_version}/preview` | Preview + thống kê cột (pandas ở backend) | MinIO |
-| `GET` | `/api/models` | Danh sách registered model + version + metric + stage | MLflow REST |
-| `POST` | `/api/models/{name}/{version}/promote` | Chuyển version sang Production | MLflow REST |
-| `GET` | `/api/drift/latest` | Report mới nhất: mức độ, 3 loại drift, dữ liệu histogram | MinIO `reports/` |
-| `GET` | `/api/drift/history` | Diễn biến mức độ drift theo thời gian | MinIO `reports/` |
-| `GET` | `/api/health` | Trạng thái các service phụ thuộc | Tất cả |
+| Method   | Endpoint                                 | Mô tả                                                          | Gọi xuống                               |
+| -------- | ---------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------- |
+| `POST` | `/api/pipeline/run`                    | Body:`{task_type, force_reprocess}`. Trả `run_id`           | Airflow`POST /dags/ml_pipeline/dagRuns` |
+| `GET`  | `/api/pipeline/runs`                   | Danh sách run gần đây + trạng thái                         | Airflow REST                              |
+| `GET`  | `/api/pipeline/runs/{run_id}`          | Trạng thái từng task của một run                            | Airflow REST                              |
+| `GET`  | `/api/pipeline/runs/{run_id}/logs`     | Query:`stage`, `level`, `q`                                | Airflow task log                          |
+| `POST` | `/api/data/upload`                     | Upload CSV → MinIO`raw/`, trả `dataset_version`            | MinIO                                     |
+| `GET`  | `/api/data/{dataset_version}/preview`  | Preview + thống kê cột (pandas ở backend)                    | MinIO                                     |
+| `GET`  | `/api/models`                          | Danh sách registered model + version + metric + stage           | MLflow REST                               |
+| `POST` | `/api/models/{name}/{version}/promote` | Chuyển version sang Production                                  | MLflow REST                               |
+| `GET`  | `/api/drift/latest`                    | Report mới nhất: mức độ, 3 loại drift, dữ liệu histogram | MinIO`reports/`                         |
+| `GET`  | `/api/drift/history`                   | Diễn biến mức độ drift theo thời gian                      | MinIO`reports/`                         |
+| `GET`  | `/api/health`                          | Trạng thái các service phụ thuộc                            | Tất cả                                  |
 
 ---
 
@@ -402,7 +403,7 @@ project/
 │       ├── schema.py
 │       ├── parsers.py             # parse giá trị đơn lẻ
 │       ├── cleaning.py            # transformer theo CỘT (vào Pipeline)
-│       ├── rowops.py              # thao tác theo DÒNG (chỉ preprocess)
+│       ├── rowops.py              # thao tác theo DÒNG (chỉ prepare_dataset_for_train)
 │       ├── features.py
 │       ├── storage.py
 │       └── profiling.py
@@ -413,7 +414,7 @@ project/
 │   ├── base/Dockerfile           # python + pandas/sklearn + common/
 │   ├── extract/
 │   ├── validate/
-│   ├── preprocess/
+│   ├── prepare_dataset_for_train/
 │   ├── train/
 │   ├── evaluate/
 │   ├── register/                 # promote + sinh baseline profile
@@ -435,24 +436,24 @@ project/
 
 ## 10. Lộ trình triển khai
 
-| Bước | Nội dung |
-| --- | --- |
-| 1 | Setup Docker Compose: Airflow + Postgres (2 DB) + MinIO + MLflow. Xác nhận 4 service nói chuyện được với nhau. |
-| 2 | Viết `common/`: `schema.py`, `cleaning.py`, `storage.py` + test cho cả 8 loại dirty. **Làm trước mọi stage** — các stage chỉ là lớp vỏ mỏng quanh package này. |
-| 3 | `stages/base/` + `extract`, `validate`, `preprocess` (có cache theo fingerprint). Test chạy tay từng container. |
-| 4 | `train.py` cho regression, log `Pipeline` vào MLflow. Kiểm tra model load lại được và predict từ record thô. |
-| 5 | `evaluate.py` (2 cổng) + `register.py` (promote + sinh baseline profile). |
-| 6 | `services/serving/`: `/predict`, `/reload`, `/health` + ghi inference log theo batch. |
-| 7 | Ghép thành `ml_pipeline` DAG, test full run cho regression. |
-| 8 | Thêm nhánh classification (`sold_within_30_days`), test chạy cả hai `task_type`. |
-| 9 | `services/agent/`: sinh traffic + `drift_scenario`. Mồi inference log từ dữ liệu theo `listing_date`. |
-| 10 | `/feedback` + ghi ground truth; `monitor.py` với Evidently; `monitoring_dag`. Kiểm chứng: chạy `drift_scenario=none` phải ra `ok`, chạy `price_inflation` phải ra `high`. |
-| 11 | `services/api/` theo contract mục 8.3. |
-| 12 | Nối `dashboard/` vào API layer, bỏ toàn bộ phần mock trong JS. |
-| 13 | (Nâng cao) Auto-retrain khi drift vượt ngưỡng, kèm cooldown. |
-| 14 | **Migrate**: MinIO → S3 (sửa `common/storage.py`), Airflow → MWAA, serving → SageMaker Endpoint, inference log → Data Capture, Evidently → Model Monitor. |
+| Bước | Nội dung                                                                                                                                                                                      |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1      | Setup Docker Compose: Airflow + Postgres (2 DB) + MinIO + MLflow. Xác nhận 4 service nói chuyện được với nhau.                                                                         |
+| 2      | Viết`common/`: `schema.py`, `cleaning.py`, `storage.py` + test cho cả 8 loại dirty. **Làm trước mọi stage** — các stage chỉ là lớp vỏ mỏng quanh package này.     |
+| 3      | `stages/base/` + `extract`, `validate`, `prepare_dataset_for_train` (có cache theo fingerprint). Test chạy tay từng container.                                                                     |
+| 4      | `train.py` cho regression, log `Pipeline` vào MLflow. Kiểm tra model load lại được và predict từ record thô.                                                                      |
+| 5      | `evaluate.py` (2 cổng) + `register.py` (promote + sinh baseline profile).                                                                                                                 |
+| 6      | `services/serving/`: `/predict`, `/reload`, `/health` + ghi inference log theo batch.                                                                                                  |
+| 7      | Ghép thành`ml_pipeline` DAG, test full run cho regression.                                                                                                                                 |
+| 8      | Thêm nhánh classification (`sold_within_30_days`), test chạy cả hai `task_type`.                                                                                                       |
+| 9      | `services/agent/`: sinh traffic + `drift_scenario`. Mồi inference log từ dữ liệu theo `listing_date`.                                                                                |
+| 10     | `/feedback` + ghi ground truth; `monitor.py` với Evidently; `monitoring_dag`. Kiểm chứng: chạy `drift_scenario=none` phải ra `ok`, chạy `price_inflation` phải ra `high`. |
+| 11     | `services/api/` theo contract mục 8.3.                                                                                                                                                      |
+| 12     | Nối`dashboard/` vào API layer, bỏ toàn bộ phần mock trong JS.                                                                                                                          |
+| 13     | (Nâng cao) Auto-retrain khi drift vượt ngưỡng, kèm cooldown.                                                                                                                             |
+| 14     | **Migrate**: MinIO → S3 (sửa `common/storage.py`), Airflow → MWAA, serving → SageMaker Endpoint, inference log → Data Capture, Evidently → Model Monitor.                        |
 
-Bước 2 đứng trước tất cả các stage là có chủ ý: nếu viết `preprocess.py` trước rồi sau đó mới tách ra `common/`, thì khả năng cao logic sẽ bị chép sang serving trước khi kịp tách.
+Bước 2 đứng trước tất cả các stage là có chủ ý: nếu viết `prepare_dataset_for_train.py` trước rồi sau đó mới tách ra `common/`, thì khả năng cao logic sẽ bị chép sang serving trước khi kịp tách.
 
 ---
 
@@ -460,39 +461,39 @@ Bước 2 đứng trước tất cả các stage là có chủ ý: nếu viết 
 
 **Feature Store (Feast).** Ở v1 nó có mặt trong tech stack và trong danh sách màn hình dashboard, nhưng không xuất hiện trong DAG, cấu trúc thư mục hay lộ trình — tức là chưa từng được thiết kế thật. Feast kéo theo một registry Postgres riêng và một job materialization, trong khi pipeline batch này chưa có nhu cầu online feature serving: giá trị thực tế của nó ở đây chỉ là một tab trên dashboard.
 
-Cân nhắc lại sau khi pipeline chạy ổn. Khi đó nó sẽ đứng giữa `preprocess` và `train`, và map sang SageMaker Feature Store lúc migrate.
+Cân nhắc lại sau khi pipeline chạy ổn. Khi đó nó sẽ đứng giữa `prepare_dataset_for_train` và `train`, và map sang SageMaker Feature Store lúc migrate.
 
 ---
 
 ## 12. Thay đổi so với phiên bản 1
 
-| Hạng mục | v1 | v2 |
-| --- | --- | --- |
-| Bài toán ML | Chưa chốt | 2 model: regression `sale_price` + classification `sold_within_30_days` |
-| Cấu trúc DAG | 1 DAG 8 task | `ml_pipeline` (manual, có `task_type`) + `monitoring_dag` (@hourly) |
-| Lịch chạy | Chưa chốt | Manual từ UI; chỉ `monitoring_dag` tự động |
-| Preprocess | Chạy lại mỗi lần | Cache theo fingerprint của raw data |
-| Logic cleaning | Không nói rõ | Package `common/`, đóng gói vào model qua sklearn Pipeline |
-| `/predict` | Không định nghĩa input | Nhận record thô, model tự clean |
-| Stage `deploy` | Build image + restart container | `POST /reload` vào serving |
-| Drift | "So data mới vs baseline", không rõ nguồn | Inference log từ agent vs baseline profile gắn model version; 3 loại drift |
-| Ground truth | Không có | `POST /feedback`, join qua `request_id` |
-| Baseline | Thư mục rỗng `monitoring-baseline/` | Profile JSON sinh tự động ở stage `register` |
-| Retrain | Câu hỏi mở | Cảnh báo + nút bấm, không tự động |
-| `evaluate` | Threshold cố định | Threshold sàn **và** phải hơn model Production, trên test set cố định |
-| Định dạng data | Không nói | Parquet sau `extract` |
-| Postgres | "Có thể tách DB" | Tách `airflow` / `mlflow` |
-| Feature Store | Trong stack | Cắt khỏi giai đoạn 1 |
-| CI/CD | "GitHub Actions (offline)" | `pre-commit` + `pytest` local; GH Actions khi đã có remote |
-| Cấu trúc thư mục | Thiếu register, common, services, tests, base | Đầy đủ (mục 9) |
-| API dashboard | Liệt kê endpoint của Airflow | Contract riêng của API layer (mục 8.3) |
+| Hạng mục           | v1                                             | v2                                                                                 |
+| -------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Bài toán ML        | Chưa chốt                                    | 2 model: regression`sale_price` + classification `sold_within_30_days`         |
+| Cấu trúc DAG       | 1 DAG 8 task                                   | `ml_pipeline` (manual, có `task_type`) + `monitoring_dag` (@hourly)         |
+| Lịch chạy          | Chưa chốt                                    | Manual từ UI; chỉ`monitoring_dag` tự động                                   |
+| Preprocess           | Chạy lại mỗi lần                           | Cache theo fingerprint của raw data                                               |
+| Logic cleaning       | Không nói rõ                                | Package`common/`, đóng gói vào model qua sklearn Pipeline                    |
+| `/predict`         | Không định nghĩa input                     | Nhận record thô, model tự clean                                                 |
+| Stage`deploy`      | Build image + restart container                | `POST /reload` vào serving                                                      |
+| Drift                | "So data mới vs baseline", không rõ nguồn  | Inference log từ agent vs baseline profile gắn model version; 3 loại drift      |
+| Ground truth         | Không có                                     | `POST /feedback`, join qua `request_id`                                        |
+| Baseline             | Thư mục rỗng`monitoring-baseline/`        | Profile JSON sinh tự động ở stage`register`                                  |
+| Retrain              | Câu hỏi mở                                  | Cảnh báo + nút bấm, không tự động                                          |
+| `evaluate`         | Threshold cố định                           | Threshold sàn**và** phải hơn model Production, trên test set cố định |
+| Định dạng data    | Không nói                                    | Parquet sau`extract`                                                             |
+| Postgres             | "Có thể tách DB"                            | Tách`airflow` / `mlflow`                                                      |
+| Feature Store        | Trong stack                                    | Cắt khỏi giai đoạn 1                                                           |
+| CI/CD                | "GitHub Actions (offline)"                     | `pre-commit` + `pytest` local; GH Actions khi đã có remote                  |
+| Cấu trúc thư mục | Thiếu register, common, services, tests, base | Đầy đủ (mục 9)                                                                |
+| API dashboard        | Liệt kê endpoint của Airflow                | Contract riêng của API layer (mục 8.3)                                          |
 
 ---
 
 ## 13. Câu hỏi còn mở
 
-- [x] Dataset: **House Pricing** (giả lập, ~2 triệu dòng, dirty) — `house_pricing_dirty.csv` + mô tả ở `house_pricing_README.md`.
-- [x] Bài toán, threshold, lịch chạy, chiến lược retrain, kiến trúc API dashboard — đã chốt ở v2.
+- [X] Dataset: **House Pricing** (giả lập, ~2 triệu dòng, dirty) — `house_pricing_dirty.csv` + mô tả ở `house_pricing_README.md`.
+- [X] Bài toán, threshold, lịch chạy, chiến lược retrain, kiến trúc API dashboard — đã chốt ở v2.
 - [ ] Con số threshold cụ thể (R² 0.75 / F1 0.70) cần hiệu chỉnh sau lần train đầu tiên, khi biết baseline thực tế của dataset.
 - [ ] Khi migrate: giữ MLflow song song với SageMaker Registry, hay chuyển hẳn? Quyết ở giai đoạn 2, không ảnh hưởng việc build hiện tại.
 - [ ] Cửa sổ thời gian của `monitoring_dag` (1 giờ gần nhất? 24 giờ trượt?) — phụ thuộc tốc độ agent sinh traffic, chốt sau bước 9.

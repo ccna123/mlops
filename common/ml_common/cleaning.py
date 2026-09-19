@@ -1,7 +1,7 @@
 """Data-cleaning transformers — column-wise ONLY.
 
 The transformers here live inside a sklearn Pipeline and get packaged with
-the model into MLflow, so they run in BOTH places: the `preprocess` stage
+the model into MLflow, so they run in BOTH places: the `prepare_dataset_for_train` stage
 (over 2 million rows) and serving (over a single record).
 
 That means they must NEVER drop rows. Row-wise operations live in

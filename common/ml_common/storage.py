@@ -30,7 +30,7 @@ def raw_key(dataset_version: str) -> str:
 def processed_key(fingerprint: str, split: str) -> str:
     """Path to processed data, named after the raw data's fingerprint.
 
-    The fingerprint acts as a cache key: `preprocess` skips work if this
+    The fingerprint acts as a cache key: `prepare_dataset_for_train` skips work if this
     prefix already exists.
     """
     if split not in _SPLITS:

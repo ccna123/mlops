@@ -6,7 +6,7 @@ Dataset giả lập thị trường bất động sản Mỹ (nhiều thành ph�
 - **Regression**: dự đoán `sale_price` (hoặc `list_price`).
 - **Classification**: dự đoán `price_category` (Low/Medium/High/Luxury) hoặc `sold_within_30_days` (Yes/No).
 
-Dataset **cố tình để dirty** để luyện phần data cleaning trong pipeline (stage `validate`/`preprocess`).
+Dataset **cố tình để dirty** để luyện phần data cleaning trong pipeline (stage `validate`/`prepare_dataset_for_train`).
 
 ---
 
@@ -57,7 +57,7 @@ Dataset **cố tình để dirty** để luyện phần data cleaning trong pipe
 ## 3. Gợi ý dùng trong pipeline (mục 5-7 của tài liệu thiết kế)
 
 - **Task `validate`**: check schema, đếm missing/outlier theo từng cột, log ra Airflow.
-- **Task `preprocess`**: chuẩn hoá `has_pool`, `city`/`state`/`property_type`/`condition` case, parse `list_price`/`sale_price` về float, parse `listing_date` về datetime, xử lý outlier (clip hoặc loại bỏ), xử lý missing (impute median/mode hoặc giữ NaN tuỳ model), drop duplicate theo `property_id`.
+- **Task `prepare_dataset_for_train`**: chuẩn hoá `has_pool`, `city`/`state`/`property_type`/`condition` case, parse `list_price`/`sale_price` về float, parse `listing_date` về datetime, xử lý outlier (clip hoặc loại bỏ), xử lý missing (impute median/mode hoặc giữ NaN tuỳ model), drop duplicate theo `property_id`.
 - **Task `train`**: chọn 1 trong 2 hướng —
   - Regression: target = `sale_price` (hoặc `log(sale_price)` để giảm skew).
   - Classification: target = `price_category` (multi-class) hoặc `sold_within_30_days` (binary).

@@ -8,7 +8,7 @@ mục 9 kèm lý do, và `mlops-pipeline-design.md` sẽ được cập nhật c
 
 ## 1. Phạm vi
 
-**Trong phạm vi:** sáu stage `extract`, `validate`, `preprocess`, `train`,
+**Trong phạm vi:** sáu stage `extract`, `validate`, `prepare_dataset_for_train`, `train`,
 `evaluate`, `register`, cộng DAG `ml_pipeline` chạy nhánh regression.
 
 **Ngoài phạm vi, để lại cho Plan 3:** task `deploy`, `services/serving/`, nhánh
@@ -68,25 +68,39 @@ Công thức đã kiểm chứng, dùng nguyên cho Plan 2:
 - Chỉ `airflow-scheduler` cần socket. `LocalExecutor` chạy task ngay trong
   scheduler, nên webserver không cần và không nên được cấp.
 
-### 2.2. `preprocess` không làm sạch theo cột
+### 2.2. `prepare_dataset_for_train` không làm sạch theo cột
 
 Đây là quyết định phản trực giác nhất của plan, và là hệ quả trực tiếp của ràng
 buộc kiến trúc số 1 và số 3 trong `CLAUDE.md`.
 
-- `preprocess` **chỉ làm thao tác theo dòng**: `rowops.drop_duplicates`,
+- `prepare_dataset_for_train` **chỉ làm thao tác theo dòng**: `rowops.drop_duplicates`,
   `rowops.drop_rows_missing_target`, rồi split train/test.
 - `processed/{fingerprint}/train.parquet` chứa dữ liệu **vẫn thô ở mức cột** —
   vẫn còn `"$450,000"`, vẫn còn `"NEW YORK"`, vẫn còn zipcode 4 số.
 - Parse, chuẩn hoá text, clip outlier, impute, encode đều nằm trong
   `sklearn.Pipeline`, được fit lúc `train` và đóng gói cùng model vào MLflow.
 
-**Lý do:** nếu `preprocess` làm sạch cột rồi lưu, model sẽ học trên dữ liệu đã
+**Lý do:** nếu `prepare_dataset_for_train` làm sạch cột rồi lưu, model sẽ học trên dữ liệu đã
 sạch, trong khi `/predict` ở Plan 3 nhận record thô. Đó chính là training/serving
 skew mà cả thiết kế này dựng lên để tránh. Đặt toàn bộ logic cột trong Pipeline
 khiến model tự chứa cách làm sạch của chính nó.
 
 Cái tên `processed/` vì vậy có nghĩa hẹp: **đã xử lý theo dòng và đã chia tập**,
 không phải "đã làm sạch".
+
+**Về tên gọi.** Stage này ban đầu tên `preprocess`, đổi thành
+`prepare_dataset_for_train` vì `preprocess` gợi ý nó làm sạch dữ liệu — đúng cái
+việc nó không làm, và là hiểu nhầm tốn kém nhất có thể xảy ra ở plan này.
+
+Hai cái tên cũ được giữ nguyên, có chủ ý:
+
+- **`processed/{fp}/`** và `storage.processed_key()` — đã implement và có test từ
+  Plan 1. Đổi tên prefix sẽ phá test đang xanh và làm hỏng dữ liệu đã nằm trên
+  MinIO, đổi lại chỉ được một cái tên đẹp hơn. Mục 2.2 này là chỗ giải thích nó
+  nghĩa là gì.
+- **`force_reprocess`** — tham số trong `dag_run.conf`, và theo spec gốc mục 7.4
+  nó map thẳng sang checkbox "Xử lý lại dữ liệu từ đầu" trên Dashboard ở Plan 5.
+  Với người bấm nút, "xử lý lại" vẫn là mô tả đúng việc sẽ xảy ra.
 
 ### 2.3. Model Registry dùng alias, không dùng stage
 
@@ -135,7 +149,7 @@ biết chuyện gì đã xảy ra.
 ## 3. Luồng chạy
 
 ```
-extract → validate → preprocess → train → evaluate → branch ─┬─ register
+extract → validate → prepare_dataset_for_train → train → evaluate → branch ─┬─ register
                                                              └─ stop_no_deploy
 ```
 
@@ -159,7 +173,7 @@ tóm tắt ra stdout để Airflow đẩy vào XCom.
 | --- | --- | --- | --- |
 | `extract` | `raw/{version}/data.parquet` | `extracted/{fp}/data.parquet` | `fingerprint`, `row_count` |
 | `validate` | `extracted/{fp}/data.parquet` | `reports/validation/{fp}.json` | `ok` |
-| `preprocess` | `extracted/{fp}/data.parquet` | `processed/{fp}/{train,test}.parquet` | `skipped` |
+| `prepare_dataset_for_train` | `extracted/{fp}/data.parquet` | `processed/{fp}/{train,test}.parquet` | `skipped` |
 | `train` | `processed/{fp}/train.parquet` | MLflow run + model | `run_id` |
 | `evaluate` | `processed/{fp}/test.parquet` | metric vào cùng run | `passed`, metrics |
 | `register` | `processed/{fp}/train.parquet` | alias + `monitoring-baseline/{name}/{v}/profile.json` | `version` |
@@ -180,7 +194,7 @@ Fail pipeline đúng ba trường hợp — dữ liệu vô dụng, không phả
 3. Số dòng bằng 0.
 
 Mọi thứ khác — missing rate từng cột, số outlier ngoài bound của schema, zipcode
-sai định dạng, số dòng trùng — chỉ **đếm và ghi vào report**. `preprocess` và
+sai định dạng, số dòng trùng — chỉ **đếm và ghi vào report**. `prepare_dataset_for_train` và
 `Pipeline` dọn chúng ở bước sau.
 
 **Lý do ngưỡng lỏng:** dataset này cố tình dirty; 8 loại lỗi là bài tập chứ không
@@ -188,7 +202,7 @@ phải sự cố. Ngưỡng chặt sẽ chặn mọi lần chạy. Điều này 
 "parser không bao giờ đoán, trả `None` để `validate` đếm được" trong `CLAUDE.md`:
 vai trò của `validate` là **đo và báo cáo**, không phải gác cổng đạo đức dữ liệu.
 
-### 4.3. `preprocess`
+### 4.3. `prepare_dataset_for_train`
 
 Đầu task kiểm tra cache: nếu `processed/{fp}/train.parquet` và `test.parquet` đều
 tồn tại và `force_reprocess` là false thì skip, in `{"skipped": true}` rồi thoát 0.
@@ -270,7 +284,7 @@ stages/
 │   ├── Dockerfile
 │   └── main.py
 ├── validate/
-├── preprocess/
+├── prepare_dataset_for_train/
 ├── train/
 ├── evaluate/
 └── register/
@@ -293,7 +307,7 @@ nằm trong hàm tách rời để test được không cần Docker.
   phải pass.
 - Quyết định hai cổng của `evaluate`: dưới ngưỡng thì chặn; trên ngưỡng nhưng kém
   champion thì chặn; chưa có champion thì chỉ cần qua cổng một.
-- Logic cache của `preprocess`: đủ file thì skip; `force_reprocess` thì không skip.
+- Logic cache của `prepare_dataset_for_train`: đủ file thì skip; `force_reprocess` thì không skip.
 
 **Test round-trip** — spec mục 7.11 yêu cầu, Plan 1 chưa làm được vì chưa có model
 thật: cùng một record thô đi qua Pipeline vừa fit và đi qua Pipeline load lại từ
@@ -311,8 +325,8 @@ sau. Ghép trước rồi debug qua Airflow là cách chậm nhất để tìm l
 - [ ] Sáu image stage build được, mỗi cái chạy tay được bằng `docker run`.
 - [ ] DAG `ml_pipeline` chạy full một lượt với `task_type=regression`, tất cả task
       success tới `register`.
-- [ ] Chạy lần hai với cùng tham số: `preprocess` báo `skipped: true`.
-- [ ] Chạy lần ba với `force_reprocess=true`: `preprocess` chạy lại thật.
+- [ ] Chạy lần hai với cùng tham số: `prepare_dataset_for_train` báo `skipped: true`.
+- [ ] Chạy lần ba với `force_reprocess=true`: `prepare_dataset_for_train` chạy lại thật.
 - [ ] MLflow có registered model `house_price_regressor` với alias `champion` trỏ
       vào một version.
 - [ ] `monitoring-baseline/house_price_regressor/{v}/profile.json` tồn tại trên
@@ -332,7 +346,7 @@ Hai mục áp chót là quan trọng nhất: chúng chứng minh cổng evaluate
 | --- | --- | --- | --- |
 | 7.5 | Registry stage `Production` | Alias `@champion` | Stage đã deprecate ở MLflow 2.22, bỏ hẳn ở MLflow 3 |
 | 7.3 | Chỉ có `raw/` và `processed/` | Thêm `extracted/{fp}/` và `reports/validation/{fp}.json` | `extract` và `validate` cần chỗ ghi đầu ra của chính chúng |
-| 7.4 | `preprocess` tính fingerprint | `extract` tính, truyền xuống qua XCom | `validate` chạy giữa hai stage đó và cũng cần fingerprint để đặt tên report. Tính ở `extract` thì cả ba stage sau dùng chung một giá trị, thay vì `validate` phải tính lại theo cách riêng — hai cách tính là hai chỗ để lệch nhau. |
+| 7.4 | `prepare_dataset_for_train` tính fingerprint | `extract` tính, truyền xuống qua XCom | `validate` chạy giữa hai stage đó và cũng cần fingerprint để đặt tên report. Tính ở `extract` thì cả ba stage sau dùng chung một giá trị, thay vì `validate` phải tính lại theo cách riêng — hai cách tính là hai chỗ để lệch nhau. |
 | 6.1 | `dataset_version` mặc định `"latest"` | Mặc định `"v1"` | `raw_key()` nối thẳng giá trị này vào đường dẫn, nên `"latest"` sẽ trỏ tới `raw/latest/` theo nghĩa đen chứ không phân giải sang version mới nhất. Phân giải `"latest"` cần một cơ chế trỏ mà Plan 2 chưa có việc gì cần tới. |
 | — | Không nói ai đưa CSV lên MinIO | `scripts/seed_raw_data.py` | Lỗ hổng trong spec gốc |
 | — | Không nói ai đọc `SAMPLE_ROWS` | `extract` đọc, và nó nằm trong fingerprint | Lỗ hổng trong spec gốc |

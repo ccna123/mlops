@@ -17,8 +17,8 @@
 - **Python:** `common/` khai báo `requires-python = ">=3.11"`. Máy dev chạy Python 3.13, container chạy Python 3.12 (Airflow 2.10 chưa hỗ trợ 3.13). **Không dùng cú pháp chỉ có ở 3.13+.**
 - **Không bao giờ train ở môi trường này rồi serve ở môi trường khác.** Model pickle bởi scikit-learn phải được load bởi cùng minor version Python và cùng version scikit-learn. Train và serve đều diễn ra trong container Python 3.12. Môi trường local Python 3.13 chỉ dùng để chạy test logic thuần.
 - **Phân biệt thao tác theo dòng và thao tác theo cột.** Đây là ràng buộc kiến trúc quan trọng nhất của plan:
-  - *Thao tác theo cột* (parse, normalize, clip, impute, encode) → nằm trong sklearn `Pipeline`, được đóng gói cùng model, dùng chung giữa `preprocess` và serving.
-  - *Thao tác theo dòng* (drop duplicate, loại bỏ dòng không hợp lệ) → **chỉ** nằm ở stage `preprocess`, tuyệt đối không đưa vào `Pipeline`. Lý do: `/predict` nhận một record đơn lẻ, một transformer xoá dòng sẽ trả về DataFrame rỗng và làm serving sập.
+  - *Thao tác theo cột* (parse, normalize, clip, impute, encode) → nằm trong sklearn `Pipeline`, được đóng gói cùng model, dùng chung giữa `prepare_dataset_for_train` và serving.
+  - *Thao tác theo dòng* (drop duplicate, loại bỏ dòng không hợp lệ) → **chỉ** nằm ở stage `prepare_dataset_for_train`, tuyệt đối không đưa vào `Pipeline`. Lý do: `/predict` nhận một record đơn lẻ, một transformer xoá dòng sẽ trả về DataFrame rỗng và làm serving sập.
 - **Pin version:** `pandas>=2.2,<3`, `scikit-learn>=1.5,<2`, `pyarrow>=16`, `boto3>=1.34`, `numpy>=1.26,<3`.
 - **Chuẩn hoá text:** mọi giá trị categorical được chuẩn hoá về **chữ thường, dấu cách đơn, không khoảng trắng đầu/cuối**, gạch dưới và gạch nối đổi thành dấu cách. `"Multi-Family"`, `"MULTI FAMILY"`, `"multi_family"` đều ra `"multi family"`.
 - **Giá trị thiếu:** dùng `None` / `np.nan`, không dùng chuỗi rỗng hay sentinel như `-1`.
@@ -989,7 +989,7 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.cleaning'`
 """Data-cleaning transformers — column-wise ONLY.
 
 The transformers here live inside a sklearn Pipeline and get packaged with
-the model into MLflow, so they run in BOTH places: the `preprocess` stage
+the model into MLflow, so they run in BOTH places: the `prepare_dataset_for_train` stage
 (over 2 million rows) and serving (over a single record).
 
 That means they must NEVER drop rows. Row-wise operations live in
@@ -1184,7 +1184,7 @@ Expected: FAIL với `ModuleNotFoundError: No module named 'ml_common.rowops'`
 - [ ] **Step 3: Viết `common/ml_common/rowops.py`**
 
 ```python
-"""ROW-wise operations — only ever called from the `preprocess` stage.
+"""ROW-wise operations — only ever called from the `prepare_dataset_for_train` stage.
 
 This file is deliberately kept separate from `cleaning.py`: the functions
 here drop rows, so they must NEVER be placed in a sklearn Pipeline. Serving
@@ -1205,7 +1205,7 @@ def drop_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """Drops rows with a duplicate `property_id`, keeping the first one.
 
     Handles dirty type 2 (~0.6% of rows are duplicated). Returns
-    (new df, dropped row count) so the `preprocess` stage can log the count.
+    (new df, dropped row count) so the `prepare_dataset_for_train` stage can log the count.
     """
     row_count_before = len(df)
     result = df.drop_duplicates(subset=[schema.ID_COLUMN], keep="first").reset_index(drop=True)
@@ -1831,7 +1831,7 @@ def raw_key(dataset_version: str) -> str:
 def processed_key(fingerprint: str, split: str) -> str:
     """Path to processed data, named after the raw data's fingerprint.
 
-    The fingerprint acts as a cache key: `preprocess` skips work if this
+    The fingerprint acts as a cache key: `prepare_dataset_for_train` skips work if this
     prefix already exists.
     """
     if split not in _SPLITS:
@@ -2821,7 +2821,7 @@ Plan 1 hoàn thành khi:
 
 | Plan                | Nội dung                                                                                                                                                       | Phụ thuộc |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| 2 — Batch pipeline | `stages/` extract, validate, preprocess (có cache fingerprint), train, evaluate (2 cổng), register (+ baseline profile); `ml_pipeline` DAG cho regression | Plan 1      |
+| 2 — Batch pipeline | `stages/` extract, validate, prepare_dataset_for_train (có cache fingerprint), train, evaluate (2 cổng), register (+ baseline profile); `ml_pipeline` DAG cho regression | Plan 1      |
 | 3 — Serving        | `services/serving/` với `/predict` `/reload` `/health`, ghi inference log theo batch; task `deploy`; nhánh classification                           | Plan 2      |
 | 4 — Monitoring     | `services/agent/` với `drift_scenario`; `/feedback` + ground truth; `stages/monitor/` với Evidently; `monitoring_dag`                               | Plan 3      |
 | 5 — Dashboard      | `services/api/` theo contract mục 8.3; nối `dashboard/` bỏ mock JS                                                                                       | Plan 4      |
