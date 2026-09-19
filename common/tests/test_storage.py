@@ -99,3 +99,30 @@ class TestStorage:
         store.write_json({"version": 1}, "file.json")
         store.write_json({"version": 2}, "file.json")
         assert store.read_json("file.json") == {"version": 2}
+
+
+def test_extracted_key():
+    assert storage.extracted_key("abc123") == "extracted/abc123/data.parquet"
+
+
+def test_validation_report_key():
+    assert storage.validation_report_key("abc123") == "reports/validation/abc123.json"
+
+
+def test_object_etag_changes_when_content_changes(store):
+    first = pd.DataFrame({"a": [1, 2, 3]})
+    second = pd.DataFrame({"a": [9, 9, 9]})
+
+    store.write_parquet(first, "raw/v1/data.parquet")
+    etag_before = store.object_etag("raw/v1/data.parquet")
+
+    store.write_parquet(second, "raw/v1/data.parquet")
+    etag_after = store.object_etag("raw/v1/data.parquet")
+
+    assert etag_before != etag_after
+    assert '"' not in etag_before
+
+
+def test_object_etag_missing_key_raises(store):
+    with pytest.raises(FileNotFoundError):
+        store.object_etag("raw/nope/data.parquet")
