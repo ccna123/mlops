@@ -285,6 +285,46 @@ def report_key(model_name: str, run_id: str, ext: str) -> str:
     return f"reports/{model_name}/{run_id}/evidently.{ext}"
 
 
+def drift_summary_key(model_name: str, run_id: str) -> str:
+    """Builds the path to the short drift verdict of one monitoring run.
+
+    Args:
+        model_name: the registered model that was monitored.
+        run_id: the monitoring run's identifier.
+
+    Returns:
+        The key, e.g. "reports/house_price_regressor/a1b2c3/summary.json".
+        It sits in the same prefix as the full Evidently report, so one
+        listing finds both, but it stays small enough to read in bulk when
+        drawing a history.
+
+    Example:
+        drift_summary_key("house_price_regressor", "a1b2c3")
+        # -> "reports/house_price_regressor/a1b2c3/summary.json"
+    """
+    return f"reports/{model_name}/{run_id}/summary.json"
+
+
+def drift_latest_key(model_name: str) -> str:
+    """Builds the path to the most recent drift verdict for a model.
+
+    Args:
+        model_name: the registered model.
+
+    Returns:
+        The key, e.g. "reports/house_price_regressor/latest.json". One object
+        per model, overwritten every run.
+
+    Example:
+        drift_latest_key("house_price_regressor")
+        # -> "reports/house_price_regressor/latest.json"
+
+        # Plan 5 answers /api/drift/latest with a single read of this key,
+        # rather than listing the whole prefix and comparing timestamps.
+    """
+    return f"reports/{model_name}/latest.json"
+
+
 class Storage:
     """Reads/writes parquet and json on S3-compatible object storage.
 
