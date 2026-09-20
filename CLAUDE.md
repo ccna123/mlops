@@ -92,18 +92,33 @@ Gọi thẳng `.venv\Scripts\python.exe`, không dùng `Activate.ps1` (vướng 
 policy của PowerShell).
 
 ```powershell
-.venv\Scripts\python.exe -m pytest common/ -v          # toàn bộ test
+.venv\Scripts\python.exe -m pytest common/ services/ -v   # toàn bộ test
 .venv\Scripts\python.exe -m pytest common/tests/test_parsers.py -v
-.venv\Scripts\python.exe -m ruff check common/ --fix
-docker compose ps                                       # trạng thái hạ tầng
+.venv\Scripts\python.exe -m ruff check . --fix            # config o ruff.toml goc repo
+docker compose ps                                          # trạng thái hạ tầng
 powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1
+powershell -ExecutionPolicy Bypass -File scripts\verify_pipeline.ps1
+powershell -ExecutionPolicy Bypass -File scripts\verify_serving.ps1
 ```
 
-Build lại image nền **mỗi khi `common/` thay đổi**, nếu không các stage sẽ dùng
-bản cũ:
+Khi `common/` thay đổi, phải build lại **cả ba tầng, theo đúng thứ tự này**:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build_stage_images.ps1
+docker build -f services/serving/Dockerfile -t ml-serving:latest .
+```
+
+Chỉ build `ml-base` là **chưa đủ**. Sáu stage image và `ml-serving` đều
+`FROM ml-base:latest`, nên tới khi được build lại chúng vẫn giữ nguyên bản
+`ml_common` cũ nướng sẵn bên trong — `docker images` sẽ cho thấy `ml-base` mới
+tinh còn phần còn lại thì không. Triệu chứng: sửa code trong `common/`, test ở
+máy xanh, mà DAG vẫn chạy y như cũ.
+
+Kiểm tra test trong container (`ml-base` không có sẵn pytest nên phải cài vào):
+
+```powershell
+docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3]>=5.0' && python -m pytest /app/common/tests -q"
 ```
 
 ## Giao diện
@@ -147,9 +162,15 @@ Chỉ commit khi được yêu cầu hoặc khi plan nói rõ ở step đó.
 
 ## Trạng thái
 
-Plan 1/5 (Foundation) **đã xong** — 13/13 task, `scripts\verify_foundation.ps1`
-xanh toàn bộ. Postgres, MinIO, MLflow, Airflow chạy được; `ml-base:latest` build
-được; 148 test pass ở cả Python 3.13 (local) lẫn 3.12 (container).
+Ba plan đầu **đã xong**, đều đã merge vào `main`:
 
-Bốn plan còn lại: batch pipeline, serving, monitoring, dashboard — xem bản đồ ở
-cuối file plan. Mỗi plan viết sau khi plan trước chạy xong.
+| Plan | Nội dung | Verify |
+| --- | --- | --- |
+| 1/5 | Foundation — Postgres, MinIO, MLflow, Airflow, `ml-base` | `scripts\verify_foundation.ps1` |
+| 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
+| 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
+
+270 test pass ở Python 3.13 (local); 247 pass + 1 skip ở 3.12 (container).
+
+Hai plan còn lại: **4/5 monitoring & drift**, **5/5 dashboard**. Mỗi plan viết
+sau khi plan trước chạy xong.
