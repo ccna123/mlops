@@ -37,3 +37,4 @@ convention = "google"
 # the directory's name back.
 "services/__init__.py" = ["D104"]
 "services/serving/__init__.py" = ["D104"]
+"services/agent/__init__.py" = ["D104"]
