@@ -33,8 +33,6 @@ convention = "google"
 # A test name is its documentation: test_zipcode_with_four_digits_returns_none
 # already says everything a docstring would repeat.
 "**/tests/*" = ["D"]
-# Namespace packages with no code in them. A docstring here would only say
-# the directory's name back.
+# A namespace package that only groups subpackages. A docstring here would
+# say the directory's name back.
 "services/__init__.py" = ["D104"]
-"services/serving/__init__.py" = ["D104"]
-"services/agent/__init__.py" = ["D104"]
