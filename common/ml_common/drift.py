@@ -20,7 +20,7 @@ import pandas as pd
 from .storage import ground_truth_prefix, inference_log_prefix
 
 
-def days_in_window(end: datetime, window_hours: int) -> list[date]:
+def days_in_window(end: datetime, window_hours: float) -> list[date]:
     """Lists the day partitions a time window touches.
 
     Args:
@@ -73,7 +73,7 @@ def _read_prefix_days(storage, prefix_builder, model_name: str, days: list[date]
     return pd.concat(frames, ignore_index=True)
 
 
-def load_predictions(storage, model_name: str, end: datetime, window_hours: int) -> pd.DataFrame:
+def load_predictions(storage, model_name: str, end: datetime, window_hours: float) -> pd.DataFrame:
     """Reads every prediction served inside the window.
 
     Args:
@@ -84,18 +84,37 @@ def load_predictions(storage, model_name: str, end: datetime, window_hours: int)
 
     Returns:
         The inference log rows - request_id, timestamp, raw_input, prediction,
-        model_name, model_version - concatenated across every part file of
-        every day the window touches. Empty when there was no traffic.
+        model_name, model_version - filtered to `timestamp` inside
+        [end - window_hours, end], across every part file of every day the
+        window touches. Empty when there was no traffic.
+
+        The day-partition read on its own is not enough: the log is
+        partitioned by day, not by hour, so a `window_hours=1` run started
+        minutes after an earlier run on the SAME day would otherwise read
+        that earlier run's rows too - two batches sent an hour apart on the
+        same day partition would silently mix. The `timestamp` column is
+        what actually bounds the window; the day list only decides which
+        part files are worth opening at all.
 
     Example:
         predictions = load_predictions(storage, "house_price_regressor", now, 24)
         # -> 1,432 rows gathered from part files across two day partitions
+
+        # Two agent runs an hour apart, same day, MONITOR_WINDOW_HOURS=1:
+        # the second run's load_predictions call excludes the first run's
+        # rows even though both live under the same dt=... prefix.
     """
     days = days_in_window(end, window_hours)
-    return _read_prefix_days(storage, inference_log_prefix, model_name, days)
+    frame = _read_prefix_days(storage, inference_log_prefix, model_name, days)
+    if len(frame) == 0:
+        return frame
+    start = end - timedelta(hours=window_hours)
+    timestamps = pd.to_datetime(frame["timestamp"], utc=True)
+    in_window = (timestamps >= start) & (timestamps <= end)
+    return frame[in_window].reset_index(drop=True)
 
 
-def load_outcomes(storage, model_name: str, end: datetime, window_hours: int) -> pd.DataFrame:
+def load_outcomes(storage, model_name: str, end: datetime, window_hours: float) -> pd.DataFrame:
     """Reads every ground-truth outcome reported for the window.
 
     Args:
@@ -105,9 +124,16 @@ def load_outcomes(storage, model_name: str, end: datetime, window_hours: int) ->
         window_hours: how far back to read.
 
     Returns:
-        The ground-truth rows - request_id, actual, received_at - or an empty
-        DataFrame. Empty is the normal state early on: ground truth always
-        arrives later than the prediction it describes.
+        The ground-truth rows - request_id, predicted_on, actual, model_name -
+        or an empty DataFrame. Empty is the normal state early on: ground
+        truth always arrives later than the prediction it describes.
+
+        Unlike `load_predictions`, this is NOT further filtered by an actual
+        timestamp - a ground-truth row carries no timestamp of its own, only
+        the day it was filed under. That is fine: `join_outcomes` matches on
+        `request_id`, and only outcomes whose request_id is in the
+        already-window-filtered predictions survive the join, so an outcome
+        for a different scenario's request never joins to this window's rows.
 
     Example:
         outcomes = load_outcomes(storage, "house_price_regressor", now, 24)

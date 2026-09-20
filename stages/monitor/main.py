@@ -28,6 +28,7 @@ import mlflow.sklearn
 from mlflow import MlflowClient
 
 from ml_common import drift, schema
+from ml_common.cleaning import DateFeatures, OutlierClipper, RawRecordCleaner
 from ml_common.features import _numeric_and_categorical_columns
 from ml_common.metrics import compute_metrics
 from ml_common.stageio import emit_result
@@ -136,6 +137,54 @@ def _drifted_share(summary: dict) -> float:
     )
 
 
+def clean_for_drift(frame):
+    """Runs the model's own column-wise cleaning steps outside the Pipeline.
+
+    Both sides of the feature-drift comparison arrive raw: `current` is
+    decoded straight from the inference log's `raw_input` JSON, and
+    `reference` is the train split, which `prepare_dataset_for_train` never
+    column-cleans - only `RawRecordCleaner` inside the fitted Pipeline does
+    that, at fit time. So every "numeric" column here - list_price,
+    bedrooms, has_pool - is still an object dtype of strings, and Evidently's
+    numeric stats crash on `np.isinf` over that.
+
+    The fix reuses the exact three stateless steps the Pipeline runs before
+    the encoder (`RawRecordCleaner`, `OutlierClipper`, `DateFeatures`), the
+    same ones `build_pipeline` in features.py wires up. None of them learn
+    from data - `fit` is a no-op on all three - so calling them unfitted here
+    produces identical output to calling the fitted copies inside the
+    champion model. This is not a copy of serving's cleaning logic; monitor
+    is not serving, and both import the same `ml_common.cleaning` module.
+
+    Args:
+        frame: a raw DataFrame - either the decoded inference log or the
+            train split with its target column dropped.
+
+    Returns:
+        A new DataFrame with money/numeric columns as real floats, booleans
+        cast to 1.0/0.0/NaN the same way the numeric branch of the encoder
+        treats them, categorical text normalized, and `listing_date`
+        replaced by `listing_year` + `listing_month` - matching the column
+        names `_numeric_and_categorical_columns` expects.
+
+    Example:
+        clean_for_drift(pd.DataFrame([{"list_price": "$450,000", "has_pool": "Yes"}]))
+        # -> list_price 450000.0, has_pool 1.0
+    """
+    cleaned = RawRecordCleaner().transform(frame)
+    cleaned = OutlierClipper().transform(cleaned)
+    cleaned = DateFeatures().transform(cleaned)
+    # RawRecordCleaner leaves booleans as Python True/False/None (object
+    # dtype), which is what the model's ColumnTransformer wants - sklearn
+    # coerces that itself. Evidently does not: np.isinf over an object-dtype
+    # column raises. Cast explicitly to match "True/False -> 1/0" from
+    # features.py's numeric/categorical split.
+    for column_name, spec in schema.COLUMNS.items():
+        if column_name in cleaned.columns and spec.kind == "boolean":
+            cleaned[column_name] = cleaned[column_name].astype("float64")
+    return cleaned
+
+
 def run_drift_report(reference, current, numeric: list[str], categorical: list[str]):
     """Runs Evidently over two frames and returns the report object.
 
@@ -194,7 +243,12 @@ def main() -> int:
     """
     task_type = os.environ["TASK_TYPE"]
     model_name = os.environ["MODEL_NAME"]
-    window_hours = int(os.environ.get("MONITOR_WINDOW_HOURS", DEFAULT_WINDOW_HOURS))
+    # float, not int: back-to-back scenario runs in a single test session land
+    # within the same wall-clock hour, and load_predictions now filters by
+    # real timestamp, so isolating one batch from the next needs sub-hour
+    # precision (e.g. 0.1 = 6 minutes). Production's hourly Airflow schedule
+    # keeps using whole hours by way of DEFAULT_WINDOW_HOURS.
+    window_hours = float(os.environ.get("MONITOR_WINDOW_HOURS", DEFAULT_WINDOW_HOURS))
     reference_rows = int(os.environ.get("MONITOR_REFERENCE_ROWS", DEFAULT_REFERENCE_ROWS))
     run_id = os.environ.get("MONITOR_RUN_ID", datetime.now(UTC).strftime("%Y%m%dT%H%M%S"))
 
@@ -228,12 +282,20 @@ def main() -> int:
     current = drift.decode_raw_inputs(predictions)
     numeric, categorical = _numeric_and_categorical_columns(task_type)
 
-    # Feature drift. Only compare columns both sides actually have.
-    shared_numeric = [c for c in numeric if c in current.columns and c in reference.columns]
-    shared_categorical = [
-        c for c in categorical if c in current.columns and c in reference.columns
+    # Feature drift. Both sides are raw - clean them the same way the
+    # champion's Pipeline does before Evidently ever sees them; see
+    # clean_for_drift for why. Only compare columns both sides actually have.
+    reference_clean = clean_for_drift(reference)
+    current_clean = clean_for_drift(current)
+    shared_numeric = [
+        c for c in numeric if c in current_clean.columns and c in reference_clean.columns
     ]
-    feature_report = run_drift_report(reference, current, shared_numeric, shared_categorical)
+    shared_categorical = [
+        c for c in categorical if c in current_clean.columns and c in reference_clean.columns
+    ]
+    feature_report = run_drift_report(
+        reference_clean, current_clean, shared_numeric, shared_categorical
+    )
     feature_part = drift.feature_severity(_drifted_share(feature_report.dict()))
 
     # Prediction drift. The champion has to be run over the reference here:

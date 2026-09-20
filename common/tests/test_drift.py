@@ -121,10 +121,10 @@ class FakeStorage:
 def test_load_predictions_concatenates_every_part_in_the_window():
     frames = {
         "inference-log/m/dt=2026-09-20/part-a.parquet": pd.DataFrame(
-            {"request_id": ["r1"], "prediction": [1.0]}
+            {"request_id": ["r1"], "prediction": [1.0], "timestamp": ["2026-09-20T17:00:00Z"]}
         ),
         "inference-log/m/dt=2026-09-20/part-b.parquet": pd.DataFrame(
-            {"request_id": ["r2"], "prediction": [2.0]}
+            {"request_id": ["r2"], "prediction": [2.0], "timestamp": ["2026-09-20T17:30:00Z"]}
         ),
     }
     end = datetime(2026, 9, 20, 18, 0, tzinfo=UTC)
@@ -137,10 +137,14 @@ def test_load_predictions_concatenates_every_part_in_the_window():
 def test_load_predictions_reads_both_days_when_the_window_spans_midnight():
     frames = {
         "inference-log/m/dt=2026-09-19/part-a.parquet": pd.DataFrame(
-            {"request_id": ["yesterday"], "prediction": [1.0]}
+            {
+                "request_id": ["yesterday"],
+                "prediction": [1.0],
+                "timestamp": ["2026-09-19T23:00:00Z"],
+            }
         ),
         "inference-log/m/dt=2026-09-20/part-b.parquet": pd.DataFrame(
-            {"request_id": ["today"], "prediction": [2.0]}
+            {"request_id": ["today"], "prediction": [2.0], "timestamp": ["2026-09-20T08:00:00Z"]}
         ),
     }
     end = datetime(2026, 9, 20, 9, 0, tzinfo=UTC)
@@ -154,6 +158,35 @@ def test_load_predictions_with_no_traffic_returns_empty_frame():
     end = datetime(2026, 9, 20, 18, 0, tzinfo=UTC)
     result = drift.load_predictions(FakeStorage({}), "m", end, 6)
     assert len(result) == 0
+
+
+def test_load_predictions_excludes_rows_outside_the_hour_cutoff_same_day_partition():
+    # Two agent batches land in the SAME day partition an hour apart. A
+    # short window must isolate the second batch, or MONITOR_WINDOW_HOURS=1
+    # would be a lie: two scenarios run back to back on the same day would
+    # silently mix, which is exactly the contamination the monitor stage
+    # exists to avoid between runs.
+    frames = {
+        "inference-log/m/dt=2026-09-20/part-a.parquet": pd.DataFrame(
+            {
+                "request_id": ["earlier_batch"],
+                "prediction": [1.0],
+                "timestamp": ["2026-09-20T06:30:00Z"],
+            }
+        ),
+        "inference-log/m/dt=2026-09-20/part-b.parquet": pd.DataFrame(
+            {
+                "request_id": ["later_batch"],
+                "prediction": [2.0],
+                "timestamp": ["2026-09-20T07:55:00Z"],
+            }
+        ),
+    }
+    end = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
+
+    result = drift.load_predictions(FakeStorage(frames), "m", end, 1)
+
+    assert result["request_id"].tolist() == ["later_batch"]
 
 
 def test_load_outcomes_reads_the_ground_truth_prefix():
@@ -172,7 +205,7 @@ def test_load_outcomes_reads_the_ground_truth_prefix():
 def test_load_predictions_skips_a_day_that_has_no_files():
     frames = {
         "inference-log/m/dt=2026-09-20/part-a.parquet": pd.DataFrame(
-            {"request_id": ["r1"], "prediction": [1.0]}
+            {"request_id": ["r1"], "prediction": [1.0], "timestamp": ["2026-09-20T08:30:00Z"]}
         ),
     }
     end = datetime(2026, 9, 20, 9, 0, tzinfo=UTC)

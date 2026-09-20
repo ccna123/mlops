@@ -6,12 +6,8 @@ Write-Host "== 1/6 Unit tests ==" -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "unit tests failed" }
 
 Write-Host "== 2/6 Lint ==" -ForegroundColor Cyan
-.venv\Scripts\python.exe -m ruff check common/ scripts/ dags/ stages/
+.venv\Scripts\python.exe -m ruff check .
 if ($LASTEXITCODE -ne 0) { throw "lint failed" }
-# services/ has no ruff config of its own; without --config ruff falls back to a
-# much broader default rule set instead of the project's E/F/I/UP/B.
-.venv\Scripts\python.exe -m ruff check services/ --config common/pyproject.toml
-if ($LASTEXITCODE -ne 0) { throw "lint failed on services/" }
 
 Write-Host "== 3/6 Serving must not import cleaning logic ==" -ForegroundColor Cyan
 $leaked = Select-String -Path services\serving\*.py -Pattern "ml_common\.(cleaning|rowops)" -Quiet
