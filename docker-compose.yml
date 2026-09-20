@@ -187,6 +187,31 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    image: ml-api:latest
+    ports:
+      - "8001:8001"
+    depends_on:
+      - minio
+      - mlflow
+      - serving
+    environment:
+      MINIO_ENDPOINT_INTERNAL: ${MINIO_ENDPOINT_INTERNAL:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      ML_BUCKET: ${ML_BUCKET:-ml-pipeline}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT_INTERNAL:-http://minio:9000}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
+      AIRFLOW_USERNAME: ${AIRFLOW_USERNAME:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:-admin}
+      SERVING_URL: http://serving:8000
+
   agent:
     build:
       context: .
