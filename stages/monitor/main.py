@@ -162,25 +162,60 @@ def _feature_margins(summary: dict) -> list[float]:
             reads.
 
     Returns:
-        One float per `ValueDrift` entry found, in whatever order Evidently
-        listed them. Empty when there are none - `feature_margin_severity`
-        treats that as "ok", not an error, since a feature-less comparison
-        is not this function's problem to flag.
+        One float per USABLE `ValueDrift` entry found, in whatever order
+        Evidently listed them. An entry missing `threshold` or `value` is
+        skipped, not fatal on its own - one odd column should not take the
+        whole run down when the rest of the report is fine.
+
+    Raises:
+        KeyError: when there is nothing to skip PARTIALLY from - either no
+            `ValueDrift` entries exist at all, or every single one found is
+            missing `threshold`/`value`. Both mean extraction itself is
+            broken, not that nothing drifted, and silently returning `[]`
+            would make `feature_margin_severity` report "ok" - a green
+            badge produced by broken extraction, which is worse than a
+            crash because nobody investigates a green badge. This mirrors
+            `_drifted_share`'s KeyError on the same class of failure.
 
     Example:
         _feature_margins(results.dict())
         # -> [-0.0409, 0.0193, ..., 0.7250]  # zipcode's ~0.725 excess, last
+
+        _feature_margins({"metrics": []})
+        # -> KeyError: no evidently:metric_v2:ValueDrift entries at all
+
+        _feature_margins({"metrics": [{"config": {"type": VALUE_DRIFT_TYPE}}]})
+        # -> KeyError: found entries but none had a usable (value, threshold)
     """
+    found = 0
     margins = []
     for metric in summary.get("metrics", []):
         config = metric.get("config") or {}
         if config.get("type") != VALUE_DRIFT_TYPE:
             continue
+        found += 1
         threshold = config.get("threshold")
         value = metric.get("value")
         if threshold is None or value is None:
             continue
         margins.append(float(value) - float(threshold))
+
+    if found == 0:
+        raise KeyError(
+            f"no metric with config.type == {VALUE_DRIFT_TYPE!r} in the Evidently "
+            f"result; metric types seen were "
+            f"{[(m.get('config') or {}).get('type') for m in summary.get('metrics', [])]}"
+        )
+    if not margins:
+        value_drift_configs = [
+            m.get("config") or {}
+            for m in summary.get("metrics", [])
+            if (m.get("config") or {}).get("type") == VALUE_DRIFT_TYPE
+        ]
+        raise KeyError(
+            f"found {found} {VALUE_DRIFT_TYPE!r} entries but none had both "
+            f"config.threshold and value; configs seen were {value_drift_configs}"
+        )
     return margins
 
 

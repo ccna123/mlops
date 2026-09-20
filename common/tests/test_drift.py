@@ -261,23 +261,28 @@ def test_feature_margin_severity_with_no_columns_is_ok():
 
 
 def test_feature_severity_share_dilutes_but_magnitude_catches_market_shift():
-    # This is the exact scenario the market_shift addendum found: city and
-    # zipcode are the only 2 of 22 compared columns that ever cross their
-    # per-column threshold, in BOTH scenario=none and market_shift (zipcode
-    # is a high-cardinality categorical that trips its 0.1 Jensen-Shannon
-    # threshold from sampling noise alone, in every run, real drift or not).
-    # Share alone can never tell these two runs apart: 2/22 = 0.0909 in
-    # both. The margin - how far PAST each column's own threshold the
-    # observed value sits, summed across all compared columns - can: it
-    # cancels out zipcode's near-identical contribution in both runs and is
-    # left with the genuine difference, city moving from barely-over-
-    # threshold to massively-over.
+    # Exercises the rule this pair of paths exists to implement, not a
+    # replay of any one report: when the SAME drifted-columns share comes
+    # from two different situations - a run with no real drift vs. a run
+    # where drift is concentrated into a couple of columns - share alone
+    # cannot tell them apart (it only counts how many columns crossed
+    # their threshold, not by how much), but the summed margin can, because
+    # a column that behaves identically in both runs contributes an
+    # identical amount to both sums and cancels out of the comparison,
+    # leaving only the genuine difference visible.
+    #
+    # The share value and the two margin sums below are representative,
+    # not arbitrary: they are the real numbers task-11's market_shift
+    # addendum measured (fingerprint 1630bf27520bba7f - see
+    # FEATURE_MAGNITUDE_WARNING's comment and the task-11 report for the
+    # full per-column breakdown), used here as realistic motivation for
+    # the constant, not as fixture data this test depends on reproducing.
     share = 2 / 22  # 0.0909..., identical in both real runs
-    none_margins_sum = -0.2844  # observed sum across all 22 columns
-    market_shift_margins_sum = 0.3901  # observed sum across all 22 columns
+    no_drift_margins_sum = -0.2844
+    concentrated_drift_margins_sum = 0.3901
 
-    assert drift.feature_severity(share, [none_margins_sum]) == "ok"
-    assert drift.feature_severity(share, [market_shift_margins_sum]) == "warning"
+    assert drift.feature_severity(share, [no_drift_margins_sum]) == "ok"
+    assert drift.feature_severity(share, [concentrated_drift_margins_sum]) == "warning"
 
 
 def test_prediction_severity_is_binary():

@@ -255,6 +255,12 @@ AUC_HIGH_DROP = 0.10
 # "high" cutoff from a single data point is exactly the kind of guess this
 # task exists to stop making - left undefined until a second real
 # high-magnitude measurement exists to calibrate against.
+#
+# Tie-break: a sum of EXACTLY 0.0 reads as "warning" (feature_margin_severity
+# uses >=, not >). Every other threshold in this module already resolves its
+# own tie this way - feature_severity's 0.3 share, performance_severity's
+# 1.2 rmse ratio and 0.05 auc drop are all ">=" into the worse band - and
+# erring toward flagging is the right direction for a monitoring system.
 FEATURE_MAGNITUDE_WARNING = 0.0
 
 
