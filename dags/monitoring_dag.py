@@ -12,6 +12,10 @@ the machine crawls. Drop the flag when this moves to MWAA.
 One container per model rather than the three tasks section 6.2 sketches.
 XCom carries only small values, so collect/report/publish as separate tasks
 would each have to re-read the window from object storage.
+
+The two tasks share no dependency edge, so a model with no champion yet
+fails its own task and leaves the other's verdict untouched. That
+independence is the whole mechanism - there is no trigger rule doing it.
 """
 
 from __future__ import annotations
@@ -99,6 +103,4 @@ with DAG(
             mount_tmp_dir=False,
             do_xcom_push=True,
             xcom_all=True,
-            # A model with no champion yet must not fail the whole run.
-            trigger_rule="all_done",
         )
