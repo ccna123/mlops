@@ -119,7 +119,7 @@ def test_list_runs_asks_for_newest_first():
 
     params = http.calls[0][2]["params"]
     assert params["limit"] == 7
-    assert params["order_by"] == "-execution_date"
+    assert params["order_by"] == "-start_date"
 
 
 def test_get_run_returns_task_states():
@@ -150,6 +150,11 @@ def test_get_run_returns_task_states():
 
     run = client.get_run("ml_pipeline", "r1")
 
+    assert http.calls[0][1] == "http://airflow:8080/api/v1/dags/ml_pipeline/dagRuns/r1"
+    assert (
+        http.calls[1][1]
+        == "http://airflow:8080/api/v1/dags/ml_pipeline/dagRuns/r1/taskInstances"
+    )
     assert run["run_id"] == "r1"
     assert run["state"] == "running"
     assert run["tasks"] == [

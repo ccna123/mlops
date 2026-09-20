@@ -104,10 +104,13 @@ class AirflowClient:
             #      "task_type": "regression", "started_at": "...",
             #      "ended_at": "..."}]
         """
+        # start_date is when the run actually started; execution_date is its
+        # logical schedule slot. They track together for manual runs but
+        # diverge for scheduled/backfilled ones, so sort by start_date.
         body = self._call(
             "GET",
             f"/dags/{dag_id}/dagRuns",
-            params={"limit": limit, "order_by": "-execution_date"},
+            params={"limit": limit, "order_by": "-start_date"},
         )
         return [
             {
@@ -170,6 +173,12 @@ class AirflowClient:
             The log as one block of text. Splitting and filtering happen in
             the route, so this stays a transport concern.
 
+        Raises:
+            KeyError: when Airflow's response has no "content" field. Left
+                to propagate rather than papered over with a default - an
+                empty string here would be indistinguishable from a task
+                that genuinely logged nothing.
+
         Example:
             get_logs("ml_pipeline", "manual__...", "extract", 1)
             # -> "[2026-09-20 10:00:01] INFO - raw=raw/v1/data.parquet ..."
@@ -178,4 +187,4 @@ class AirflowClient:
             "GET",
             f"/dags/{dag_id}/dagRuns/{run_id}/taskInstances/{task_id}/logs/{try_number}",
         )
-        return body.get("content", "") if isinstance(body, dict) else str(body)
+        return body["content"]
