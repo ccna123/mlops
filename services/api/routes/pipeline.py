@@ -6,6 +6,7 @@ as soon as Airflow has queued the run, and the dashboard polls for the rest.
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
@@ -112,10 +113,13 @@ def filter_log_lines(text: str, level: str | None, keyword: str | None) -> tuple
 
     Args:
         text: the raw log text as Airflow returned it.
-        level: keep only lines mentioning this level, case-insensitively.
-            None keeps every level.
-        keyword: keep only lines containing this text, case-insensitively.
-            None keeps every line.
+        level: keep only lines mentioning this level as a whole word,
+            case-insensitively, so `level=ERROR` does not also match a line
+            reading "no errors found". None keeps every level.
+        keyword: keep only lines containing this text, case-insensitively,
+            as a plain substring - this is free-text search, not level
+            matching, so `q=error` DOES match "no errors found". None keeps
+            every line.
 
     Returns:
         A tuple of (lines, truncated). Filtering happens here rather than in
@@ -123,16 +127,19 @@ def filter_log_lines(text: str, level: str | None, keyword: str | None) -> tuple
         network only to be thrown away - section 8.1 names doing this in JS
         as one of the things the old frontend got wrong. `truncated` is True
         when lines were dropped at MAX_LOG_LINES, so the UI can say so
-        instead of silently showing less than there is.
+        instead of silently showing less than there is. Blank lines are kept
+        when unfiltered, since Airflow tracebacks and section separators use
+        them; a `level` or `q` needle can never match a blank line, so it
+        drops out naturally as soon as either filter is applied.
 
     Example:
         filter_log_lines(text, level="ERROR", keyword=None)
         # -> (["[2026-09-20 10:00:03] ERROR - could not parse zipcode"], False)
     """
-    lines = [line for line in text.splitlines() if line.strip()]
+    lines = text.splitlines()
     if level:
-        needle = level.lower()
-        lines = [line for line in lines if needle in line.lower()]
+        pattern = re.compile(rf"\b{re.escape(level)}\b", re.IGNORECASE)
+        lines = [line for line in lines if pattern.search(line)]
     if keyword:
         needle = keyword.lower()
         lines = [line for line in lines if needle in line.lower()]
@@ -158,7 +165,11 @@ def get_logs(
             "the log" is not a thing that exists.
         level: keep only lines at this level.
         q: keep only lines containing this text.
-        try_number: which attempt; Airflow numbers them from 1.
+        try_number: which attempt; Airflow numbers them from 1. Defaults to
+            the FIRST attempt, so a retried task's first try_number may be
+            stale - callers should pass the try_number that
+            `GET /pipeline/runs/{run_id}` already reports per task rather
+            than relying on this default.
 
     Returns:
         `lines` and `truncated`.

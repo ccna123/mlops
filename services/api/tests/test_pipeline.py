@@ -110,9 +110,11 @@ class FakeAirflowLogs(FakeAirflow):
 
 
 def test_logs_return_every_line_when_no_filter_is_given():
-    body = _client(FakeAirflowLogs()).get("/api/pipeline/runs/r1/logs?stage=extract").json()
+    airflow = FakeAirflowLogs()
+    body = _client(airflow).get("/api/pipeline/runs/r1/logs?stage=extract").json()
     assert len(body["lines"]) == 4
     assert body["truncated"] is False
+    assert airflow.asked == [("ml_pipeline", "r1", "extract", 1)]
 
 
 def test_logs_filter_by_level():
@@ -132,6 +134,72 @@ def test_logs_filter_by_keyword_case_insensitively():
         .json()
     )
     assert len(body["lines"]) == 1
+
+
+def test_logs_level_filter_matches_whole_word_only():
+    text = "\n".join(
+        [
+            "[2026-09-20 10:00:01] INFO - no errors found",
+            "[2026-09-20 10:00:02] ERROR - could not parse zipcode",
+        ]
+    )
+    body = (
+        _client(FakeAirflowLogs(text=text))
+        .get("/api/pipeline/runs/r1/logs?stage=extract&level=ERROR")
+        .json()
+    )
+    assert len(body["lines"]) == 1
+    assert "could not parse zipcode" in body["lines"][0]
+
+
+def test_logs_level_filter_does_not_match_a_word_containing_it():
+    text = "\n".join(
+        [
+            "[2026-09-20 10:00:01] INFO - reading raw data",
+            "[2026-09-20 10:00:02] INFORMATION - deprecated field seen",
+        ]
+    )
+    body = (
+        _client(FakeAirflowLogs(text=text))
+        .get("/api/pipeline/runs/r1/logs?stage=extract&level=INFO")
+        .json()
+    )
+    assert len(body["lines"]) == 1
+    assert "reading raw data" in body["lines"][0]
+
+
+def test_logs_keyword_filter_is_free_text_not_level_matching():
+    text = "\n".join(
+        [
+            "[2026-09-20 10:00:01] INFO - no errors found",
+            "[2026-09-20 10:00:02] WARNING - 3 rows dropped",
+        ]
+    )
+    body = (
+        _client(FakeAirflowLogs(text=text))
+        .get("/api/pipeline/runs/r1/logs?stage=extract&q=error")
+        .json()
+    )
+    assert len(body["lines"]) == 1
+    assert "no errors found" in body["lines"][0]
+
+
+def test_logs_preserve_blank_lines_when_unfiltered():
+    text = "\n".join(
+        [
+            "[2026-09-20 10:00:01] ERROR - traceback follows",
+            "",
+            "[2026-09-20 10:00:02] INFO - end of traceback",
+        ]
+    )
+    body = (
+        _client(FakeAirflowLogs(text=text)).get("/api/pipeline/runs/r1/logs?stage=extract").json()
+    )
+    assert body["lines"] == [
+        "[2026-09-20 10:00:01] ERROR - traceback follows",
+        "",
+        "[2026-09-20 10:00:02] INFO - end of traceback",
+    ]
 
 
 def test_logs_report_truncation_rather_than_hiding_it():
