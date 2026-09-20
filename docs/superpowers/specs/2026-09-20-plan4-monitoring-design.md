@@ -26,8 +26,12 @@ Không vào:
 - Đổi bất cứ thứ gì trong 6 stage của Plan 2. Xem mục 6.
 
 Lý do gộp agent và monitoring vào một plan: Definition of Done của cả plan là
-"`none` ra `ok`, `price_inflation` ra `high`". Tách đôi thì nửa đầu chỉ chứng
-minh được "record có rơi xuống MinIO", còn nửa sau không có gì để đo.
+"`none` ra `ok`, `market_shift` ra `high`" — `none` là control bắt false
+positive, `market_shift` là kịch bản chứng minh feature drift kêu thật, vì nó
+bóp méo `city`, một feature model có nhìn thấy (xem mục 2.5 và mục 8; đo thật
+ở Task 11 cho thấy `price_inflation` không dùng được cho vế thứ hai — xem mục
+2.5). Tách đôi thì nửa đầu chỉ chứng minh được "record có rơi xuống MinIO",
+còn nửa sau không có gì để đo.
 
 ---
 
@@ -157,40 +161,76 @@ Vì sao lõi phải là hàm chứ không phải chỉ một container chạy li
 
 Có cả hai thì không mất gì: service chỉ là vòng lặp gọi lại đúng hàm đó.
 
-### 2.5. `price_inflation` và `market_rally` — hai kịch bản, hai bài học
+### 2.5. `price_inflation` và `market_rally` — hai kịch bản, một bài học đã đổi sau khi đo
 
-Cả hai đều lấy **dòng có thật** trong dữ liệu rồi bóp méo feature. Khác nhau ở
-chỗ **có bóp méo luôn đáp án không**.
+Cả hai đều lấy **dòng có thật** trong dữ liệu rồi bóp méo `list_price`, đẩy
+giá niêm yết lên ~20%. Khác nhau ở đúng một chỗ: `price_inflation` giữ
+nguyên giá bán thật báo về `/feedback`; `market_rally` cũng nhân giá bán
+thật lên ~20%, cùng hệ số. **Thiết kế này — hai kịch bản chỉ khác nhau ở
+việc đáp án có đi theo feature hay không — vẫn đúng**, và tách ba loại drift
+ra báo riêng vẫn đúng. Cái sai nằm ở dự đoán kết quả và lý do đưa ra cho nó,
+không nằm ở thiết kế kịch bản.
 
-Lấy một nhà thật: niêm yết $400.000, bán thật $420.000. Áp hệ số 1.2:
+**Dự đoán ban đầu — đã sai, đo được ở Task 11.** Bản nháp đầu của mục này có
+một bảng ví dụ bằng số: niêm yết $400.000 → $480.000 sau khi bóp méo, ngụ ý
+model đổi dự đoán theo (ước tính ~$500.000). **Model không đổi dự đoán một
+chút nào.** `list_price` bị loại khỏi `feature_columns("regression")` vì là
+leakage (mục 5 của `mlops-pipeline-design.md`: giữ lại thì
+`sale_price ≈ list_price` khiến bài toán tầm thường), nên `SelectColumns`
+cắt cột đó trước khi tới model — và trước khi tới phép so drift — nên bóp
+méo `list_price` không chạm được vào đâu cả. Đo thật: `price_inflation` ra
+kết quả **byte-identical** với `scenario=none` (feature `ok`, prediction
+`ok`, rmse 101835.89 = rmse của `none`); `market_rally` ra performance drift
+thật (rmse ratio 2.24) với feature drift **`ok`** — không phải "feature kêu,
+performance im" như bản nháp viết, mà ngược lại hoàn toàn.
 
-| Kịch bản | Gửi vào `/predict` | Báo về `/feedback` | Model đoán | Hệ quả |
-| --- | --- | --- | --- | --- |
-| `price_inflation` | niêm yết $480.000 | **$420.000** (giữ nguyên) | ~$500.000 | lệch $80.000 |
-| `market_rally` | niêm yết $480.000 | **$504.000** (×1.2) | ~$500.000 | lệch $4.000 |
+**Vì sao dự đoán sai: chưa kiểm tra `list_price` có phải feature không.**
+Bản nháp viết kịch bản theo trực giác thị trường (giá niêm yết ảnh hưởng tới
+model), mà không đối chiếu với mục 5 của tài liệu gốc, nơi đã ghi rõ
+`list_price` bị loại khỏi feature của regression. Một dòng kiểm tra
+`"list_price" in feature_columns("regression")` trước khi viết kịch bản đã
+đủ bắt lỗi này trước khi có dòng code nào được viết.
 
-Hai hiện tượng thị trường khác nhau:
+**Bài học thật, sau khi đo, là thứ được giữ lại — không phải bị bỏ:**
 
-- `price_inflation` — người bán đua nhau hét giá, giá bán thật không nhúc nhích.
-  Model tin giá niêm yết nên bị lừa. **Cả ba loại drift đều kêu.**
-- `market_rally` — cả thị trường lên đều, niêm yết lên thì giá bán cũng lên.
-  Model vẫn đúng tương đối. **Feature drift kêu, performance drift im.**
+- `price_inflation` — **drift ở một cột model không nhìn thấy không phải là
+  drift.** Một kết quả âm tính hữu ích: chứng minh hệ thống không báo động
+  giả chỉ vì một cột bất kỳ trong dữ liệu thô đổi giá trị.
+- `market_rally` — **performance có thể sập trong khi feature drift bằng
+  KHÔNG.** Đây là ảnh gương của bài học dự định ban đầu, và nếu có khác thì
+  là bằng chứng còn mạnh hơn cho việc báo cáo ba loại drift tách riêng: một
+  badge feature drift xanh không có nghĩa là model ổn.
+- `market_shift` — kịch bản **thật sự** thử được feature drift, vì nó bóp
+  méo `city`, một feature model có nhìn thấy. `price_inflation`/
+  `market_rally` không làm được việc này; đây là lý do `market_shift` giữ
+  vai trò "ca chứng minh feature drift kêu thật", không phải `market_rally`
+  như bản nháp ban đầu dự đoán.
 
-`market_rally` là kịch bản **không có trong §7.7**, thêm ở plan này. Lý do: nó
-là bằng chứng sống cho câu "phân biệt ba loại drift là phần đáng học nhất" của
-§7.8. Nếu mọi kịch bản mà feature drift kêu thì performance cũng kêu, thì tách
-ba loại ra chẳng để làm gì. Phải có ít nhất một ca chứng minh **dữ liệu đổi
-không đồng nghĩa với model hỏng** — nếu không, phản xạ đúng sẽ là "thấy feature
-drift thì retrain", và đó là phản xạ sai.
+`market_rally` là kịch bản **không có trong §7.7**, thêm ở plan này. Lý do
+thêm nó vẫn đúng dù kết quả đảo chiều so với dự đoán: nó là bằng chứng sống
+cho câu "phân biệt ba loại drift là phần đáng học nhất" của §7.8. Nếu mọi
+kịch bản mà feature drift kêu thì performance cũng kêu (hoặc ngược lại), thì
+tách ba loại ra chẳng để làm gì. Phải có ít nhất một ca chứng minh **dữ liệu
+đổi không đồng nghĩa với model hỏng, và dữ liệu không đổi không đồng nghĩa
+với model ổn** — nếu không, phản xạ đúng sẽ là "thấy feature drift thì
+retrain", và đó là phản xạ sai theo cả hai chiều.
+
+**Câu hỏi mở cho plan sau (mục 10):** có nên đổi cột mà
+`price_inflation`/`market_rally` bóp méo sang một feature thật (ví dụ
+`living_area_sqft`, `school_rating`) để hai kịch bản này thật sự thử được
+feature drift? **Bỏ `list_price` khỏi danh sách leakage không phải câu trả
+lời** — mục 5 của tài liệu gốc đã giải thích rõ vì sao loại nó, và đảo quyết
+định đó chỉ để "sửa" kết quả của một kịch bản demo là phá vỡ lý do thiết kế
+của Plan 2.
 
 Năm kịch bản:
 
 | Scenario | Bóp méo | Đáp án | Dùng để |
 | --- | --- | --- | --- |
 | `none` | không | thật | Bắt false positive |
-| `price_inflation` | `list_price` ×1.2 | **giữ nguyên** | True positive, cả 3 loại |
-| `market_rally` | `list_price` ×1.2 | **×1.2** | Feature drift vô hại |
-| `market_shift` | dồn `city` về 1–2 thành phố | thật | Drift trên cột categorical |
+| `price_inflation` | `list_price` ×1.2 | **giữ nguyên** | No-op có chủ ý — `list_price` không phải feature, đo được `ok` giống hệt `none` |
+| `market_rally` | `list_price` ×1.2 | **×1.2** | Performance drift với feature drift bằng không |
+| `market_shift` | dồn `city` về 1–2 thành phố | thật | Ca thật sự thử feature drift (`city` là feature) |
 | `new_segment` | `property_type` giá trị chưa từng thấy | thật | Serving không được sập |
 
 ### 2.6. Chưa đủ ground truth thì phải nói ra, không được báo `ok`
@@ -423,7 +463,7 @@ thường). Câu hỏi mở cho plan sau ở mục 10.
 | Chỗ | Tài liệu gốc | Plan 4 | Lý do |
 | --- | --- | --- | --- |
 | §7.8 | Baseline là profile, **không phải dataset** | Evidently ăn tập train đọc lại; profile vẫn giữ cho Plan 5 | Evidently chỉ nhận DataFrame — xem 2.1 |
-| §7.7 | 4 scenario | 5, thêm `market_rally` | Cần một ca chứng minh feature drift vô hại — xem 2.5 |
+| §7.7 | 4 scenario | 5, thêm `market_rally` | Thêm để chứng minh dữ liệu đổi không đồng nghĩa model hỏng; đo thật cho kết quả ngược lại — performance sập với feature drift bằng không — càng củng cố lý do tách ba loại drift ra báo riêng, xem 2.5 |
 | §6.2 | `schedule="@hourly"` | Giữ lịch, thêm `is_paused_upon_creation=True` | Máy dev 16GB — xem 2.7 |
 | §7.8 | Mức độ `ok`/`warning`/`high` | Thêm `insufficient_data` cho performance | Không báo xanh khi chưa đo — xem 2.6 |
 | §7.7 | Agent gửi feedback "sau N ngày mô phỏng" | Agent gửi theo lệnh, mang theo `predicted_on` | Độ trễ thật thì không demo được; độ trễ vẫn hiện ra vì hai lệnh tách rời |
