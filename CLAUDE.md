@@ -99,21 +99,23 @@ docker compose ps                                          # trạng thái hạ 
 powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1
 powershell -ExecutionPolicy Bypass -File scripts\verify_pipeline.ps1
 powershell -ExecutionPolicy Bypass -File scripts\verify_serving.ps1
+powershell -ExecutionPolicy Bypass -File scripts\verify_monitoring.ps1
 ```
 
-Khi `common/` thay đổi, phải build lại **cả ba tầng, theo đúng thứ tự này**:
+Khi `common/` thay đổi, phải build lại **cả bốn tầng, theo đúng thứ tự này**:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
 powershell -ExecutionPolicy Bypass -File scripts\build_stage_images.ps1
 docker build -f services/serving/Dockerfile -t ml-serving:latest .
+docker build -f services/agent/Dockerfile -t ml-agent:latest .
 ```
 
-Chỉ build `ml-base` là **chưa đủ**. Sáu stage image và `ml-serving` đều
-`FROM ml-base:latest`, nên tới khi được build lại chúng vẫn giữ nguyên bản
-`ml_common` cũ nướng sẵn bên trong — `docker images` sẽ cho thấy `ml-base` mới
-tinh còn phần còn lại thì không. Triệu chứng: sửa code trong `common/`, test ở
-máy xanh, mà DAG vẫn chạy y như cũ.
+Chỉ build `ml-base` là **chưa đủ**. Sáu stage image (kể cả `ml-monitor`),
+`ml-serving` và `ml-agent` đều `FROM ml-base:latest`, nên tới khi được build
+lại chúng vẫn giữ nguyên bản `ml_common` cũ nướng sẵn bên trong — `docker
+images` sẽ cho thấy `ml-base` mới tinh còn phần còn lại thì không. Triệu
+chứng: sửa code trong `common/`, test ở máy xanh, mà DAG vẫn chạy y như cũ.
 
 Kiểm tra test trong container (`ml-base` không có sẵn pytest nên phải cài vào):
 
@@ -162,15 +164,17 @@ Chỉ commit khi được yêu cầu hoặc khi plan nói rõ ở step đó.
 
 ## Trạng thái
 
-Ba plan đầu **đã xong**, đều đã merge vào `main`:
+Ba plan đầu **đã xong**, đều đã merge vào `main`. Plan 4 đã xong trên nhánh
+`plan4-monitoring`, chưa merge:
 
 | Plan | Nội dung | Verify |
 | --- | --- | --- |
 | 1/5 | Foundation — Postgres, MinIO, MLflow, Airflow, `ml-base` | `scripts\verify_foundation.ps1` |
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
+| 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
 
-270 test pass ở Python 3.13 (local); 247 pass + 1 skip ở 3.12 (container).
+357 test pass ở Python 3.13 (local).
 
-Hai plan còn lại: **4/5 monitoring & drift**, **5/5 dashboard**. Mỗi plan viết
-sau khi plan trước chạy xong.
+Một plan còn lại: **5/5 dashboard**. Mỗi plan viết sau khi plan trước chạy
+xong.

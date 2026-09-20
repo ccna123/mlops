@@ -353,7 +353,7 @@ Chủ trương: **Plan 2 không bị đụng tới**. Sáu stage và `ml_pipelin
 | File | Thay đổi | Vì sao |
 | --- | --- | --- |
 | `common/ml_common/storage.py` | Thêm 2 hàm key ở mục 5 | Ràng buộc kiến trúc: đường dẫn chỉ được tạo ở đây |
-| `services/serving/app.py` | Thêm route `POST /feedback/{task_type}` | Endpoint mới |
+| `services/serving/app.py` | Thêm route `POST /feedback/{task_type}`; ghi thêm `probability` vào inference log | Endpoint mới; performance drift của classification chấm bằng AUC, mà AUC không tính được từ một bool |
 | `docker-compose.yml` | Thêm service `agent` với `profiles: ["agent"]` | Chế độ chạy liên tục, tắt mặc định |
 | `scripts/build_stage_images.ps1` | Thêm `ml-monitor` | Image mới |
 | `CLAUDE.md` | Cập nhật lệnh build và trạng thái | Đã có tiền lệ |
@@ -380,27 +380,41 @@ chọn đọc lại tập train chính vì nó không bắt sửa stage đang ch
 
 ## 8. Definition of Done
 
-1. `pytest common/ services/` xanh ở cả Python 3.13 (máy) lẫn 3.12 (container).
+1. `pytest common/ services/` xanh ở cả Python 3.13 (máy, 357 test) lẫn 3.12 (container).
 2. `ruff check .` sạch.
 3. `ml-monitor:latest` build được.
 4. Agent bắn được vào serving đang chạy; `/health` cho thấy `buffered` tăng.
 5. `/feedback` ghi được, và file rơi vào đúng mảnh `dt=` của ngày dự đoán.
-6. `monitoring_dag` chạy tay xong cả 3 task, ghi được HTML + JSON lên MinIO.
-7. **Bảng kịch bản dưới đây đúng hết** — đây là điều kiện thật sự của plan này:
+6. `monitoring_dag` chạy tay xong cả 2 task (một task mỗi model, mỗi task một
+   container `ml-monitor` — xem mục 9), ghi được HTML + JSON lên MinIO.
+7. **Finding A. Bảng kịch bản dưới đây là số đo thật từ Task 11, không phải
+   bảng dự đoán viết tay ở bản nháp đầu của mục này.** Bảng nháp đầu tiên sai ở
+   `price_inflation` và `market_rally` — không phải vì hệ thống đo sai, mà vì
+   bảng dự đoán chưa tính tới việc `list_price` là cột bị loại khỏi feature
+   của regression (leakage, mục 5). Đây là chỗ plan này chứng minh mình có
+   giá trị: một hệ thống drift luôn báo `high` vô dụng ngang một hệ thống
+   luôn báo `ok`, và phải đo thật — không phải đoán trước — mới biết bảng
+   nào đúng:
 
-| Chạy | Feature | Prediction | Performance | Tổng hợp |
-| --- | --- | --- | --- | --- |
-| `none` | `ok` | `ok` | `ok` | **`ok`** |
-| `price_inflation` | `high` | `high` | `high` | **`high`** |
-| `market_rally` | `warning`/`high` | `warning`/`high` | **`ok`** | warning/high |
-| `new_segment` | drift ở `property_type` | — | — | serving **không sập** |
+| Chạy | Feature | Prediction | Performance | Tổng hợp | Bài học |
+| --- | --- | --- | --- | --- | --- |
+| `none` | `ok` (tỉ lệ cột drift 0.0909, 2/22) | `ok` | `ok` | **`ok`** | Control cho false positive — nhưng đọc mục 10: `zipcode` tự trôi JS distance 0.825 ngay cả ở đây, control không sạch tuyệt đối |
+| `price_inflation` | `ok` (giống hệt `none` tới từng bit) | `ok` | `ok` (rmse ratio 1.14) | **`ok`** | **Drift ở một cột model không nhìn thấy không phải là drift.** `list_price` bị loại khỏi `feature_columns("regression")` vì leakage; bóp méo nó không chạm tới model lẫn phép so drift — RMSE ra byte-identical với `none` |
+| `market_rally` | `ok` (giống hệt `none`) | `ok` | **`high`** (rmse ratio 2.24) | **`high`** | **Performance có thể sập trong khi feature drift = 0.** Đây là bằng chứng mạnh nhất cho việc tách ba loại drift ra báo riêng — nhìn riêng feature drift, `market_rally` trôi qua như không có gì xảy ra |
+| `market_shift` | `warning` (luật magnitude — xem mục 4) | `high` | `high` | **`high`** | Kịch bản duy nhất trong năm kịch bản thật sự thử được feature drift, vì nó bóp méo `city` — một cột model **có** nhìn thấy. Luật tỉ lệ cột drift một mình không thấy điều này (2/22 = 0.0909, y hệt `none`); phải có luật magnitude mới bắt được |
+| `new_segment` | `warning` | `ok` | `warning` | warning | Serving **không sập** (không có HTTP 500) — đây là điều kiện thật của hàng này, không phải một mức độ cụ thể |
 
-8. Chạy `monitoring_dag` khi chưa có ground truth phải ra `insufficient_data`
-   ở performance, không ra `ok`.
+8. Chạy khi chưa có ground truth (feedback-ratio=0) phải ra `insufficient_data`
+   ở performance, không ra `ok`. Đo thật: tổng hợp `high` (do `prediction=high`,
+   một artefact của mẫu nhỏ 100 dòng làm test thống kê per-column của Evidently
+   nhiễu hơn), còn `performance=insufficient_data` đúng như yêu cầu.
 
-Điểm 7 là chỗ plan này chứng minh mình có giá trị. Một hệ thống drift luôn báo
-`high` cũng vô dụng ngang một hệ thống luôn báo `ok`; phải qua được cả dòng
-`none` lẫn dòng `price_inflation` thì mới nói được là nó đo thật.
+Chi tiết đầy đủ — số đo từng lần chạy, cách cô lập cửa sổ theo timestamp, bảng
+per-column Jensen-Shannon/Wasserstein — ở
+`.superpowers/sdd/2026-09-20-plan4-monitoring/task-11-report.md`. Không đề
+xuất bỏ `list_price` khỏi leakage của regression để "sửa" bảng cũ — mục 5 của
+tài liệu gốc đã giải thích rõ vì sao loại nó (giữ lại thì bài toán tầm
+thường). Câu hỏi mở cho plan sau ở mục 10.
 
 ---
 
@@ -413,16 +427,71 @@ chọn đọc lại tập train chính vì nó không bắt sửa stage đang ch
 | §6.2 | `schedule="@hourly"` | Giữ lịch, thêm `is_paused_upon_creation=True` | Máy dev 16GB — xem 2.7 |
 | §7.8 | Mức độ `ok`/`warning`/`high` | Thêm `insufficient_data` cho performance | Không báo xanh khi chưa đo — xem 2.6 |
 | §7.7 | Agent gửi feedback "sau N ngày mô phỏng" | Agent gửi theo lệnh, mang theo `predicted_on` | Độ trễ thật thì không demo được; độ trễ vẫn hiện ra vì hai lệnh tách rời |
+| §6.2 | 3 task `collect_window`/`run_evidently`/`publish_report` | 1 task mỗi model (`house_price_regressor`, `house_needs_renovation_classifier`), mỗi task 1 container `ml-monitor` làm hết cả ba việc | XCom chỉ chuyền được giá trị nhỏ; 3 task sẽ phải đọc lại cửa sổ 3 lần — xem Task 10 |
+| §7.6 | Inference log: `request_id`, `timestamp`, `raw_input`, `prediction`, `model_name`, `model_version` | Thêm `probability` | Performance drift của classification chấm bằng AUC, không tính được từ một bool — xem mục 6 |
+| §8 (bảng kịch bản) | `price_inflation` phải ra `high`; `market_rally` phải ra `feature=warning/high, performance=ok` | Đo thật: `price_inflation` ra `ok` (giống hệt `none`); `market_rally` đảo ngược — `feature=ok`, `performance=high` | `list_price` bị loại khỏi feature của regression (leakage, mục 5 tài liệu gốc); cả hai kịch bản chỉ bóp méo đúng cột đó — xem mục 8 (Finding A) |
+| §4 (ngưỡng feature drift) | Một luật duy nhất: tỉ lệ cột drift | Thêm luật thứ hai (magnitude — cộng dồn `value − threshold` trên mọi cột so sánh được), lấy mức nặng hơn giữa hai luật | Luật tỉ lệ mù trước drift dồn vào 1-2 cột: `market_shift` lệch `city` (Jensen-Shannon 0.7754, ngưỡng 0.1) mà tỉ lệ vẫn 2/22 = 0.0909, y hệt `none` → báo `ok` sai — xem mục 10 (Finding B) |
 
-Cả năm dòng nên được vá ngược vào `mlops-pipeline-design.md` sau khi Plan 4
-chạy xong, cùng cách Plan 3 đã vá §5. Vá sau chứ không vá trước, vì tới lúc đó
-mới biết ngưỡng thật và cỡ cửa sổ thật là bao nhiêu.
+Chín dòng trên. Bảy dòng đầu đã được vá ngược vào `mlops-pipeline-design.md`
+ở Task 12, cùng cách Plan 3 đã vá §5. Hai dòng cuối — bảng kịch bản theo đo
+thật và luật magnitude cho feature drift — **không** vá lại, vì tài liệu gốc
+không có bảng kỳ vọng theo kịch bản hay bảng ngưỡng số ở cấp chi tiết đó để
+vá; cả hai là phát hiện mới, chỉ sống trong tài liệu spec này (mục 8, mục
+10). Vá sau chứ không vá trước, vì tới lúc đó mới biết ngưỡng thật và cỡ cửa
+sổ thật là bao nhiêu.
 
 ---
 
 ## 10. Câu hỏi còn mở
 
-- **Ngưỡng ở mục 4 chưa hiệu chỉnh.** Phải chạy `none` trước rồi mới chốt.
+- **Ngưỡng ở mục 4 — đã đo thật ở Task 11, không cần hiệu chỉnh lại.** `none`
+  đo được tỉ lệ cột drift 0.0909 (2/22), nằm sâu dưới ngưỡng `warning` 0.3;
+  `FEATURE_WARNING_SHARE`, `FEATURE_HIGH_SHARE`, `RMSE_WARNING_RATIO`,
+  `RMSE_HIGH_RATIO`, `MIN_GROUND_TRUTH` đều giữ nguyên giá trị đoán ở Task 4.
+  Nhưng đo thật cũng lộ ra một lỗ hổng mà ngưỡng tỉ lệ cột một mình không
+  thấy — xem điểm tiếp theo.
+- **Finding B — `feature_severity` giờ có hai đường, và đường thứ hai được
+  hiệu chỉnh trên một control bị nhiễm.** `market_shift` (dồn `city` về 1-2 thành phố)
+  đo được Jensen-Shannon distance của `city` là 0.7754 so với ngưỡng
+  per-column 0.1 — lệch gần 8 lần — nhưng luật chỉ-nhìn-tỉ-lệ-cột-drift cũ
+  vẫn báo `ok`, vì chỉ 2/22 = 0.0909 cột vượt ngưỡng, y hệt tỉ lệ đo được ở
+  `none`. Đã thêm một luật thứ hai — `sum(value − threshold)` cộng dồn trên
+  toàn bộ cột Evidently so sánh được, cảnh báo khi `>= 0.0` — và
+  `feature_severity` lấy mức nặng hơn giữa hai luật (`market_shift`:
+  `none` = `-0.2844`, `market_shift` = `+0.3901`). Ba điểm yếu đã biết, ghi
+  lại ở đây thay vì chỉ nằm trong code comment:
+  - **(a) Luật magnitude cộng dồn trên toàn bộ cột, nên phụ thuộc số chiều.**
+    Cùng kiểu điểm yếu với luật tỉ lệ mà nó bổ sung: càng nhiều cột, càng
+    nhiều "khoảng trống âm" (cột không drift, `value − threshold` âm) có thể
+    nuốt mất tín hiệu của một cột lệch nặng.
+  - **(b) Đường `0.0` là chỗ hai mẫu đo tình cờ rơi vào, không phải một con
+    số có nguyên lý.** Cả hai margin (0.284 và 0.390) đều thoải mái so với
+    biên độ dao động 0.674 giữa hai lần đo, nhưng đường phân cách vẫn chỉ
+    dựa trên đúng hai điểm đo, chưa có một quy tắc thống kê đứng sau.
+  - **(c) `scenario=none` không phải một control sạch.** `zipcode` tự trôi
+    Jensen-Shannon distance 0.825 — gấp tám lần ngưỡng phát hiện 0.1 — ngay
+    cả khi không áp scenario nào, ở mọi lần chạy. Nguyên nhân: agent lấy
+    mẫu ở **đuôi** dataset theo `listing_date` (đúng như bullet "Pool dữ
+    liệu của agent" bên dưới đã dự đoán), trong khi model train trên
+    `head(SAMPLE_ROWS)` — hai slice khác nhau của cùng một dataset. Bất kỳ
+    ngưỡng nào hiệu chỉnh dựa trên `none` đều thừa hưởng sự nhiễm này. Đây
+    là lỗi của **bộ đo, không phải của drift detector**: toàn bộ khoảng
+    cách 0.674 phân tách hai lần chạy phía trên đến từ đúng một cột —
+    `city` — không phải `zipcode` (cột này gần như giống hệt nhau ở cả hai
+    lần đo, 0.825054 cả hai, vì cùng seed 42 nên cùng tập giá trị zipcode
+    thật). Số liệu per-column đầy đủ ở
+    `.superpowers/sdd/2026-09-20-plan4-monitoring/task-11-report.md`, mục
+    "Addendum 2".
+- **Race khi flush buffer của inference log — chưa fix trong code.** Chạy
+  `monitor` ngay sau một lô agent có thể bắt trúng lúc buffer mới flush được
+  một phần (`InferenceLogBuffer` flush theo kích thước hoặc tuổi, qua một
+  task nền chạy "khoảng mỗi giây", nhưng dưới một đợt 500 request đồng bộ có
+  thể trễ). Quan sát được một lần: `n_predictions=33` ngay sau một lô 500
+  request, rồi `/health` báo `buffered:0` vài giây sau khi flush kịp. Vòng
+  qua được bằng thao tác tay trong suốt Task 11 — poll `GET /health` tới khi
+  `inference_log.buffered == 0` trước khi gọi monitor — nhưng chưa sửa trong
+  code. Có thể ảnh hưởng tới các lần chạy theo lịch của `monitoring_dag`, vì
+  lúc đó không có ai đứng poll `/health` hộ.
 - **Cỡ cửa sổ.** Đề xuất mặc định 24 giờ (`MONITOR_WINDOW_HOURS`) dù DAG chạy
   mỗi giờ, vì traffic bắn tay có thể để trống nhiều giờ liền. Nếu sau này có
   agent chạy liên tục thì rút xuống.
@@ -431,7 +500,20 @@ mới biết ngưỡng thật và cỡ cửa sổ thật là bao nhiêu.
   đuôi là dữ liệu model chưa từng thấy — đúng ý. Khi chạy full 2 triệu dòng thì
   không còn phần nào chưa thấy, và drift lúc đó hoàn toàn do scenario tạo ra.
   Chấp nhận được, nhưng phải ghi rõ để sau này không ai hiểu nhầm là agent luôn
-  gửi dữ liệu lạ.
+  gửi dữ liệu lạ. **Đo thật xác nhận dự đoán này, và nó chính là nguồn nhiễm
+  của control `none` — xem điểm (c) ở trên.**
 - **Đọc raw 373MB trong container agent.** Với 200k dòng thì thoải mái. Với 2
   triệu dòng cần đọc theo row group thay vì `read_parquet` cả file. Để
   implementation plan xử lý.
+- **Finding A — `price_inflation`/`market_rally` chỉ bóp méo `list_price`,
+  một cột bị loại khỏi feature của regression (leakage).** Đo thật (Task 11): cả hai
+  kịch bản ra kết quả feature/prediction giống hệt `none` —
+  `price_inflation` giống `none` tới cả RMSE. Đây **không phải bug** — hệ
+  thống đúng theo đúng nghĩa "model không nhìn thấy cột thì không thể drift
+  theo cột đó". Không đề xuất bỏ `list_price` khỏi leakage của regression để
+  "sửa" kết quả này — mục 5 của tài liệu gốc đã giải thích rõ vì sao loại nó
+  (giữ lại thì bài toán trở nên tầm thường). Câu hỏi để ngỏ cho plan sau: có
+  nên đổi cột mà `price_inflation`/`market_rally` bóp méo (ví dụ
+  `living_area_sqft`, `school_rating`) để hai kịch bản đó thật sự thử được
+  feature drift, thay vì chỉ `market_shift` làm việc đó? Xem mục 8, Finding
+  A.
