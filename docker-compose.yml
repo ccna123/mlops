@@ -92,6 +92,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      # Airflow 2.10 chi bat session backend, nen moi loi goi basic auth tu
+      # services/api/ deu bi 401 - va thong diep 401 khong he goi y rang
+      # nguyen nhan la thieu backend chu khong phai sai mat khau.
+      # Giu session phia sau de dang nhap tren trinh duyet khong doi.
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       MINIO_ENDPOINT_INTERNAL: ${MINIO_ENDPOINT_INTERNAL}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
