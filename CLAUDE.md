@@ -174,7 +174,7 @@ Ba plan đầu **đã xong**, đều đã merge vào `main`. Plan 4 đã xong tr
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
 
-357 test pass ở Python 3.13 (local); 294 pass + 6 skip ở 3.12 (container) —
+358 test pass ở Python 3.13 (local); 294 pass + 7 skip ở 3.12 (container) —
 image `ml-base` chỉ chứa `common/`, nên test cần `stages/` hoặc `services/`
 bị skip có chủ ý ở đó.
 
