@@ -14,6 +14,29 @@ as testable as anything in `ml_common.drift`.
 by design, so each Docker image only copies the one `main.py` it needs.
 Rather than add package structure to production code for one test file,
 this loads `stages/monitor/main.py` directly by path.
+
+SKIPPED INSIDE THE ml-base CONTAINER, ON PURPOSE. `ml-base:latest` COPYs
+only `common/` - `docker run --rm ml-base:latest sh -c "ls /app"` prints
+just `common`, nothing else. `stages/monitor/main.py` does not exist in
+that image, so loading it there would raise `FileNotFoundError` at
+COLLECTION time, which aborts pytest's entire run, not just this one file
+(`ERROR common/tests/test_monitor_feature_margins.py - FileNotFoundError`,
+`Interrupted: 1 error during collection`) - failing the plan's Definition
+of Done item 2, "tests pass in the container under Python 3.12", for
+every test in the suite, not just these five. The module-level
+`pytestmark` below guards against exactly that: it is computed and
+evaluated BEFORE `_load_monitor_main()` is ever called, so collection
+never touches the missing file inside the container. This file runs (not
+skips) on the dev machine and wherever CI checks out the full repo, both
+of which have `stages/` on disk. DO NOT "fix" this skip by adding
+`stages/` to `ml-base`'s Dockerfile, by adding `__init__.py` under
+`stages/` to make it importable normally, or by moving this file/logic
+into `common/ml_common/` to dodge the problem - see the module-docstring
+paragraphs above for why `_feature_margins` belongs with the monitor
+stage and why `stages/` has no package structure. The correct fix, if this
+skip ever needs revisiting, is to keep it and just make sure the container
+suite is run with the coordinator's exact container test command
+alongside the dev-machine one, not to make the skip stop triggering.
 """
 
 from __future__ import annotations
@@ -24,9 +47,27 @@ from pathlib import Path
 
 import pytest
 
+_MONITOR_MAIN_PATH = Path(__file__).resolve().parents[2] / "stages" / "monitor" / "main.py"
+
+pytestmark = pytest.mark.skipif(
+    not _MONITOR_MAIN_PATH.exists(),
+    reason=(
+        "stages/monitor/main.py not present - the ml-base image copies only "
+        "common/, so this test runs on the dev machine and in CI, not in the "
+        "container suite."
+    ),
+)
+
 
 def _load_monitor_main():
     """Loads stages/monitor/main.py as a module without a package around it.
+
+    Only called when `_MONITOR_MAIN_PATH` is already known to exist - see
+    the module-level skip guard above. Calling this unconditionally at
+    import time is exactly what broke the container test suite: inside
+    ml-base, the file is absent and `spec_from_file_location` /
+    `exec_module` raise `FileNotFoundError` during collection, before the
+    skip marker ever gets a chance to apply.
 
     Returns:
         The executed module object, with `_feature_margins` and friends as
@@ -35,15 +76,14 @@ def _load_monitor_main():
         are `def`s and constant assignments, guarded from running by its
         own `if __name__ == "__main__":` block.
     """
-    path = Path(__file__).resolve().parents[2] / "stages" / "monitor" / "main.py"
-    spec = importlib.util.spec_from_file_location("monitor_main_under_test", path)
+    spec = importlib.util.spec_from_file_location("monitor_main_under_test", _MONITOR_MAIN_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
-monitor_main = _load_monitor_main()
+monitor_main = _load_monitor_main() if _MONITOR_MAIN_PATH.exists() else None
 
 
 def _value_drift(column: str, threshold: float, value: float) -> dict:
