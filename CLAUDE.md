@@ -54,9 +54,8 @@ Python 3.12. Máy dev chạy 3.13 để test logic thuần.
 
 ## Quy ước viết code
 
-- **Dấu tiếng Việt:** file markdown có dấu. Commit message tiếng Việt **không
-  dấu** — tránh lỗi encoding khi chạy qua terminal Windows và trong log
-  container.
+- **Dấu tiếng Việt:** file markdown có dấu. Commit message viết **tiếng Anh** —
+  xem mục Quy ước commit.
 - **Ngôn ngữ trong code:** toàn bộ code — biến cục bộ lẫn API công khai, comment,
   docstring, error message — viết **tiếng Anh tự nhiên**, đặt tên sao cho dễ
   đọc (vd `result`, `deleted_row_count`, `compute_profile`, `build_pipeline`),
@@ -126,14 +125,23 @@ powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
 
 ## Quy ước commit
 
-Conventional Commits, mô tả tiếng Việt không dấu. Một task trong plan = một commit.
+Conventional Commits, mô tả **tiếng Anh**. Một task trong plan = một commit.
 
 ```
-feat: parser cho 5 loai dirty o muc gia tri don le
-test: them test cho truong hop zipcode 4 so
-chore: scaffolding package ml_common va tooling
-docs: README va script xac nhan nen tang
+feat: parse the 5 dirty formats at the single-value level
+test: cover the 4-digit zipcode case
+chore: scaffold the ml_common package and tooling
+docs: README and the foundation verification script
 ```
+
+Tiếng Anh thay cho tiếng Việt không dấu kể từ 2026-09-20. Lý do đổi: git log
+nằm cùng chỗ với traceback, log container và docstring — vốn đã tiếng Anh cả —
+nên tiếng Việt không dấu là ngôn ngữ thứ ba, và nó đọc chậm hơn hẳn (`sua tan
+goc bay stdout` mất vài giây để giải mã). Tiếng Anh cũng bỏ luôn được lý do
+phải bỏ dấu: không còn rủi ro encoding trên terminal Windows.
+
+**Commit cũ giữ nguyên** — không rewrite history. Log sẽ có hai ngôn ngữ ở hai
+giai đoạn, và điều đó bình thường.
 
 Chỉ commit khi được yêu cầu hoặc khi plan nói rõ ở step đó.
 
