@@ -168,3 +168,149 @@ def join_outcomes(predictions: pd.DataFrame, outcomes: pd.DataFrame) -> pd.DataF
         empty["actual"] = pd.Series(dtype="object")
         return empty
     return predictions.merge(outcomes[["request_id", "actual"]], on="request_id", how="inner")
+
+
+SEVERITIES = ("ok", "warning", "high")
+
+# Performance drift has a third state the other two do not. Ground truth
+# always arrives later than the prediction it describes, so early on there is
+# simply nothing to measure. Reporting "ok" then would put a green badge on a
+# dashboard when the truthful answer is "nobody has checked yet".
+INSUFFICIENT = "insufficient_data"
+
+MIN_GROUND_TRUTH = 50
+
+FEATURE_WARNING_SHARE = 0.3
+FEATURE_HIGH_SHARE = 0.5
+
+RMSE_WARNING_RATIO = 1.2
+RMSE_HIGH_RATIO = 1.5
+
+AUC_WARNING_DROP = 0.05
+AUC_HIGH_DROP = 0.10
+
+
+def feature_severity(drifted_share: float) -> str:
+    """Grades feature drift from the share of columns Evidently flagged.
+
+    Args:
+        drifted_share: fraction of columns reported as drifted, 0.0 to 1.0.
+
+    Returns:
+        "ok" below 0.3, "warning" from 0.3 through 0.5, "high" above 0.5.
+
+    Example:
+        feature_severity(0.1)   # -> "ok", a column or two moving is normal
+        feature_severity(0.4)   # -> "warning"
+        feature_severity(0.8)   # -> "high"
+
+        # These numbers are a starting point, not a conclusion. Calibrate
+        # them against a scenario=none run: if no-drift traffic already
+        # scores 0.25, the 0.3 line is far too close.
+    """
+    if drifted_share > FEATURE_HIGH_SHARE:
+        return "high"
+    if drifted_share >= FEATURE_WARNING_SHARE:
+        return "warning"
+    return "ok"
+
+
+def prediction_severity(drifted: bool) -> str:
+    """Grades prediction drift, which is a single column and so a yes or no.
+
+    Args:
+        drifted: whether Evidently flagged the prediction column.
+
+    Returns:
+        "high" when it drifted, "ok" otherwise. There is no middle grade:
+        one column cannot be partly drifted, and the model's own output
+        shifting is worth looking at whenever it happens.
+
+    Example:
+        prediction_severity(True)   # -> "high"
+        prediction_severity(False)  # -> "ok"
+    """
+    return "high" if drifted else "ok"
+
+
+def performance_severity(task_type: str, current: dict, train: dict, n_joined: int) -> str:
+    """Grades how far real accuracy has fallen from what training measured.
+
+    Args:
+        task_type: "regression" or "classification".
+        current: metrics computed over the rows that have ground truth.
+        train: the metrics logged by the train stage for this model version.
+        n_joined: how many rows had ground truth. Below MIN_GROUND_TRUTH the
+            metric is too noisy to act on.
+
+    Returns:
+        "insufficient_data" when n_joined is below the floor. Otherwise for
+        regression, the rmse ratio: "ok" below 1.2x, "warning" to 1.5x,
+        "high" above. For classification, the auc drop: "ok" under 0.05,
+        "warning" to 0.10, "high" beyond. A model doing BETTER than at
+        training is "ok", never worse.
+
+    Raises:
+        KeyError: when the metric a task needs is missing from either dict.
+            Guessing would report a verdict nobody measured.
+
+    Example:
+        performance_severity("regression", {"rmse": 41000}, {"rmse": 41000}, 500)
+        # -> "ok"
+
+        performance_severity("regression", {"rmse": 70000}, {"rmse": 41000}, 500)
+        # -> "high", predictions are off by 70% more than they were
+
+        performance_severity("regression", {"rmse": 41000}, {"rmse": 41000}, 10)
+        # -> "insufficient_data", NOT "ok" - 10 rows decides nothing
+    """
+    if n_joined < MIN_GROUND_TRUTH:
+        return INSUFFICIENT
+
+    if task_type == "regression":
+        ratio = current["rmse"] / train["rmse"]
+        if ratio > RMSE_HIGH_RATIO:
+            return "high"
+        if ratio >= RMSE_WARNING_RATIO:
+            return "warning"
+        return "ok"
+
+    drop = train["auc"] - current["auc"]
+    if drop >= AUC_HIGH_DROP:
+        return "high"
+    if drop >= AUC_WARNING_DROP:
+        return "warning"
+    return "ok"
+
+
+def overall_severity(parts: dict) -> str:
+    """Reduces the three drift verdicts to the one a dashboard shows.
+
+    Args:
+        parts: the per-type verdicts, e.g.
+            {"feature": "ok", "prediction": "ok", "performance": "high"}.
+
+    Returns:
+        The worst of the measured verdicts. `insufficient_data` is skipped
+        rather than counted: something unmeasured must not drag the badge up,
+        and must not hold it down either. When nothing at all was measured,
+        the answer is `insufficient_data`, because "ok" would claim a check
+        that never happened.
+
+    Example:
+        overall_severity({"feature": "warning", "prediction": "high", "performance": "ok"})
+        # -> "high"
+
+        overall_severity({"feature": "ok", "prediction": "ok",
+                          "performance": "insufficient_data"})
+        # -> "ok", feature and prediction really were measured and were fine
+
+        overall_severity({"feature": "insufficient_data",
+                          "prediction": "insufficient_data",
+                          "performance": "insufficient_data"})
+        # -> "insufficient_data"
+    """
+    measured = [value for value in parts.values() if value in SEVERITIES]
+    if not measured:
+        return INSUFFICIENT
+    return max(measured, key=SEVERITIES.index)

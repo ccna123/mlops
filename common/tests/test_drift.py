@@ -8,6 +8,7 @@ import json
 from datetime import UTC, date, datetime
 
 import pandas as pd
+import pytest
 
 from ml_common import drift
 
@@ -180,3 +181,118 @@ def test_load_predictions_skips_a_day_that_has_no_files():
     result = drift.load_predictions(FakeStorage(frames), "m", end, 24)
 
     assert result["request_id"].tolist() == ["r1"]
+
+
+@pytest.mark.parametrize(
+    ("share", "expected"),
+    [
+        (0.0, "ok"),
+        (0.29, "ok"),
+        (0.3, "warning"),
+        (0.5, "warning"),
+        (0.51, "high"),
+        (1.0, "high"),
+    ],
+)
+def test_feature_severity_thresholds(share, expected):
+    assert drift.feature_severity(share) == expected
+
+
+def test_prediction_severity_is_binary():
+    assert drift.prediction_severity(False) == "ok"
+    assert drift.prediction_severity(True) == "high"
+
+
+def test_performance_severity_says_insufficient_below_the_floor():
+    # Not "ok". A green badge when nobody has checked is the dangerous lie.
+    result = drift.performance_severity(
+        "regression", {"rmse": 41_000.0}, {"rmse": 41_000.0}, n_joined=10
+    )
+    assert result == "insufficient_data"
+
+
+def test_performance_severity_at_exactly_the_floor_is_measured():
+    result = drift.performance_severity(
+        "regression", {"rmse": 41_000.0}, {"rmse": 41_000.0}, n_joined=drift.MIN_GROUND_TRUTH
+    )
+    assert result == "ok"
+
+
+@pytest.mark.parametrize(
+    ("current_rmse", "expected"),
+    [
+        (41_000.0, "ok"),
+        (49_199.0, "ok"),
+        (49_200.0, "warning"),
+        (61_500.0, "warning"),
+        (61_501.0, "high"),
+    ],
+)
+def test_performance_severity_regression_uses_the_rmse_ratio(current_rmse, expected):
+    # Train rmse 41_000: warning at 1.2x = 49_200, high above 1.5x = 61_500.
+    result = drift.performance_severity(
+        "regression", {"rmse": current_rmse}, {"rmse": 41_000.0}, n_joined=500
+    )
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("current_auc", "expected"),
+    [
+        (0.72, "ok"),
+        (0.71, "ok"),
+        (0.65, "warning"),
+        (0.61, "warning"),
+        (0.60, "high"),
+    ],
+)
+def test_performance_severity_classification_uses_the_auc_drop(current_auc, expected):
+    # Train auc 0.71: warning once it drops 0.05, high once it drops 0.10.
+    result = drift.performance_severity(
+        "classification", {"auc": current_auc}, {"auc": 0.71}, n_joined=500
+    )
+    assert result == expected
+
+
+def test_performance_severity_improving_is_never_worse_than_ok():
+    result = drift.performance_severity(
+        "regression", {"rmse": 20_000.0}, {"rmse": 41_000.0}, n_joined=500
+    )
+    assert result == "ok"
+
+
+def test_overall_severity_takes_the_worst():
+    result = drift.overall_severity({"feature": "ok", "prediction": "ok", "performance": "ok"})
+    assert result == "ok"
+    assert (
+        drift.overall_severity({"feature": "warning", "prediction": "ok", "performance": "ok"})
+        == "warning"
+    )
+    assert (
+        drift.overall_severity({"feature": "warning", "prediction": "high", "performance": "ok"})
+        == "high"
+    )
+
+
+def test_overall_severity_ignores_insufficient_data():
+    # Unmeasured must not drag the verdict up OR down.
+    result = drift.overall_severity(
+        {"feature": "ok", "prediction": "ok", "performance": "insufficient_data"}
+    )
+    assert result == "ok"
+
+    result = drift.overall_severity(
+        {"feature": "high", "prediction": "ok", "performance": "insufficient_data"}
+    )
+    assert result == "high"
+
+
+def test_overall_severity_with_nothing_measured_is_insufficient():
+    result = drift.overall_severity(
+        {
+            "feature": "insufficient_data",
+            "prediction": "insufficient_data",
+            "performance": "insufficient_data",
+        }
+    )
+    assert result == "insufficient_data"
