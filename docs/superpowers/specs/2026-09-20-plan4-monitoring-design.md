@@ -451,7 +451,7 @@ chọn đọc lại tập train chính vì nó không bắt sửa stage đang ch
 
 Chi tiết đầy đủ — số đo từng lần chạy, cách cô lập cửa sổ theo timestamp, bảng
 per-column Jensen-Shannon/Wasserstein — ở
-`.superpowers/sdd/2026-09-20-plan4-monitoring/task-11-report.md`. Không đề
+`docs/superpowers/specs/2026-09-20-plan4-monitoring-measurements.md`. Không đề
 xuất bỏ `list_price` khỏi leakage của regression để "sửa" bảng cũ — mục 5 của
 tài liệu gốc đã giải thích rõ vì sao loại nó (giữ lại thì bài toán tầm
 thường). Câu hỏi mở cho plan sau ở mục 10.
@@ -520,7 +520,7 @@ sổ thật là bao nhiêu.
     `city` — không phải `zipcode` (cột này gần như giống hệt nhau ở cả hai
     lần đo, 0.825054 cả hai, vì cùng seed 42 nên cùng tập giá trị zipcode
     thật). Số liệu per-column đầy đủ ở
-    `.superpowers/sdd/2026-09-20-plan4-monitoring/task-11-report.md`, mục
+    `docs/superpowers/specs/2026-09-20-plan4-monitoring-measurements.md`, mục
     "Addendum 2".
 - **Race khi flush buffer của inference log — chưa fix trong code.** Chạy
   `monitor` ngay sau một lô agent có thể bắt trúng lúc buffer mới flush được
