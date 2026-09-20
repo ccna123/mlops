@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from .routes import health
+from .routes import health, pipeline
 
 
 def create_app(
@@ -51,6 +51,7 @@ def create_app(
     app.state.probes = probes if probes is not None else {}
 
     app.include_router(health.router, prefix="/api")
+    app.include_router(pipeline.router, prefix="/api")
     return app
 
 
