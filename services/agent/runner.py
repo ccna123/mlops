@@ -50,8 +50,9 @@ def build_requests(
     Example:
         build_requests(pool, "price_inflation", "regression", count=500, seed=42)
         # -> 500 records with list_price multiplied by 1.2, each paired with
-        #    the price the house really sold for - unchanged, which is what
-        #    makes the model wrong under this scenario.
+        #    the price the house really sold for - unchanged. list_price is
+        #    not a regression feature, so the model never sees the inflation
+        #    either; this scenario is a structural no-op for regression.
     """
     if len(pool) == 0:
         return []

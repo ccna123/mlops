@@ -7,9 +7,16 @@ nothing.
 
 The interesting pair is `price_inflation` and `market_rally`. Both multiply
 the asking price by the same factor; they differ only in whether the true
-sale price moves with it. That one difference is what separates drift that
-hurts the model from drift that does not, and it is the reason the three
-drift types are reported separately at all.
+sale price moves with it, and that design is still right. But
+`schema.feature_columns("regression")` excludes `list_price` as leakage, so
+neither scenario's perturbation ever reaches the regression model's input -
+`SelectColumns` strips it before the model or the drift comparison sees it.
+`price_inflation` therefore changes nothing the model can see: a useful
+negative result, since drift in a column the model never reads is not drift
+that matters. `market_rally` moves the true sale price without moving the
+prediction, so it fires performance drift with zero feature drift.
+`market_shift` is the scenario that actually exercises feature drift,
+because `city` - unlike `list_price` - IS a regression feature.
 
 Pure functions on dicts: no HTTP, no pandas, no config.
 """
@@ -119,11 +126,14 @@ def adjust_truth(actual, scenario: str, task_type: str):
 
     Returns:
         For `market_rally` on regression, the price scaled by PRICE_FACTOR:
-        the market really did rise, so the model stays roughly right and
-        performance drift should NOT fire. For everything else the value
-        unchanged - under `price_inflation` houses still sell for what they
-        were always worth, which is what makes the model wrong. Classification
-        truth is never scaled, because a bool has nothing to scale.
+        the market really did rise, but `list_price` (the only column either
+        scenario perturbs) is excluded from the regression model's features,
+        so the prediction never follows it - performance drift fires because
+        the truth moved and the model did not. For everything else the value
+        is unchanged - under `price_inflation` this makes no difference to
+        the model either way, since it never sees the inflated `list_price`
+        at all. Classification truth is never scaled, because a bool has
+        nothing to scale.
 
     Raises:
         ValueError: when the scenario name is unknown.

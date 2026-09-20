@@ -220,11 +220,11 @@ RMSE_HIGH_RATIO = 1.5
 AUC_WARNING_DROP = 0.05
 AUC_HIGH_DROP = 0.10
 
-# Share dilutes concentrated drift. With 22 compared columns, 7 must cross
+# Share dilutes concentrated drift. With 21 compared columns, 7 must cross
 # their own threshold before FEATURE_WARNING_SHARE even fires. The
 # market_shift scenario (city forced to a single value) concentrates ALL
 # its drift into exactly 2 columns - city and zipcode - and measured a
-# share of 2/22 = 0.0909, IDENTICAL to scenario=none's share, because
+# share of 2/21 = 0.0952, IDENTICAL to scenario=none's share, because
 # zipcode (a high-cardinality categorical - thousands of distinct 5-digit
 # codes) crosses its own 0.1 Jensen-Shannon threshold from sampling noise
 # alone, in EVERY run, real drift or not: both the none and market_shift
@@ -235,23 +235,36 @@ AUC_HIGH_DROP = 0.10
 #
 # feature_margin_severity sums how far PAST its own threshold every
 # compared column's drift score sits (value - threshold, negative when
-# under). zipcode's near-identical ~+0.725 excess contributes almost
-# equally to both runs' sums and washes out of the COMPARISON, leaving the
-# genuine difference: city's margin, which went from +0.001 (value 0.101
-# against threshold 0.1, barely over) in scenario=none to +0.675 (value
-# 0.775 against threshold 0.1, massively over) in market_shift.
+# under), across every compared column. That sum is dominated by however
+# many quiet columns sit comfortably under their own threshold - each one
+# contributes a small negative term - so the 0.0 line below is calibrated
+# against the CURRENT number of compared columns (21: run_drift_report
+# subsets both frames to shared_numeric + shared_categorical before handing
+# them to Evidently, so property_id no longer rides along - see
+# run_drift_report in stages/monitor/main.py). Adding or removing a feature
+# column shifts every future sum, so this constant would need recalibrating
+# against fresh measurements if the compared column count changes again, not
+# just trusted to keep separating the same way.
+# zipcode's near-identical ~+0.725 excess contributes almost equally to both
+# runs' sums and washes out of the COMPARISON, leaving the genuine
+# difference: city's margin, which went from +0.001 (value 0.101 against
+# threshold 0.1, barely over) in scenario=none to +0.675 (value 0.775
+# against threshold 0.1, massively over) in market_shift.
 #
-# Observed sums across all 22 compared columns (task-11 market_shift
-# addendum, same fingerprint/runs as above):
-#   scenario=none:  -0.2844
-#   market_shift:   +0.3901
-# A swing of 0.674 across the zero crossing chosen below. Margin from the
-# none observation to the line: 0.284. Margin from the line to the
-# market_shift observation: 0.390. Both comfortable - this is not a threshold
-# tuned to barely separate two samples.
+# Observed sums across the 21 columns actually compared today (task-11
+# market_shift addendum, same fingerprint/runs as above; the raw runs
+# measured 22 columns because run_drift_report did not yet subset out
+# property_id, whose own margin was a constant -0.05 in both runs - it is
+# subtracted back out here analytically rather than re-measured):
+#   scenario=none:  -0.2344  (was -0.2844 across 22 columns)
+#   market_shift:   +0.4401  (was +0.3901 across 22 columns)
+# A swing of 0.6745 across the zero crossing chosen below. Margin from the
+# none observation to the line: 0.2344. Margin from the line to the
+# market_shift observation: 0.4401. Both comfortable - this is not a
+# threshold tuned to barely separate two samples.
 #
 # There is deliberately NO high-tier magnitude constant. Exactly one
-# above-warning observation exists (market_shift, +0.3901) and inventing a
+# above-warning observation exists (market_shift, +0.4401) and inventing a
 # "high" cutoff from a single data point is exactly the kind of guess this
 # task exists to stop making - left undefined until a second real
 # high-magnitude measurement exists to calibrate against.
