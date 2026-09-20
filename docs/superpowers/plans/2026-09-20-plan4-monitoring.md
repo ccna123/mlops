@@ -30,20 +30,20 @@
 
 ## File Structure
 
-| File | Trách nhiệm |
-| --- | --- |
-| `common/ml_common/storage.py` | **Sửa:** thêm `drift_summary_key()`, `drift_latest_key()` |
-| `common/ml_common/drift.py` | **Mới.** Gom cửa sổ, join `request_id`, luật quy mức độ. Thuần pandas |
-| `services/agent/scenarios.py` | **Mới.** 5 kịch bản bóp méo — hàm thuần trên dict |
-| `services/agent/runner.py` | **Mới.** Lõi agent: dựng request, gọi HTTP, gom feedback |
-| `services/agent/__main__.py` | **Mới.** CLI |
-| `services/agent/Dockerfile` | **Mới.** `FROM ml-base:latest` + httpx |
-| `services/serving/app.py` | **Sửa:** thêm `POST /feedback/{task_type}` và `write_ground_truth` |
-| `stages/monitor/main.py` | **Mới.** Gọi Evidently, ghi report + summary |
-| `stages/monitor/Dockerfile` | **Mới.** `FROM ml-base:latest` + Evidently |
-| `dags/monitoring_dag.py` | **Mới.** DAG theo lịch, một task mỗi `task_type` |
-| `scripts/build_stage_images.ps1` | **Sửa:** thêm `ml-monitor` |
-| `scripts/verify_monitoring.ps1` | **Mới.** Một lệnh xác nhận Plan 4 |
+| File                               | Trách nhiệm                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `common/ml_common/storage.py`    | **Sửa:** thêm `drift_summary_key()`, `drift_latest_key()`                 |
+| `common/ml_common/drift.py`      | **Mới.** Gom cửa sổ, join `request_id`, luật quy mức độ. Thuần pandas |
+| `services/agent/scenarios.py`    | **Mới.** 5 kịch bản bóp méo — hàm thuần trên dict                      |
+| `services/agent/runner.py`       | **Mới.** Lõi agent: dựng request, gọi HTTP, gom feedback                    |
+| `services/agent/__main__.py`     | **Mới.** CLI                                                                   |
+| `services/agent/Dockerfile`      | **Mới.** `FROM ml-base:latest` + httpx                                       |
+| `services/serving/app.py`        | **Sửa:** thêm `POST /feedback/{task_type}` và `write_ground_truth`       |
+| `stages/monitor/main.py`         | **Mới.** Gọi Evidently, ghi report + summary                                  |
+| `stages/monitor/Dockerfile`      | **Mới.** `FROM ml-base:latest` + Evidently                                   |
+| `dags/monitoring_dag.py`         | **Mới.** DAG theo lịch, một task mỗi `task_type`                          |
+| `scripts/build_stage_images.ps1` | **Sửa:** thêm `ml-monitor`                                                  |
+| `scripts/verify_monitoring.ps1`  | **Mới.** Một lệnh xác nhận Plan 4                                          |
 
 **Vì sao `drift.py` nằm ở `common/` chứ không ở `stages/monitor/`:** luật quy mức độ là phần dễ sai nhất và đáng test nhất của plan này. Ở `common/` thì nó chạy trong bộ test đã có, ở máy dev, không cần Evidently và không cần container. Ranh giới: `drift.py` **quyết định mức độ**, `monitor/main.py` **gọi Evidently và ghi file**.
 
@@ -56,10 +56,12 @@
 Spec mục 2.3 yêu cầu task đầu tiên là xác minh API thật trên đúng version được pin, **không viết chay theo trí nhớ**. Evidently đổi API giữa 0.4 và 0.7; code chép từ blog cũ sẽ hỏng.
 
 **Files:**
+
 - Create: `stages/monitor/Dockerfile`
 - Modify: `scripts/build_stage_images.ps1`
 
 **Interfaces:**
+
 - Produces: image `ml-monitor:latest` có Evidently 0.7.x; xác nhận được chữ ký `Report.run(current, reference)`
 
 - [ ] **Step 1: Viết Dockerfile cho `ml-monitor`**
@@ -176,10 +178,12 @@ Thay `<FILL IN...>` bằng version thật in ra ở Step 3.
 ## Task 2: Hai hàm key mới trong `storage.py`
 
 **Files:**
+
 - Modify: `common/ml_common/storage.py`
 - Test: `common/tests/test_storage.py`
 
 **Interfaces:**
+
 - Produces: `storage.drift_summary_key(model_name, run_id) -> str`, `storage.drift_latest_key(model_name) -> str`
 
 - [ ] **Step 1: Viết test fail trước**
@@ -288,10 +292,12 @@ EOF
 ## Task 3: `drift.py` — gom cửa sổ và join ground truth
 
 **Files:**
+
 - Create: `common/ml_common/drift.py`
 - Test: `common/tests/test_drift.py`
 
 **Interfaces:**
+
 - Consumes: `storage.Storage`, `storage.inference_log_prefix`, `storage.ground_truth_prefix`
 - Produces:
   - `drift.days_in_window(end: datetime, window_hours: int) -> list[date]`
@@ -711,10 +717,12 @@ EOF
 ## Task 4: `drift.py` — luật quy ra mức độ
 
 **Files:**
+
 - Modify: `common/ml_common/drift.py`
 - Test: `common/tests/test_drift.py`
 
 **Interfaces:**
+
 - Consumes: `metrics.compute_metrics`
 - Produces:
   - `drift.SEVERITIES = ("ok", "warning", "high")`, `drift.INSUFFICIENT = "insufficient_data"`
@@ -1039,10 +1047,12 @@ EOF
 ## Task 5: `scenarios.py` — 5 kịch bản thị trường
 
 **Files:**
+
 - Create: `services/agent/__init__.py`, `services/agent/scenarios.py`
 - Test: `services/agent/tests/__init__.py`, `services/agent/tests/test_scenarios.py`
 
 **Interfaces:**
+
 - Consumes: không gì (hàm thuần trên dict)
 - Produces:
   - `scenarios.SCENARIOS = ("none", "price_inflation", "market_rally", "market_shift", "new_segment")`
@@ -1349,10 +1359,12 @@ EOF
 ## Task 6: `runner.py` — lõi agent
 
 **Files:**
+
 - Create: `services/agent/runner.py`
 - Test: `services/agent/tests/test_runner.py`
 
 **Interfaces:**
+
 - Consumes: `scenarios.apply_scenario`, `scenarios.adjust_truth`, `ml_common.schema`, `ml_common.targets.derive_target`
 - Produces:
   - `runner.build_requests(pool: pd.DataFrame, scenario, task_type, count, seed) -> list[dict]`
@@ -1739,10 +1751,12 @@ EOF
 ## Task 7: CLI, Dockerfile, và service trong compose
 
 **Files:**
+
 - Create: `services/agent/__main__.py`, `services/agent/Dockerfile`
 - Modify: `docker-compose.yml`
 
 **Interfaces:**
+
 - Consumes: `runner.build_requests`, `runner.send_predictions`, `runner.send_feedback`, `storage.Storage`, `storage.raw_key`
 - Produces: `python -m services.agent --scenario X --task-type Y --count N`, image `ml-agent:latest`, service `agent` có `profiles: ["agent"]`
 
@@ -2010,10 +2024,12 @@ EOF
 ## Task 8: `POST /feedback/{task_type}` trên serving
 
 **Files:**
+
 - Modify: `services/serving/app.py`
 - Test: `services/serving/tests/test_app.py`
 
 **Interfaces:**
+
 - Consumes: `storage.Storage`, `storage.ground_truth_key`, `model_registry.ModelRegistry`
 - Produces: route `POST /feedback/{task_type}`, hàm `app.write_ground_truth(records: list[dict]) -> str`
 
@@ -2377,10 +2393,12 @@ EOF
 ## Task 9: `stages/monitor/main.py` — gọi Evidently
 
 **Files:**
+
 - Create: `stages/monitor/main.py`
 - Modify: `stages/monitor/Dockerfile` (không đổi, đã có từ Task 1)
 
 **Interfaces:**
+
 - Consumes: `drift.*` (Task 3, 4), `storage.drift_summary_key`, `storage.drift_latest_key`, `storage.report_key`, `features._numeric_and_categorical_columns`, `metrics.compute_metrics`
 - Produces: stage result `{"severity": str, "parts": dict, "n_predictions": int, "n_ground_truth": int, "report_key": str}`
 
@@ -2770,9 +2788,11 @@ EOF
 ## Task 10: `monitoring_dag`
 
 **Files:**
+
 - Create: `dags/monitoring_dag.py`
 
 **Interfaces:**
+
 - Consumes: image `ml-monitor:latest`, `stage_result` (chép lại, DAG không import được `ml_common`)
 - Produces: DAG `monitoring_dag` với 2 task song song
 
@@ -2943,10 +2963,12 @@ EOF
 Đây là task chứng minh plan này có giá trị. Ngưỡng ở Task 4 là **số khởi điểm chưa ai đo**; task này đo rồi chỉnh.
 
 **Files:**
+
 - Create: `scripts/verify_monitoring.ps1`
 - Modify: `common/ml_common/drift.py` (chỉ nếu số đo đòi)
 
 **Interfaces:**
+
 - Consumes: mọi thứ từ Task 1–10
 
 - [ ] **Step 1: Đảm bảo có champion cho regression**
@@ -3077,6 +3099,7 @@ EOF
 ## Task 12: Cập nhật tài liệu
 
 **Files:**
+
 - Modify: `CLAUDE.md`, `mlops-pipeline-design.md`, `docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`
 
 - [ ] **Step 1: Cập nhật `CLAUDE.md`**
@@ -3154,12 +3177,12 @@ EOF
 7. `monitoring_dag` parse được và tạo ra ở trạng thái paused.
 8. **Bảng kịch bản đúng hết:**
 
-| Chạy | Feature | Prediction | Performance | Tổng hợp |
-| --- | --- | --- | --- | --- |
-| `none` | `ok` | `ok` | `ok` | **`ok`** |
-| `price_inflation` | `high` | `high` | `high` | **`high`** |
-| `market_rally` | `warning`/`high` | `warning`/`high` | **`ok`** | warning/high |
-| `new_segment` | drift ở `property_type` | — | — | serving **không sập** |
+| Chạy               | Feature                   | Prediction           | Performance      | Tổng hợp                   |
+| ------------------- | ------------------------- | -------------------- | ---------------- | ---------------------------- |
+| `none`            | `ok`                    | `ok`               | `ok`           | **`ok`**             |
+| `price_inflation` | `high`                  | `high`             | `high`         | **`high`**           |
+| `market_rally`    | `warning`/`high`      | `warning`/`high` | **`ok`** | warning/high                 |
+| `new_segment`     | drift ở`property_type` | —                   | —               | serving**không sập** |
 
 9. Chạy khi chưa có ground truth ra `insufficient_data`, không ra `ok`.
 10. `scripts\verify_monitoring.ps1` xanh.
@@ -3182,23 +3205,23 @@ EOF
 
 **Spec coverage** — đối chiếu từng mục của spec:
 
-| Mục spec | Task |
-| --- | --- |
-| 2.1 baseline đọc lại train split | Task 9 (`load_champion_context`) |
-| 2.2 Evidently không vào `ml-base` | Task 1 (Dockerfile), Task 9 (lazy import), Task 11 Step 7 (script kiểm) |
-| 2.3 API Evidently 0.7 | Task 1 (xác minh), Task 9 (`run_drift_report`) |
-| 2.4 agent lõi + CLI + profile | Task 6, Task 7 |
-| 2.5 `price_inflation` vs `market_rally` | Task 5, Task 11 Step 3–4 |
-| 2.6 `insufficient_data` | Task 4, Task 11 Step 6 |
-| 2.7 DAG paused | Task 10 |
-| 2.8 `/feedback` theo lô, ngày do agent cấp | Task 6, Task 8 |
-| 3 API endpoint | Task 8 |
-| 4 ba loại drift + ngưỡng | Task 4, Task 9, Task 11 |
-| 5 cấu trúc thư mục + 2 hàm key | Task 2, Task 5–10 |
-| 6 thay đổi code đã có | Task 2, 7, 8; `register` không đụng ✔ |
-| 7 test | Task 3–6, 8, 11 |
-| 8 Definition of Done | Task 11 |
-| 9 chỗ lệch spec | Task 12 |
+| Mục spec                                      | Task                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| 2.1 baseline đọc lại train split            | Task 9 (`load_champion_context`)                                       |
+| 2.2 Evidently không vào`ml-base`           | Task 1 (Dockerfile), Task 9 (lazy import), Task 11 Step 7 (script kiểm) |
+| 2.3 API Evidently 0.7                          | Task 1 (xác minh), Task 9 (`run_drift_report`)                        |
+| 2.4 agent lõi + CLI + profile                 | Task 6, Task 7                                                           |
+| 2.5`price_inflation` vs `market_rally`     | Task 5, Task 11 Step 3–4                                                |
+| 2.6`insufficient_data`                       | Task 4, Task 11 Step 6                                                   |
+| 2.7 DAG paused                                 | Task 10                                                                  |
+| 2.8`/feedback` theo lô, ngày do agent cấp | Task 6, Task 8                                                           |
+| 3 API endpoint                                 | Task 8                                                                   |
+| 4 ba loại drift + ngưỡng                    | Task 4, Task 9, Task 11                                                  |
+| 5 cấu trúc thư mục + 2 hàm key            | Task 2, Task 5–10                                                       |
+| 6 thay đổi code đã có                     | Task 2, 7, 8;`register` không đụng ✔                               |
+| 7 test                                         | Task 3–6, 8, 11                                                         |
+| 8 Definition of Done                           | Task 11                                                                  |
+| 9 chỗ lệch spec                              | Task 12                                                                  |
 
 Không có mục nào thiếu task.
 
