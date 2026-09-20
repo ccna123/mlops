@@ -46,7 +46,7 @@
 | Experiment tracking & Model Registry | MLflow (self-host, Postgres làm backend store) | API để API layer đọc/ghi model version                                                             |
 | Model serving                        | FastAPI + Uvicorn —`services/serving/`       | Load model từ MLflow Registry, expose`/predict`, `/feedback`, `/reload`                         |
 | Sinh traffic mô phỏng              | AI agent nghiệp vụ BĐS —`services/agent/` | Bắn request`/predict` và trả ground truth trễ qua `/feedback`; có tham số `drift_scenario` |
-| Monitoring / Drift                   | Evidently AI                                    | So inference log với baseline profile của model đang Production                                     |
+| Monitoring / Drift                   | Evidently AI                                    | So inference log với baseline profile của model đang giữ alias `champion`                                     |
 | Metadata DB                          | PostgreSQL                                      | **Hai database tách biệt** trên cùng instance: `airflow` và `mlflow`                    |
 | Auth                                 | API key qua FastAPI                             | Chưa cần nếu chỉ chạy local 1 người dùng; bắt buộc trước khi expose ra ngoài              |
 | Containerize / hạ tầng offline     | Docker Compose                                  | Toàn bộ service trong 1`docker-compose.yml`                                                        |
@@ -172,9 +172,9 @@ Task 1: extract         → đọc raw data từ MinIO, ghi parquet
 Task 2: validate        → check schema (common/schema.py), đếm missing/outlier, fail nếu vi phạm nghiêm trọng
 Task 3: prepare_dataset_for_train      → cache-aware: tính fingerprint của raw, skip nếu processed/{fingerprint}/{task_type}/ đã tồn tại
 Task 4: train           → train theo task_type, log Pipeline + params + metrics vào MLflow
-Task 5: evaluate        → hai cổng: threshold sàn + phải hơn model Production (mục 7.5)
+Task 5: evaluate        → hai cổng: threshold sàn + phải hơn model champion (mục 7.5)
 Task 6: [branch]        → pass → register; fail → dừng (không deploy)
-Task 7: register        → đẩy vào MLflow Registry stage Production + sinh baseline profile
+Task 7: register        → đăng ký vào MLflow Registry, chuyển alias `champion` + sinh baseline profile
 Task 8: deploy          → POST /reload vào serving
 ```
 
@@ -193,7 +193,7 @@ extract → validate → prepare_dataset_for_train → train → evaluate → br
 
 ```
 Task 1: collect_window  → đọc inference-log + ground-truth trong cửa sổ gần nhất
-Task 2: run_evidently   → so với baseline profile của model đang Production
+Task 2: run_evidently   → so với baseline profile của model đang giữ alias `champion`
 Task 3: publish_report  → ghi report + mức độ (ok/warning/high) lên MinIO
 ```
 
@@ -275,21 +275,21 @@ Dashboard có checkbox **"Xử lý lại dữ liệu từ đầu"** map sang `fo
 1. **Threshold sàn** — chặn model rác.
    - Regression: R² ≥ 0.75
    - Classification: F1 ≥ 0.70
-2. **Phải tốt hơn model đang Production** trên **cùng `test.parquet`** — chặn việc đẩy một model kém hơn bản đang chạy lên production chỉ vì nó vượt ngưỡng.
+2. **Phải tốt hơn model đang giữ alias `champion`** trên **cùng `test.parquet`** — chặn việc đẩy một model kém hơn bản đang chạy lên production chỉ vì nó vượt ngưỡng.
 
-Chưa có model Production nào thì chỉ áp cổng (1).
+Chưa có model nào giữ alias `champion` thì chỉ áp cổng (1).
 
 Con số threshold ở trên là điểm khởi đầu, sẽ hiệu chỉnh sau lần train đầu tiên khi biết baseline thực tế của dataset.
 
 ### 7.6. Serving (`services/serving/`)
 
-Image serving **không chứa model**. Lúc khởi động nó load bản `Production` mới nhất của cả hai model từ MLflow Registry vào bộ nhớ.
+Image serving **không chứa model**. Lúc khởi động nó load bản đang giữ alias `champion` của cả hai model từ MLflow Registry vào bộ nhớ.
 
 | Endpoint                  | Mô tả                                                                                                                                                                     |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /predict/{model}` | `model` ∈ `regression` \| `classification`. Nhận record **thô** (chưa clean). Trả prediction + `request_id` + `model_version`. Ghi vào inference log. |
 | `POST /feedback`        | Nhận`{request_id, actual_value}` từ agent. Ghi vào `ground-truth/`.                                                                                                  |
-| `POST /reload`          | Tải lại bản Production mới nhất và swap in-memory. Task`deploy` gọi endpoint này.                                                                                 |
+| `POST /reload`          | Tải lại bản đang giữ alias `champion` và swap in-memory. Task`deploy` gọi endpoint này.                                                                                 |
 | `GET /health`           | Model nào đang load, version bao nhiêu.                                                                                                                                  |
 
 Một container duy nhất phục vụ cả hai model.
@@ -394,7 +394,7 @@ Gọi thẳng Airflow/MLflow REST API từ browser không dùng được: creden
 | `POST` | `/api/data/upload`                     | Upload CSV → MinIO`raw/`, trả `dataset_version`            | MinIO                                     |
 | `GET`  | `/api/data/{dataset_version}/preview`  | Preview + thống kê cột (pandas ở backend)                    | MinIO                                     |
 | `GET`  | `/api/models`                          | Danh sách registered model + version + metric + stage           | MLflow REST                               |
-| `POST` | `/api/models/{name}/{version}/promote` | Chuyển version sang Production                                  | MLflow REST                               |
+| `POST` | `/api/models/{name}/{version}/promote` | Chuyển alias `champion` sang version này                       | MLflow REST                               |
 | `GET`  | `/api/drift/latest`                    | Report mới nhất: mức độ, 3 loại drift, dữ liệu histogram | MinIO`reports/`                         |
 | `GET`  | `/api/drift/history`                   | Diễn biến mức độ drift theo thời gian                      | MinIO`reports/`                         |
 | `GET`  | `/api/health`                          | Trạng thái các service phụ thuộc                            | Tất cả                                  |
@@ -453,7 +453,7 @@ project/
 | 5      | `evaluate.py` (2 cổng) + `register.py` (promote + sinh baseline profile).                                                                                                                 |
 | 6      | `services/serving/`: `/predict`, `/reload`, `/health` + ghi inference log theo batch.                                                                                                  |
 | 7      | Ghép thành`ml_pipeline` DAG, test full run cho regression.                                                                                                                                 |
-| 8      | Thêm nhánh classification (`sold_within_30_days`), test chạy cả hai `task_type`.                                                                                                       |
+| 8      | Thêm nhánh classification (`needs_renovation`), test chạy cả hai `task_type`.                                                                                                       |
 | 9      | `services/agent/`: sinh traffic + `drift_scenario`. Mồi inference log từ dữ liệu theo `listing_date`.                                                                                |
 | 10     | `/feedback` + ghi ground truth; `monitor.py` với Evidently; `monitoring_dag`. Kiểm chứng: chạy `drift_scenario=none` phải ra `ok`, chạy `price_inflation` phải ra `high`. |
 | 11     | `services/api/` theo contract mục 8.3.                                                                                                                                                      |
@@ -477,7 +477,7 @@ Cân nhắc lại sau khi pipeline chạy ổn. Khi đó nó sẽ đứng giữa
 
 | Hạng mục           | v1                                             | v2                                                                                 |
 | -------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Bài toán ML        | Chưa chốt                                    | 2 model: regression`sale_price` + classification `sold_within_30_days`         |
+| Bài toán ML        | Chưa chốt                                    | 2 model: regression`sale_price` + classification `needs_renovation`         |
 | Cấu trúc DAG       | 1 DAG 8 task                                   | `ml_pipeline` (manual, có `task_type`) + `monitoring_dag` (@hourly)         |
 | Lịch chạy          | Chưa chốt                                    | Manual từ UI; chỉ`monitoring_dag` tự động                                   |
 | Preprocess           | Chạy lại mỗi lần                           | Cache theo fingerprint của raw data                                               |
@@ -488,7 +488,7 @@ Cân nhắc lại sau khi pipeline chạy ổn. Khi đó nó sẽ đứng giữa
 | Ground truth         | Không có                                     | `POST /feedback`, join qua `request_id`                                        |
 | Baseline             | Thư mục rỗng`monitoring-baseline/`        | Profile JSON sinh tự động ở stage`register`                                  |
 | Retrain              | Câu hỏi mở                                  | Cảnh báo + nút bấm, không tự động                                          |
-| `evaluate`         | Threshold cố định                           | Threshold sàn**và** phải hơn model Production, trên test set cố định |
+| `evaluate`         | Threshold cố định                           | Threshold sàn**và** phải hơn model champion, trên test set cố định |
 | Định dạng data    | Không nói                                    | Parquet sau`extract`                                                             |
 | Postgres             | "Có thể tách DB"                            | Tách`airflow` / `mlflow`                                                      |
 | Feature Store        | Trong stack                                    | Cắt khỏi giai đoạn 1                                                           |
