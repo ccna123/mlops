@@ -65,6 +65,26 @@ def stage_result(lines: list[str]) -> dict:
     DockerOperator merges stdout and stderr, and the daemon does not guarantee
     the order of two writes microseconds apart on different pipes. The result
     marks itself rather than relying on position; see ml_common.stageio.
+
+    Args:
+        lines: every log line the stage container produced, as xcom_all=True
+            pushes them. Non-string entries are skipped rather than crashing.
+
+    Returns:
+        The payload the stage emitted, decoded from JSON.
+
+    Raises:
+        ValueError: when no marked line is present — the stage died before
+            emitting one, and letting the DAG carry on with nothing would fail
+            further downstream with a much less obvious message.
+
+    Example:
+        stage_result(ti.xcom_pull(task_ids="extract"))["fingerprint"]
+        # -> "3f0a9c1d5e2b7a48"
+
+        # Also registered as a Jinja filter, which is how templates reach it —
+        # Airflow 2.10 has no built-in JSON filter:
+        # "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['fingerprint'] }}"
     """
     for line in reversed(lines):
         if isinstance(line, str) and line.strip().startswith(RESULT_PREFIX):
@@ -82,8 +102,27 @@ ESTIMATOR_NAME = "{{ params.estimator_name or default_estimator_for(params.task_
 def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
     """One stage: run an image, stream its logs, take every log line as XCom.
 
-    xcom_all=True (rather than the default last-line-only) is required so
-    stage_result() above has the full set of lines to scan — see its docstring.
+    Args:
+        task_id: the Airflow task id, which is also what XCom is pulled by.
+        image: the stage image tag, e.g. "ml-extract:latest".
+        extra_env: variables specific to this stage, merged over BASE_ENV.
+            Values may be Jinja templates; DockerOperator renders them.
+
+    Returns:
+        A configured DockerOperator. xcom_all=True (rather than the default
+        last-line-only) is required so stage_result() above has the full set of
+        lines to scan — see its docstring. auto_remove="success" keeps a failed
+        container around to inspect, and removes the rest.
+
+    Example:
+        validate = stage(
+            "validate",
+            "ml-validate:latest",
+            {"FINGERPRINT": FINGERPRINT, "TASK_TYPE": TASK_TYPE},
+        )
+        # FINGERPRINT is a Jinja string pulling extract's XCom, so the value is
+        # resolved at run time, not when the DAG file is parsed. BASE_ENV (MinIO
+        # and MLflow credentials) is merged in for every stage automatically.
     """
     return DockerOperator(
         task_id=task_id,
@@ -99,7 +138,23 @@ def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
 
 
 def choose_branch(ti) -> str:
-    """Reads the evaluate verdict and picks which way the DAG goes."""
+    """Reads the evaluate verdict and picks which way the DAG goes.
+
+    Args:
+        ti: the task instance Airflow passes in, used to pull evaluate's XCom.
+
+    Returns:
+        The task id to run next: "register" when both gates passed,
+        "stop_no_deploy" when they did not. The branch that is not chosen is
+        skipped, not failed — a model that did not earn promotion is a normal
+        outcome of a training run.
+
+    Example:
+        # evaluate emitted {"passed": false, "reason": "does not beat the
+        # champion: rmse=45000.0000 vs 41000.0000 (lower is better)", ...}
+        choose_branch(ti)   # -> "stop_no_deploy"
+        # register and deploy are skipped; the DAG run still succeeds.
+    """
     verdict = stage_result(ti.xcom_pull(task_ids="evaluate"))
     print(f"evaluate said: {verdict['reason']}")
     return "register" if verdict["passed"] else "stop_no_deploy"
@@ -113,6 +168,26 @@ def reload_serving() -> str:
 
     One HTTP call, so no image and no Airflow Connection: a PythonOperator with
     the standard library is the whole task.
+
+    Args:
+        None. Posts to SERVING_URL (default http://serving:8000) + "/reload".
+
+    Returns:
+        Serving's response body, which lists the versions now live. It is
+        returned rather than only printed so it lands in XCom and the run keeps
+        a record of what was deployed.
+
+    Raises:
+        urllib.error.URLError: when serving is unreachable or answers an error.
+            The task fails, which is the point: the alias moved but nothing is
+            serving the new version, and that should be visible in the DAG.
+
+    Example:
+        reload_serving()
+        # -> '{"models": {"regression": {"loaded": true, "version": "4"}, ...}}'
+
+        # Runs only on the register branch, so serving is asked to reload
+        # exactly when there is something new to load.
     """
     request = urllib.request.Request(SERVING_RELOAD_URL, data=b"", method="POST")
     with urllib.request.urlopen(request, timeout=30) as response:

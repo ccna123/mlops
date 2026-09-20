@@ -69,7 +69,23 @@ Python 3.12. Máy dev chạy 3.13 để test logic thuần.
   đều phải ra `"multi family"`.
 - **Parser không bao giờ đoán.** Giá trị mơ hồ trả `None` để stage `validate`
   đếm được và báo cáo. Zipcode 4 số không được tự thêm số 0 đầu.
-- **Ruff:** `line-length = 100`, rule set `["E", "F", "I", "UP", "B"]`.
+- **Docstring:** mọi function, method và class trong code production
+  (`common/`, `services/`, `stages/`, `dags/`, `scripts/`) phải có docstring
+  Google style, ghi rõ `Args:` và `Returns:`, thêm `Raises:` khi hàm có ném
+  exception. Hàm không nhận tham số vẫn ghi `Args: None.` kèm danh sách biến
+  môi trường nó đọc — với các stage thì đó chính là input thật sự. Thư mục
+  `tests/` được miễn: tên test đã là tài liệu.
+- **Example trong docstring:** thêm mục `Example:` cho hàm mà thấy cách gọi sẽ
+  hiểu nhanh hơn đọc mô tả. Viết dạng **minh hoạ, không phải doctest** — dùng
+  `# -> ket qua`, **không dùng `>>>`**, để pytest không thu gom chúng thành
+  test. Miễn cho `fit`/`transform` của sklearn transformer (đặt example ở
+  docstring của class) và `main()` của stage (chỉ chạy qua DockerOperator).
+  Vì không có gì tự động chặn example sai, khi sửa hàm phải sửa luôn example.
+  Có backslash trong docstring thì dùng `r"""` — ruff `D301` sẽ nhắc.
+- **Ruff:** cấu hình ở `ruff.toml` **tại gốc repo** (không phải trong
+  `common/`), áp dụng cho toàn bộ code. `line-length = 100`, rule set
+  `["E", "F", "I", "UP", "B", "D"]`, `convention = "google"`. Rule `D` chính là
+  thứ bắt buộc docstring ở trên.
 
 ## Lệnh
 

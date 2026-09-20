@@ -37,6 +37,20 @@ WEAK_MAX_ITER = 10
 
 
 def _regression_base(name: str):
+    """Builds one regression estimator by name.
+
+    Args:
+        name: a name already checked against `ESTIMATOR_NAMES["regression"]`.
+
+    Returns:
+        The estimator. An unrecognized name falls through to DummyRegressor, so
+        the caller is the one that must validate — `build_estimator` does.
+
+    Example:
+        _regression_base("hist_gradient_boosting")       # -> scores R2 0.947
+        _regression_base("hist_gradient_boosting_weak")  # -> max_iter=10, R2 0.769
+        _regression_base("anything else")                # -> DummyRegressor
+    """
     if name == "ridge":
         return Ridge(alpha=1.0)
     if name == "hist_gradient_boosting":
@@ -47,6 +61,19 @@ def _regression_base(name: str):
 
 
 def _classification_base(name: str):
+    """Builds one classification estimator by name.
+
+    Args:
+        name: a name already checked against `ESTIMATOR_NAMES["classification"]`.
+
+    Returns:
+        The estimator. An unrecognized name falls through to DummyClassifier, so
+        the caller is the one that must validate — `build_estimator` does.
+
+    Example:
+        _classification_base("logistic")           # -> LogisticRegression(max_iter=1000)
+        _classification_base("anything else")      # -> DummyClassifier(strategy="prior")
+    """
     if name == "logistic":
         return LogisticRegression(max_iter=1000)
     if name == "hist_gradient_boosting":
@@ -64,9 +91,22 @@ def build_estimator(task_type: str, name: str):
         name: one of `ESTIMATOR_NAMES[task_type]`.
 
     Returns:
-        The estimator itself. Regression estimators predict in dollars, so no
-        caller downstream — evaluate, register, or serving — has to undo a
+        The unfitted estimator itself. Regression estimators predict in dollars,
+        so no caller downstream — evaluate, register, or serving — has to undo a
         transform.
+
+    Raises:
+        ValueError: when task_type is unknown, or when the name is not one this
+            task offers. Falling back to a default would train something nobody
+            asked for and log it under the requested name.
+
+    Example:
+        # The pair of calls the train stage always makes:
+        estimator = build_estimator("regression", "hist_gradient_boosting")
+        pipeline = build_pipeline("regression", estimator)
+
+        build_estimator("regression", "logistic")
+        # -> ValueError: logistic belongs to classification, not regression
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")

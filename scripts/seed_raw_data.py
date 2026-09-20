@@ -14,6 +14,7 @@ import tempfile
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+
 from ml_common.storage import Storage, raw_key
 
 CHUNK_ROWS = 200_000
@@ -21,6 +22,24 @@ DEFAULT_SOURCE = "house_pricing_dirty.csv"
 
 
 def parse_args() -> argparse.Namespace:
+    """Reads the command line.
+
+    Args:
+        None. Parses sys.argv.
+
+    Returns:
+        A namespace with `source` (the local CSV, default
+        "house_pricing_dirty.csv"), `version` (the dataset version to write
+        under, default "v1") and `limit` (stop after this many rows, or None
+        for all of them).
+
+    Example:
+        # python scripts/seed_raw_data.py
+        # -> source="house_pricing_dirty.csv", version="v1", limit=None
+
+        # python scripts/seed_raw_data.py --limit 200000 --version v2
+        # -> a smaller v2 dataset, useful when disk space is short
+    """
     parser = argparse.ArgumentParser(description="Upload the raw CSV to object storage.")
     parser.add_argument("--source", default=DEFAULT_SOURCE, help="local CSV to upload")
     parser.add_argument("--version", default="v1", help="dataset version to write under")
@@ -34,6 +53,25 @@ def csv_to_parquet(source: str, destination: str, limit: int | None) -> int:
     Every column is read as text on purpose: this is the RAW copy, and parsing
     belongs to the Pipeline. Letting pandas infer types here would quietly fix
     some of the dirt the pipeline exists to handle.
+
+    Args:
+        source: path to the CSV. Read 200k rows at a time, so a 373 MB file
+            never has to fit in memory whole.
+        destination: path of the parquet file to write.
+        limit: stop after this many rows, or None for all of them.
+
+    Returns:
+        How many rows were written. The parquet file is closed either way, so
+        an interrupted run leaves a readable partial file rather than a corrupt
+        one.
+
+    Example:
+        csv_to_parquet("house_pricing_dirty.csv", "/tmp/data.parquet", None)
+        # -> 2000000, printing progress every 200k rows
+
+        # Every column lands as a STRING. "$450,000" stays "$450,000" and
+        # "09/20/2026" stays text — letting pandas infer types here would
+        # quietly repair some of the dirt the pipeline exists to handle.
     """
     written = 0
     writer = None
@@ -59,6 +97,30 @@ def csv_to_parquet(source: str, destination: str, limit: int | None) -> int:
 
 
 def main() -> int:
+    r"""Converts the CSV to parquet and uploads it as the raw dataset.
+
+    Args:
+        None. Takes its settings from the command line, and the MinIO
+        variables `Storage.from_env` needs from the environment.
+
+    Returns:
+        0. The parquet file is built in a temporary directory that is removed
+        on the way out, so nothing large is left behind on a disk that is
+        already nearly full.
+
+    Raises:
+        SystemExit: when the source CSV is not where it was expected — almost
+            always because the script was run from somewhere other than the
+            repo root.
+
+    Example:
+        # Run once, by hand, with the stack up:
+        #   .venv\Scripts\python.exe scripts\seed_raw_data.py
+        # -> Converting house_pricing_dirty.csv -> parquet
+        #    ... 200,000 rows
+        #    Uploading 118.4 MB to raw/v1/data.parquet
+        #    Seeded 2,000,000 rows to raw/v1/data.parquet
+    """
     args = parse_args()
     if not os.path.isfile(args.source):
         raise SystemExit(f"Source CSV not found: {args.source}. Run this from the repo root.")

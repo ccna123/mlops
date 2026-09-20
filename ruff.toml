@@ -1,0 +1,39 @@
+# Ruff settings for the whole repo.
+#
+# This lives at the root on purpose. common/pyproject.toml used to hold them,
+# which meant stages/, dags/, services/ and scripts/ were linted with ruff's
+# bare defaults — line length 88, no import sorting, no docstring rules. Ruff
+# walks up from each file to the nearest config, so one file here covers
+# everything.
+
+line-length = 100
+target-version = "py311"
+
+# ml_common is a package in this repo, not a dependency downloaded from PyPI,
+# so import sorting must group it as first-party. Without this it is installed
+# into the venv like any other library and ruff cannot tell the difference.
+src = ["common", "services", "."]
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "D"]
+
+# D401 wants the imperative "Build the pipeline". This codebase says "Builds
+# the pipeline" throughout, matching the pandas and scikit-learn docs it sits
+# next to. Consistency with the neighbours beats consistency with pydocstyle.
+#
+# D107 is off because __init__ is documented in its class docstring where the
+# arguments are simple; where they are not, the __init__ has its own docstring
+# anyway — InferenceLogBuffer and Storage both do.
+ignore = ["D401", "D107"]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.per-file-ignores]
+# A test name is its documentation: test_zipcode_with_four_digits_returns_none
+# already says everything a docstring would repeat.
+"**/tests/*" = ["D"]
+# Namespace packages with no code in them. A docstring here would only say
+# the directory's name back.
+"services/__init__.py" = ["D104"]
+"services/serving/__init__.py" = ["D104"]

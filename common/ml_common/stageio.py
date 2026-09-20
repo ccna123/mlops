@@ -24,6 +24,21 @@ def emit_result(payload: dict) -> None:
     Args:
         payload: the values the DAG passes on through XCom. Must be a dict —
             a bare number or string would be ambiguous against log output.
+
+    Returns:
+        Nothing. The result leaves as one prefixed line on stdout, which
+        DockerOperator captures; `parse_result` is what reads it back.
+
+    Raises:
+        TypeError: when payload is not a dict.
+
+    Example:
+        # Last line of every stage's main(). Human-readable logs go to stderr,
+        # the machine-readable result goes through here and nowhere else:
+        print(f"wrote {n} rows", file=sys.stderr)
+        emit_result({"fingerprint": "3f0a9c1d5e2b7a48", "row_count": 200000})
+        # stdout gets exactly:
+        # XCOM_RESULT {"fingerprint": "3f0a9c1d5e2b7a48", "row_count": 200000}
     """
     if not isinstance(payload, dict):
         raise TypeError(f"stage result must be a dict, got: {type(payload).__name__}")
@@ -38,6 +53,28 @@ def parse_result(lines: list[str]) -> dict:
 
     Scanned from the end: a stage emits exactly one result and emits it last,
     so on the rare interleave the later match is still the right one.
+
+    Args:
+        lines: every line of the stage's merged stdout and stderr, in the order
+            captured. Non-string entries are skipped rather than crashing.
+
+    Returns:
+        The payload `emit_result` was given, decoded from JSON.
+
+    Raises:
+        ValueError: when no marked line is present — the stage died before
+            emitting, and treating that as an empty result would let the DAG
+            carry on with nothing.
+
+    Example:
+        parse_result([
+            "reading raw data",                       # stderr noise
+            'XCOM_RESULT {"fingerprint": "3f0a", "row_count": 200000}',
+            "wrote 200000 rows",                      # landed AFTER the result
+        ])
+        # -> {"fingerprint": "3f0a", "row_count": 200000}
+        # Position does not matter, only the marker. That log order is real:
+        # replaying one stage five times put the JSON last only twice.
     """
     for line in reversed(lines):
         if not isinstance(line, str):

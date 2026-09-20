@@ -31,8 +31,19 @@ def parse_target(series: pd.Series, task_type: str) -> pd.Series:
         task_type: "regression" or "classification".
 
     Returns:
-        A Series with the same index. Values that cannot be parsed become null
-        rather than a guess, so the caller can count and drop them.
+        A Series with the same index — float for regression, object holding
+        True/False/None for classification. Values that cannot be parsed become
+        null rather than a guess, so the caller can count and drop them.
+
+    Raises:
+        ValueError: when task_type is unknown, or when the target column's kind
+            has no parser registered here.
+
+    Example:
+        parse_target(pd.Series(["$450,000", "380000", "call us"]), "regression")
+        # -> [450000.0, 380000.0, NaN]
+        # The third row is not guessed at; rowops drops it, and the count of
+        # dropped rows is logged by the prepare stage.
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")
@@ -73,8 +84,22 @@ def derive_target(df: pd.DataFrame, task_type: str) -> pd.Series:
         rather than a guess, so the caller can count and drop them.
 
     Raises:
+        ValueError: when task_type is not one of `schema.TASK_TYPES`.
         KeyError: when the source column is absent. Silently returning nulls
             would drop every row and look like empty data instead of a bug.
+
+    Example:
+        # Classification — built from `condition`, which does not look like a
+        # target at all until you see this:
+        df = pd.DataFrame({"condition": ["Poor", "GOOD", "fair", "unknown"]})
+        derive_target(df, "classification")
+        # -> [True, False, True, None]
+        #    poor and fair need renovation; "unknown" is not in the allowed set
+        #    so it becomes None rather than a guess.
+
+        # Regression — just reads and parses sale_price:
+        derive_target(pd.DataFrame({"sale_price": ["$450,000"]}), "regression")
+        # -> [450000.0]
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")

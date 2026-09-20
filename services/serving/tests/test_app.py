@@ -4,8 +4,8 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from ml_common.inference_log import InferenceLogBuffer
 
+from ml_common.inference_log import InferenceLogBuffer
 from services.serving.app import create_app
 from services.serving.model_registry import LoadedModel, ModelRegistry
 

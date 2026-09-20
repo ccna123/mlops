@@ -24,6 +24,14 @@ def compute_fingerprint(dataset_version: str, etag: str, sample_rows: int | None
 
     Returns:
         16 lowercase hex characters.
+
+    Example:
+        etag = storage.object_etag(raw_key("v1"))
+        compute_fingerprint("v1", etag, 200_000)  # -> "3f0a9c1d5e2b7a48"
+        compute_fingerprint("v1", etag, None)     # -> a DIFFERENT value
+
+        # That difference is the point: a 200k-row dev run must never reuse
+        # the processed split built from all 2 million rows.
     """
     limit = "all" if sample_rows is None else str(sample_rows)
     payload = f"{dataset_version}|{etag}|{limit}"

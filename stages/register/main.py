@@ -12,16 +12,37 @@ import os
 import sys
 
 import mlflow
+from mlflow import MlflowClient
+
 from ml_common import schema
 from ml_common.profiling import compute_profile
 from ml_common.stageio import emit_result
 from ml_common.storage import Storage, baseline_key, processed_key
-from mlflow import MlflowClient
 
 CHAMPION_ALIAS = "champion"
 
 
 def main() -> int:
+    """Promotes the model to champion and snapshots what it learned from.
+
+    Only ever reached when `evaluate` said both gates passed.
+
+    Args:
+        None. Reads FINGERPRINT, TASK_TYPE, MODEL_NAME, RUN_ID and
+        MLFLOW_TRACKING_URI, plus the MinIO variables `Storage.from_env` needs.
+
+    Returns:
+        0. The stage result carries the new `version` and the `baseline_key` it
+        was profiled to. Promotion moves the `champion` alias, which leaves
+        every older version intact — nothing is archived, it simply stops being
+        pointed at. The baseline comes from the TRAIN split, so Plan 4 compares
+        production traffic against the distribution the model actually saw.
+
+    Raises:
+        KeyError: when a required variable is unset.
+        FileNotFoundError: when the train split for that fingerprint and task is
+            not in storage.
+    """
     fingerprint = os.environ["FINGERPRINT"]
     task_type = os.environ["TASK_TYPE"]
     model_name = os.environ["MODEL_NAME"]

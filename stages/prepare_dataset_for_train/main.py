@@ -15,18 +15,38 @@ from __future__ import annotations
 import os
 import sys
 
+from sklearn.model_selection import train_test_split
+
 from ml_common import schema
 from ml_common.rowops import drop_duplicates, drop_rows_missing_target
 from ml_common.stageio import emit_result
 from ml_common.storage import Storage, extracted_key, processed_key
 from ml_common.targets import derive_target
-from sklearn.model_selection import train_test_split
 
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
 
 def main() -> int:
+    """Drops bad rows, builds the target, and writes the train/test split.
+
+    Args:
+        None. Reads FINGERPRINT, TASK_TYPE and FORCE_REPROCESS ("true" rebuilds
+        even on a cache hit), plus the MinIO variables `Storage.from_env` needs.
+
+    Returns:
+        0 on success, 1 when fewer than 2 usable rows survive and there is
+        nothing left to split. The stage result carries `skipped`, `train_rows`
+        and `test_rows`, and on a real run also the two drop counts. The files
+        written still hold RAW column values: column cleaning belongs to the
+        Pipeline, so that it ships with the model.
+
+    Raises:
+        KeyError: when FINGERPRINT or TASK_TYPE is unset, or when the column the
+            target is built from is missing.
+        FileNotFoundError: when the extracted data for that fingerprint is not
+            in storage.
+    """
     fingerprint = os.environ["FINGERPRINT"]
     task_type = os.environ["TASK_TYPE"]
     force = os.environ.get("FORCE_REPROCESS", "false").strip().lower() == "true"

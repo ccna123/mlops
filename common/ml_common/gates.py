@@ -28,7 +28,23 @@ COMPARISON: dict[str, tuple[str, str]] = {
 
 
 def _is_better(candidate_value: float, champion_value: float, direction: str) -> bool:
-    """A tie is not an improvement: the incumbent keeps its place."""
+    """Compares two values of the same metric.
+
+    Args:
+        candidate_value: the challenger's score.
+        champion_value: the incumbent's score on the same test split.
+        direction: "lower" when a smaller number is better (rmse), "higher"
+            otherwise (auc).
+
+    Returns:
+        True only on a strict improvement. A tie is not an improvement: the
+        incumbent keeps its place.
+
+    Example:
+        _is_better(0.91, 0.88, "higher")    # -> True, auc went up
+        _is_better(48_000, 52_000, "lower") # -> True, rmse came down
+        _is_better(0.88, 0.88, "higher")    # -> False, a tie loses
+    """
     if direction == "lower":
         return candidate_value < champion_value
     return candidate_value > champion_value
@@ -48,8 +64,24 @@ def evaluate_gates(task_type: str, candidate: dict, champion: dict | None) -> di
         is no champion to compare against) and a human-readable `reason`.
 
     Raises:
+        ValueError: when task_type is not one of `schema.TASK_TYPES`.
         KeyError: when a metric a gate needs is absent. Guessing here would
             silently promote a model nobody measured.
+
+    Example:
+        # First ever run — no champion to beat, the floor decides alone:
+        evaluate_gates("regression", {"r2": 0.95, "rmse": 41_000}, None)
+        # -> {"passed": True, "floor_passed": True, "beats_champion": None,
+        #     "reason": "passed the floor (r2=0.9500); no champion yet"}
+
+        # Good enough on its own, but not better than what is live:
+        evaluate_gates("regression", {"r2": 0.94, "rmse": 45_000},
+                       {"r2": 0.95, "rmse": 41_000})
+        # -> {"passed": False, ..., "beats_champion": False}
+
+        # Junk, blocked before the champion is even consulted:
+        evaluate_gates("classification", {"auc": 0.50}, None)
+        # -> {"passed": False, "floor_passed": False, "beats_champion": None}
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")

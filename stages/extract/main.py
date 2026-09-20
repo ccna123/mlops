@@ -16,7 +16,27 @@ from ml_common.storage import Storage, extracted_key, raw_key
 
 
 def read_sample_rows() -> int | None:
-    """Reads SAMPLE_ROWS, treating empty or unset as 'use every row'."""
+    """Reads the SAMPLE_ROWS limit for this run.
+
+    Args:
+        None. Reads the SAMPLE_ROWS environment variable.
+
+    Returns:
+        The row limit, or None when the variable is unset or empty — both mean
+        "use every row". The value is part of the fingerprint, so a sampled run
+        can never reuse the full run's processed data.
+
+    Raises:
+        ValueError: when the variable holds something that is not a number.
+            Falling back to "every row" would start a 2-million-row run on a
+            machine that asked for 200k.
+
+    Example:
+        # SAMPLE_ROWS=200000  -> 200000   (the dev setting, from .env)
+        # SAMPLE_ROWS=""      -> None     (a real run)
+        # SAMPLE_ROWS unset   -> None
+        # SAMPLE_ROWS="lots"  -> ValueError
+    """
     raw_value = os.environ.get("SAMPLE_ROWS", "").strip()
     if not raw_value:
         return None
@@ -24,6 +44,22 @@ def read_sample_rows() -> int | None:
 
 
 def main() -> int:
+    """Samples the raw dataset and parks it under a fingerprint.
+
+    Args:
+        None. Reads DATASET_VERSION (default "v1"), SAMPLE_ROWS, and the MinIO
+        variables `Storage.from_env` needs.
+
+    Returns:
+        0. Emits `fingerprint` and `row_count` as the stage result, which every
+        later stage uses to find its input. When the fingerprint already has
+        extracted data, that data is reused rather than rewritten.
+
+    Raises:
+        FileNotFoundError: when the raw object for that dataset version is not
+            in storage. Nothing downstream can run, so the stage fails loudly
+            rather than emitting a fingerprint for data that does not exist.
+    """
     dataset_version = os.environ.get("DATASET_VERSION", "v1")
     sample_rows = read_sample_rows()
     storage = Storage.from_env()

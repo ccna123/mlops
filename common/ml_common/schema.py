@@ -19,7 +19,20 @@ TASK_TYPES = ("regression", "classification")
 
 @dataclass(frozen=True)
 class ColumnSpec:
-    """Describes one column: its logical data kind and valid-value constraints."""
+    """Describes one column: its logical data kind and valid-value constraints.
+
+    Frozen, so a spec cannot be edited by accident at runtime — every consumer
+    reads the same COLUMNS map.
+
+    Example:
+        spec = COLUMNS["bedrooms"]
+        # -> ColumnSpec(name="bedrooms", kind="numeric", required=False,
+        #               min_value=0, max_value=20, allowed=None)
+
+        # `kind` picks the parser in cleaning.py, min/max drive OutlierClipper
+        # and the out-of-bounds count in validation.py, and `allowed` is the
+        # value set derive_target checks `condition` against.
+    """
 
     name: str
     kind: str
@@ -97,7 +110,27 @@ _EXCLUDED: dict[str, frozenset[str]] = {
 
 
 def feature_columns(task_type: str) -> list[str]:
-    """List of columns usable as features for a task, leakage already excluded."""
+    """Lists the columns usable as features for a task.
+
+    Args:
+        task_type: "regression" or "classification".
+
+    Returns:
+        Column names in declaration order, with the id, the target and every
+        leakage column for that task already removed.
+
+    Raises:
+        ValueError: when task_type is not one of TASK_TYPES.
+
+    Example:
+        feature_columns("regression")
+        # -> [..., "condition", "days_on_market", "sold_within_30_days", ...]
+        #    but NOT sale_price, list_price, price_category or property_id
+
+        feature_columns("classification")
+        # -> condition is gone too: needs_renovation is derived FROM it,
+        #    so keeping it would hand the model the answer
+    """
     if task_type not in TASK_TYPES:
         raise ValueError(f"task_type must be one of {TASK_TYPES}, got: {task_type!r}")
     excluded = _EXCLUDED[task_type]
@@ -105,12 +138,48 @@ def feature_columns(task_type: str) -> list[str]:
 
 
 def columns_of_kind(kind: str) -> list[str]:
-    """List of columns of a given logical kind, in declaration order."""
+    """Lists the columns of one logical kind.
+
+    Args:
+        kind: a ColumnSpec kind — "id", "date", "categorical", "zipcode",
+            "numeric", "money" or "boolean".
+
+    Returns:
+        Column names in declaration order. An unknown kind returns an empty
+        list rather than raising: asking which columns are of a kind nobody
+        declared has a correct answer, and it is "none".
+
+    Example:
+        columns_of_kind("money")     # -> ["list_price", "sale_price"]
+        columns_of_kind("boolean")   # -> ["has_pool", "sold_within_30_days"]
+        columns_of_kind("zipcode")   # -> ["zipcode"]
+        columns_of_kind("nonsense")  # -> []
+    """
     return [name for name, spec in COLUMNS.items() if spec.kind == kind]
 
 
 def target_column(task_type: str) -> str:
-    """Name of the target column for a task."""
+    """Names the target column for a task.
+
+    Args:
+        task_type: "regression" or "classification".
+
+    Returns:
+        "sale_price" for regression, "needs_renovation" for classification.
+        The classification target does not exist in the raw data — it is built
+        by `targets.derive_target`.
+
+    Raises:
+        ValueError: when task_type is not one of TASK_TYPES.
+
+    Example:
+        target_column("regression")      # -> "sale_price"
+        target_column("classification")  # -> "needs_renovation"
+
+        # The usual reason to call it — split X from y without hardcoding a name:
+        target = target_column(task_type)
+        features, y = train_df.drop(columns=[target]), train_df[target]
+    """
     if task_type not in TASK_TYPES:
         raise ValueError(f"task_type must be one of {TASK_TYPES}, got: {task_type!r}")
     return TARGET_REGRESSION if task_type == "regression" else TARGET_CLASSIFICATION

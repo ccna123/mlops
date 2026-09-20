@@ -12,6 +12,7 @@ import sys
 
 import mlflow
 import mlflow.sklearn
+
 from ml_common import schema
 from ml_common.estimators import build_estimator
 from ml_common.features import build_pipeline
@@ -21,6 +22,26 @@ from ml_common.storage import Storage, processed_key
 
 
 def main() -> int:
+    """Fits the whole Pipeline on the train split and logs it to MLflow.
+
+    Args:
+        None. Reads FINGERPRINT, TASK_TYPE, MODEL_NAME, ESTIMATOR_NAME (default
+        "ridge") and MLFLOW_TRACKING_URI, plus the MinIO variables
+        `Storage.from_env` needs.
+
+    Returns:
+        0. The stage result carries `run_id`, `experiment` and the training
+        `metrics`. What lands in MLflow is the Pipeline, not the bare estimator,
+        so the model in the Registry cleans its own input and serving never
+        needs a second copy of that logic. Nothing is registered or promoted
+        here — `evaluate` decides that.
+
+    Raises:
+        KeyError: when a required variable is unset.
+        FileNotFoundError: when the train split for that fingerprint and task is
+            not in storage.
+        ValueError: when ESTIMATOR_NAME is not one this task offers.
+    """
     fingerprint = os.environ["FINGERPRINT"]
     task_type = os.environ["TASK_TYPE"]
     model_name = os.environ["MODEL_NAME"]

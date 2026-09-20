@@ -15,9 +15,10 @@ import os
 import mlflow
 import mlflow.sklearn
 import numpy as np
+from mlflow import MlflowClient
+
 from ml_common import schema
 from ml_common.storage import Storage, processed_key
-from mlflow import MlflowClient
 
 os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "minioadmin")
@@ -29,6 +30,32 @@ SAMPLE_SIZE = 20
 
 
 def main() -> int:
+    r"""Checks that a model reloaded from the Registry predicts identically.
+
+    Loads the current champion twice — once by its run, once by its alias —
+    feeds both the same 20 RAW test records, and compares.
+
+    Args:
+        None. Talks to MLflow and MinIO on localhost, so the stack must be up
+        and this must be run from the host, not from inside a container.
+
+    Returns:
+        0 when both models agree and the predictions are positive dollar
+        amounts.
+
+    Raises:
+        SystemExit: when the two disagree, or the predictions are not positive.
+            Either means the packaging is lossy, and /predict would inherit
+            that silently.
+
+    Example:
+        #   .venv\Scripts\python.exe scripts\smoke_round_trip.py
+        # -> champion is version 3 from run a1b2c3d4
+        #    feeding RAW records straight in - no cleaning on this side:
+        #      list_price[0] = '$450,000'
+        #      city[0]       = '  NEW YORK '
+        #    OK: 20 raw records, identical predictions both ways
+    """
     mlflow.set_tracking_uri("http://localhost:5000")
     client = MlflowClient()
 

@@ -16,6 +16,23 @@ from ml_common.validation import validate_dataframe
 
 
 def main() -> int:
+    """Measures the extracted dataset and writes the validation report.
+
+    Args:
+        None. Reads FINGERPRINT and TASK_TYPE, plus the MinIO variables
+        `Storage.from_env` needs.
+
+    Returns:
+        0 when the data can be trained on, 1 when it cannot. Either way the
+        full report is written to storage and the stage result carries `ok` and
+        `row_count`. Counts of dirt are reported, never fatal — this dataset is
+        dirty on purpose.
+
+    Raises:
+        KeyError: when FINGERPRINT or TASK_TYPE is unset.
+        FileNotFoundError: when the extracted data for that fingerprint is not
+            in storage, meaning `extract` did not run.
+    """
     fingerprint = os.environ["FINGERPRINT"]
     task_type = os.environ["TASK_TYPE"]
     storage = Storage.from_env()

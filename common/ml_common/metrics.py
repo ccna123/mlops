@@ -31,7 +31,24 @@ def compute_metrics(task_type: str, y_true, y_pred, y_proba=None) -> dict[str, f
             out when this is None, rather than guessed at.
 
     Returns:
-        Plain Python floats — numpy scalars break json.dumps and MLflow logging.
+        For regression: rmse, mae and r2. For classification: f1 and accuracy,
+        plus auc when y_proba was given. Values are plain Python floats — numpy
+        scalars break json.dumps and MLflow logging.
+
+    Raises:
+        ValueError: when task_type is not one of `schema.TASK_TYPES`.
+
+    Example:
+        compute_metrics("regression", y_true, y_pred)
+        # -> {"rmse": 41203.7, "mae": 28104.2, "r2": 0.947}
+        #    rmse and mae are in dollars, readable straight off a dashboard
+
+        compute_metrics("classification", y_true, y_pred, y_proba)
+        # -> {"f1": 0.81, "accuracy": 0.86, "auc": 0.91}
+
+        compute_metrics("classification", y_true, y_pred)
+        # -> no "auc" key at all. The gates read auc, so a candidate scored
+        #    without probabilities fails with KeyError instead of sneaking past.
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")

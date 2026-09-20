@@ -16,6 +16,20 @@ MAX_TARGET_MISSING_RATE = 0.5
 
 
 def _missing_rate(series: pd.Series) -> float:
+    """Measures how much of a column is missing.
+
+    Args:
+        series: the column to measure.
+
+    Returns:
+        The fraction of null values, between 0.0 and 1.0. An empty column
+        returns 0.0: there is nothing missing from nothing, and the "no rows"
+        rule in `validate_dataframe` is what catches an empty dataset.
+
+    Example:
+        _missing_rate(pd.Series([1, None, 3, None]))  # -> 0.5
+        _missing_rate(pd.Series([], dtype=float))     # -> 0.0
+    """
     if len(series) == 0:
         return 0.0
     return float(series.isna().mean())
@@ -24,8 +38,21 @@ def _missing_rate(series: pd.Series) -> float:
 def _out_of_bounds_count(series: pd.Series, spec: schema.ColumnSpec) -> int:
     """Counts values outside the schema bounds, ignoring anything non-numeric.
 
-    Values that cannot be read as numbers are not counted here: they are missing
-    or mistyped, which the missing rate and the parsers already cover.
+    Args:
+        series: the raw column, still unparsed.
+        spec: the column's schema entry, holding min_value and max_value.
+
+    Returns:
+        How many values fall outside the bounds. A column the schema gives no
+        bounds returns 0. Values that cannot be read as numbers are not counted
+        here: they are missing or mistyped, which the missing rate and the
+        parsers already cover.
+
+    Example:
+        # bedrooms is declared min_value=0, max_value=20:
+        _out_of_bounds_count(pd.Series([-1, 3, 999, "n/a", None]), COLUMNS["bedrooms"])
+        # -> 2, counting only -1 and 999.
+        # "n/a" and None are not counted: they are missing, not out of range.
     """
     if spec.min_value is None and spec.max_value is None:
         return 0
@@ -46,7 +73,27 @@ def validate_dataframe(df: pd.DataFrame, task_type: str) -> dict:
         task_type: "regression" or "classification".
 
     Returns:
-        A JSON-serializable report. `ok` is False when `fatal` is non-empty.
+        A JSON-serializable report holding `ok`, `fatal` (the reasons the run
+        cannot continue), `row_count`, `duplicate_rows` and `columns` — a
+        missing_rate and out_of_bounds count per column. `ok` is False exactly
+        when `fatal` is non-empty; everything else is measured and reported,
+        never blocked on.
+
+    Raises:
+        ValueError: when task_type is not one of `schema.TASK_TYPES`.
+
+    Example:
+        report = validate_dataframe(df, "regression")
+        # -> {"ok": True, "fatal": [], "row_count": 200000, "duplicate_rows": 1183,
+        #     "columns": {"bedrooms": {"missing_rate": 0.031, "out_of_bounds": 87},
+        #                 ...}}
+
+        # 1183 duplicates and 87 impossible bedroom counts do NOT fail the run:
+        # this dataset is dirty on purpose. Only these three fill `fatal` —
+        # a missing schema column, zero rows, or a target source that is
+        # missing in more than 50% of rows.
+        if not report["ok"]:
+            ...  # the validate stage exits 1 here
     """
     if task_type not in schema.TASK_TYPES:
         raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")
