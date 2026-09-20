@@ -207,6 +207,9 @@ with DAG(
         "force_reprocess": False,
         "dataset_version": "v1",
         "estimator_name": None,
+        # None = use every row, same as the old default. A triggered run's
+        # conf overrides this, which is how the dashboard picks a row count.
+        "sample_rows": None,
     },
     # model_name is derived, never passed: a run that names the wrong registered
     # model does not fail, it quietly registers a classifier under the regressor.
@@ -223,7 +226,9 @@ with DAG(
         "ml-extract:latest",
         {
             "DATASET_VERSION": "{{ params.dataset_version }}",
-            "SAMPLE_ROWS": os.environ.get("SAMPLE_ROWS", ""),
+            # Airflow merges a triggered run's conf into params, so this covers
+            # both the API path and a hand-triggered run.
+            "SAMPLE_ROWS": "{{ params.sample_rows or '' }}",
         },
     )
 
