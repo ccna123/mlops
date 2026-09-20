@@ -86,3 +86,65 @@ def test_run_detail_returns_task_states():
     )
     body = _client(airflow).get("/api/pipeline/runs/r1").json()
     assert body["tasks"][0]["task_id"] == "extract"
+
+
+LOG_TEXT = "\n".join(
+    [
+        "[2026-09-20 10:00:01] INFO - reading raw data",
+        "[2026-09-20 10:00:02] WARNING - 3 rows dropped",
+        "[2026-09-20 10:00:03] ERROR - could not parse zipcode",
+        "[2026-09-20 10:00:04] INFO - wrote 200000 rows",
+    ]
+)
+
+
+class FakeAirflowLogs(FakeAirflow):
+    def __init__(self, text=LOG_TEXT):
+        super().__init__()
+        self.text = text
+        self.asked = []
+
+    def get_logs(self, dag_id, run_id, task_id, try_number):
+        self.asked.append((dag_id, run_id, task_id, try_number))
+        return self.text
+
+
+def test_logs_return_every_line_when_no_filter_is_given():
+    body = _client(FakeAirflowLogs()).get("/api/pipeline/runs/r1/logs?stage=extract").json()
+    assert len(body["lines"]) == 4
+    assert body["truncated"] is False
+
+
+def test_logs_filter_by_level():
+    body = (
+        _client(FakeAirflowLogs())
+        .get("/api/pipeline/runs/r1/logs?stage=extract&level=ERROR")
+        .json()
+    )
+    assert len(body["lines"]) == 1
+    assert "could not parse zipcode" in body["lines"][0]
+
+
+def test_logs_filter_by_keyword_case_insensitively():
+    body = (
+        _client(FakeAirflowLogs())
+        .get("/api/pipeline/runs/r1/logs?stage=extract&q=ZIPCODE")
+        .json()
+    )
+    assert len(body["lines"]) == 1
+
+
+def test_logs_report_truncation_rather_than_hiding_it():
+    long_text = "\n".join(f"[2026-09-20] INFO - line {i}" for i in range(3000))
+    body = (
+        _client(FakeAirflowLogs(text=long_text))
+        .get("/api/pipeline/runs/r1/logs?stage=extract")
+        .json()
+    )
+    assert body["truncated"] is True
+    assert len(body["lines"]) == 2000
+
+
+def test_logs_require_a_stage():
+    response = _client(FakeAirflowLogs()).get("/api/pipeline/runs/r1/logs")
+    assert response.status_code == 422

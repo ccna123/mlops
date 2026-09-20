@@ -102,3 +102,72 @@ def get_run(request: Request, run_id: str) -> dict:
         #             "try_number": 1, "duration": 12.5}]}
     """
     return request.app.state.airflow.get_run(DAG_ID, run_id)
+
+
+MAX_LOG_LINES = 2000
+
+
+def filter_log_lines(text: str, level: str | None, keyword: str | None) -> tuple[list[str], bool]:
+    """Splits a log into lines and keeps only the ones asked for.
+
+    Args:
+        text: the raw log text as Airflow returned it.
+        level: keep only lines mentioning this level, case-insensitively.
+            None keeps every level.
+        keyword: keep only lines containing this text, case-insensitively.
+            None keeps every line.
+
+    Returns:
+        A tuple of (lines, truncated). Filtering happens here rather than in
+        the browser so a run with thousands of lines does not cross the
+        network only to be thrown away - section 8.1 names doing this in JS
+        as one of the things the old frontend got wrong. `truncated` is True
+        when lines were dropped at MAX_LOG_LINES, so the UI can say so
+        instead of silently showing less than there is.
+
+    Example:
+        filter_log_lines(text, level="ERROR", keyword=None)
+        # -> (["[2026-09-20 10:00:03] ERROR - could not parse zipcode"], False)
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if level:
+        needle = level.lower()
+        lines = [line for line in lines if needle in line.lower()]
+    if keyword:
+        needle = keyword.lower()
+        lines = [line for line in lines if needle in line.lower()]
+    truncated = len(lines) > MAX_LOG_LINES
+    return lines[:MAX_LOG_LINES], truncated
+
+
+@router.get("/pipeline/runs/{run_id}/logs", dependencies=[Depends(require_auth)])
+def get_logs(
+    request: Request,
+    run_id: str,
+    stage: str,
+    level: str | None = None,
+    q: str | None = None,
+    try_number: int = 1,
+) -> dict:
+    """Reads one task's log, filtered on the server.
+
+    Args:
+        request: the FastAPI request.
+        run_id: the run whose log is wanted.
+        stage: which task's log - required, because a run has seven tasks and
+            "the log" is not a thing that exists.
+        level: keep only lines at this level.
+        q: keep only lines containing this text.
+        try_number: which attempt; Airflow numbers them from 1.
+
+    Returns:
+        `lines` and `truncated`.
+
+    Example:
+        # GET /api/pipeline/runs/manual__.../logs?stage=validate&level=ERROR
+        # {"lines": ["[...] ERROR - target source missing in 62% of rows"],
+        #  "truncated": false}
+    """
+    text = request.app.state.airflow.get_logs(DAG_ID, run_id, stage, try_number)
+    lines, truncated = filter_log_lines(text, level, q)
+    return {"lines": lines, "truncated": truncated}
