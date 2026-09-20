@@ -32,12 +32,13 @@ def _registry(loaded: dict) -> ModelRegistry:
     return registry
 
 
-def _client(loaded: dict, buffer=None, flush=None) -> TestClient:
+def _client(loaded: dict, buffer=None, flush=None, write_truth=None) -> TestClient:
     app = create_app(
         registry=_registry(loaded),
         buffer=buffer or InferenceLogBuffer(),
         flush=flush or (lambda records: None),
         start_flusher=False,
+        write_truth=write_truth or (lambda records: "k"),
     )
     return TestClient(app)
 
@@ -200,3 +201,88 @@ def test_shutdown_flushes_a_partial_batch():
         client.post("/predict/regression", json=RAW_RECORD)
         assert written == []
     assert len(written) == 1
+
+
+def test_feedback_writes_one_batch_and_reports_the_key():
+    written = []
+
+    def fake_ground_truth(records):
+        written.append(records)
+        return "ground-truth/house_price_regressor/dt=2026-09-20/part-abc.parquet"
+
+    loaded = {
+        "regression": LoadedModel("house_price_regressor", "3", FakeModel()),
+        "classification": None,
+    }
+    response = _client(loaded, write_truth=fake_ground_truth).post(
+        "/feedback/regression",
+        json={
+            "outcomes": [
+                {"request_id": "r1", "predicted_on": "2026-09-20", "actual": 420000.0},
+                {"request_id": "r2", "predicted_on": "2026-09-20", "actual": 380000.0},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["accepted"] == 2
+    assert "ground-truth/" in response.json()["key"]
+    assert len(written) == 1
+    assert len(written[0]) == 2
+    assert written[0][0]["model_name"] == "house_price_regressor"
+
+
+def test_feedback_rejects_an_empty_batch():
+    loaded = {
+        "regression": LoadedModel("house_price_regressor", "3", FakeModel()),
+        "classification": None,
+    }
+    response = _client(loaded).post("/feedback/regression", json={"outcomes": []})
+    assert response.status_code == 422
+
+
+def test_feedback_without_a_champion_is_503():
+    # Without a champion there is no model name to file the outcomes under.
+    response = _client({"regression": None, "classification": None}).post(
+        "/feedback/regression",
+        json={"outcomes": [{"request_id": "r1", "predicted_on": "2026-09-20", "actual": 1.0}]},
+    )
+    assert response.status_code == 503
+
+
+def test_feedback_rejects_an_outcome_missing_a_field():
+    loaded = {
+        "regression": LoadedModel("house_price_regressor", "3", FakeModel()),
+        "classification": None,
+    }
+    response = _client(loaded).post(
+        "/feedback/regression",
+        json={"outcomes": [{"request_id": "r1", "actual": 1.0}]},
+    )
+    assert response.status_code == 422
+
+
+def test_inference_log_records_the_probability_for_classification():
+    # Performance drift scores classification on AUC, the same metric the
+    # promotion gate uses. AUC needs probabilities, so the log must carry them.
+    buffer = InferenceLogBuffer()
+    loaded = {
+        "regression": None,
+        "classification": LoadedModel(
+            "house_needs_renovation_classifier", "1", FakeModel(value=True, proba=0.83)
+        ),
+    }
+    _client(loaded, buffer=buffer).post("/predict/classification", json=RAW_RECORD)
+    record = buffer.take()[0]
+    assert record["probability"] == pytest.approx(0.83)
+
+
+def test_inference_log_probability_is_none_for_regression():
+    buffer = InferenceLogBuffer()
+    loaded = {
+        "regression": LoadedModel("house_price_regressor", "3", FakeModel()),
+        "classification": None,
+    }
+    _client(loaded, buffer=buffer).post("/predict/regression", json=RAW_RECORD)
+    record = buffer.take()[0]
+    assert record["probability"] is None
