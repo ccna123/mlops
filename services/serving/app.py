@@ -30,7 +30,7 @@ import pandas as pd
 from fastapi import Body, FastAPI, HTTPException
 
 from ml_common.inference_log import InferenceLogBuffer
-from ml_common.storage import Storage, inference_log_key
+from ml_common.storage import Storage, ground_truth_key, inference_log_key
 
 from .model_registry import ModelRegistry
 
@@ -75,11 +75,45 @@ def write_batch(records: list[dict]) -> None:
         storage.write_parquet(group.drop(columns=["day"]).reset_index(drop=True), key)
 
 
+def write_ground_truth(records: list[dict]) -> str:
+    """Writes one batch of reported outcomes, one file per model and per day.
+
+    Args:
+        records: outcomes carrying `model_name` and `predicted_on`. Grouping
+            uses `predicted_on`, the day the PREDICTION was served, not the
+            day the feedback arrived - that is what puts these rows in the
+            same partition as the inference log they will be joined to.
+
+    Returns:
+        The key of the last file written, for the response body.
+
+    Raises:
+        Exception: anything object storage raises. Unlike the inference log,
+            this one surfaces to the caller: the agent is reporting a batch
+            it can retry, so a silent drop would lose data nobody knows about.
+
+    Example:
+        write_ground_truth([
+            {"request_id": "r1", "predicted_on": "2026-09-20",
+             "actual": 420000.0, "model_name": "house_price_regressor"},
+        ])
+        # -> "ground-truth/house_price_regressor/dt=2026-09-20/part-1a2b3c4d.parquet"
+    """
+    storage = Storage.from_env()
+    frame = pd.DataFrame(records)
+    key = ""
+    for (model_name, day), group in frame.groupby(["model_name", "predicted_on"], sort=False):
+        key = ground_truth_key(model_name, date.fromisoformat(day), uuid4().hex[:8])
+        storage.write_parquet(group.reset_index(drop=True), key)
+    return key
+
+
 def create_app(
     registry: ModelRegistry | None = None,
     buffer: InferenceLogBuffer | None = None,
     flush=write_batch,
     start_flusher: bool = True,
+    write_truth=write_ground_truth,
 ) -> FastAPI:
     """Builds the app. Every collaborator is injectable so tests need no infra.
 
@@ -92,6 +126,8 @@ def create_app(
             tests pass a function that appends to a list.
         start_flusher: False skips the background flush loop, so a test can
             drive `drain` itself instead of waiting on real time.
+        write_truth: what writes a feedback batch. Takes a list of outcome
+            dicts and returns the key written; tests pass a recorder.
 
     Returns:
         A FastAPI app serving GET /health, POST /reload and
@@ -317,6 +353,10 @@ def create_app(
                 "day": now.date().isoformat(),
                 "raw_input": json.dumps(record, default=str),
                 "prediction": prediction,
+                # Needed by performance drift: classification is scored on AUC,
+                # the same metric the promotion gate uses, and AUC cannot be
+                # computed from a bool. None for regression.
+                "probability": probability,
                 "model_name": loaded.name,
                 "model_version": loaded.version,
             }
@@ -331,6 +371,63 @@ def create_app(
         if probability is not None:
             body["probability"] = probability
         return body
+
+    @app.post("/feedback/{task_type}")
+    def feedback(
+        task_type: Literal["regression", "classification"],
+        payload: Annotated[dict, Body()],
+    ) -> dict:
+        """Records what actually happened to predictions served earlier.
+
+        Args:
+            task_type: "regression" or "classification", from the path.
+            payload: {"outcomes": [...]}, each outcome carrying `request_id`,
+                `predicted_on` (the ISO date the prediction was served) and
+                `actual` - a number for regression, a bool for classification.
+
+        Returns:
+            `accepted`, how many outcomes were stored, and `key`, the last
+            object written.
+
+        Raises:
+            HTTPException: 422 when `outcomes` is empty or an entry is missing
+                a field. 503 when no champion is loaded, since there is then
+                no model name to file the outcomes under.
+
+        Example:
+            # POST /feedback/regression
+            # {"outcomes": [
+            #    {"request_id": "3f0a...", "predicted_on": "2026-09-20",
+            #     "actual": 420000.0}]}
+            # -> {"accepted": 1, "key": "ground-truth/.../part-1a2b3c4d.parquet"}
+            #
+            # A whole batch in one call, so one file is written rather than
+            # one per house - the same reason the inference log batches.
+        """
+        outcomes = payload.get("outcomes") or []
+        if not outcomes:
+            raise HTTPException(status_code=422, detail="outcomes must not be empty")
+
+        loaded = registry.get(task_type)
+        if loaded is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"no champion loaded for {task_type}; nothing to file outcomes under",
+            )
+
+        required = ("request_id", "predicted_on", "actual")
+        records = []
+        for outcome in outcomes:
+            missing = [field for field in required if field not in outcome]
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"outcome is missing {', '.join(missing)}",
+                )
+            records.append({**{f: outcome[f] for f in required}, "model_name": loaded.name})
+
+        key = write_truth(records)
+        return {"accepted": len(records), "key": key}
 
     return app
 

@@ -69,8 +69,9 @@ def test_emit_result_raises_type_error_for_non_dict_payload():
         emit_result([1, 2, 3])
 
 
-def test_dag_file_repeats_result_prefix_literal():
-    dag_path = Path(__file__).resolve().parents[2] / "dags" / "ml_pipeline_dag.py"
+@pytest.mark.parametrize("dag_filename", ["ml_pipeline_dag.py", "monitoring_dag.py"])
+def test_dag_file_repeats_result_prefix_literal(dag_filename):
+    dag_path = Path(__file__).resolve().parents[2] / "dags" / dag_filename
     if not dag_path.exists():
         pytest.skip("DAG file not present in this environment")
 

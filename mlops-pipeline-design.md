@@ -189,13 +189,30 @@ extract → validate → prepare_dataset_for_train → train → evaluate → br
 
 ### 6.2. `monitoring_dag` — theo dõi drift
 
-`schedule="@hourly"`. **Đây là DAG duy nhất chạy tự động.**
+`schedule="@hourly"`. **Đây là DAG duy nhất chạy tự động.** Tạo ra ở trạng
+thái **`is_paused_upon_creation=True`** — lịch `@hourly` vẫn giữ nguyên, chỉ
+là không tự chạy cho tới khi ai đó bật tay. Máy dev 16GB không cần một DAG tự
+nổ mỗi giờ, kéo Evidently và mẫu reference vào bộ nhớ, trong lúc không ai để
+ý. Lúc migrate lên MWAA thì bỏ cờ này. **(Plan 4 — xem mục 2.7 của
+`docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`, đã vá lại
+đoạn dưới đây.)**
+
+Không phải ba task như bản phác thảo ban đầu của mục này. Plan 4 dựng **một
+task mỗi model** (`house_price_regressor`, `house_needs_renovation_classifier`),
+chạy song song, mỗi task gọi **một container `ml-monitor`** làm hết cả việc
+đọc cửa sổ, so Evidently, và ghi report — không tách thành ba task
+`collect_window`/`run_evidently`/`publish_report` như dưới đây:
 
 ```
-Task 1: collect_window  → đọc inference-log + ground-truth trong cửa sổ gần nhất
-Task 2: run_evidently   → so với baseline profile của model đang giữ alias `champion`
-Task 3: publish_report  → ghi report + mức độ (ok/warning/high) lên MinIO
+task[house_price_regressor]             → container ml-monitor: đọc cửa sổ,
+                                            so Evidently, ghi report + mức độ
+task[house_needs_renovation_classifier] → container ml-monitor: (như trên)
 ```
+
+Lý do gộp: XCom (mục 7.2) chỉ chuyền được giá trị nhỏ, không chuyền được
+DataFrame giữa các task. Tách thành ba task riêng thì mỗi task phải tự đọc
+lại cửa sổ dữ liệu từ đầu — ba lần đọc cho một lần chạy, không được gì đổi
+lại.
 
 Không tự trigger retrain. Khi mức độ là `high`, Dashboard hiện cảnh báo kèm nút "Retrain ngay" đã điền sẵn `task_type` của model bị ảnh hưởng — người quyết định, không phải hệ thống.
 
@@ -296,22 +313,50 @@ Một container duy nhất phục vụ cả hai model.
 
 **Ghi inference log theo batch**, không ghi một object cho mỗi request: buffer trong bộ nhớ và flush khi đủ 500 record hoặc quá 30 giây. Agent bắn vài nghìn request mà ghi từng file thì MinIO đầy object rác và `monitoring_dag` đọc rất chậm.
 
-Mỗi bản ghi gồm: `request_id`, `timestamp`, `raw_input`, `prediction`, `model_name`, `model_version`.
+Mỗi bản ghi gồm: `request_id`, `timestamp`, `raw_input`, `prediction`,
+`probability`, `model_name`, `model_version`. **`probability` thêm ở Plan
+4** — performance drift của classification chấm bằng AUC (cùng metric cổng
+promote ở mục 7.5 dùng), mà AUC không tính được từ một giá trị bool;
+`/predict` vốn đã tính xác suất trước khi ngưỡng hoá ra `prediction`, giờ
+ghi luôn xuống log thay vì vứt đi. **(Plan 4 — xem mục 6 của
+`docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`.)**
 
 ### 7.7. Agent mô phỏng nghiệp vụ BĐS (`services/agent/`)
 
 Sinh traffic thật cho serving, thay cho việc giả lập drift bằng cách cắt dataset.
 
 - Sinh listing mới theo phân phối mô phỏng thị trường, gọi `POST /predict/{model}`.
-- Sau N ngày mô phỏng, báo kết quả thực tế về `POST /feedback` (giá bán thật, hoặc có bán trong 30 ngày không) — đây là nguồn ground truth, join với inference log qua `request_id`.
-- **Tham số `drift_scenario`** — bắt buộc phải có:
+- **Không đợi "N ngày mô phỏng".** Agent báo kết quả thực tế về
+  `POST /feedback/{task_type}` **theo lệnh** — khi người vận hành gọi lệnh
+  feedback, không phải sau một khoảng thời gian giả lập trôi qua trong
+  agent. Mỗi phần tử của lô mang theo `predicted_on` (ngày agent đã gọi
+  `/predict`), để serving phân mảnh `ground-truth/` đúng ngày đó chứ không
+  phải ngày nhận feedback — có vậy mới nằm cùng mảnh với inference log để
+  join được. Độ trễ thật giữa hỏi giá và biết giá bán vẫn hiện ra vì hai
+  lệnh là hai lần gọi tách rời, chỉ là không cần một bộ đếm "N ngày" giả lập
+  bên trong agent để có nó. **(Plan 4 — xem mục 2.8 của
+  `docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`.)**
+- **Tham số `drift_scenario`** — bắt buộc phải có, **năm kịch bản, không
+  phải bốn**:
 
 | Scenario            | Mô phỏng                                                               |
 | ------------------- | ------------------------------------------------------------------------ |
 | `none`            | Cùng phân phối với tập train — dùng để kiểm tra false positive |
-| `price_inflation` | Đẩy mặt bằng giá lên ~20%                                          |
+| `price_inflation` | Đẩy `list_price` lên ~20%, giá bán thật giữ nguyên                |
+| `market_rally`     | Đẩy `list_price` lên ~20%, giá bán thật **cũng** lên ~20%       |
 | `market_shift`    | Đổi tỉ lệ`city`, dồn giao dịch về thành phố khác             |
 | `new_segment`     | Xuất hiện`property_type` model chưa từng thấy                     |
+
+`market_rally` không có ở v2 gốc, thêm ở Plan 4. Lý do: không kịch bản nào
+trong bốn kịch bản gốc chứng minh được câu "phân biệt ba loại drift là phần
+đáng học nhất" ở mục 7.8 — cần ít nhất một ca mà feature đổi nhưng model vẫn
+đúng, để phản xạ "thấy feature drift thì retrain" lộ ra là phản xạ sai.
+**(Plan 4 — xem mục 2.5 và mục 8 (Definition of Done) của
+`docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`. Đo thật ở
+mục 8 cho thấy `price_inflation` và `market_rally` không tác động tới
+regression theo đúng bảng kết quả mà bản nháp đầu của mục 8 đó từng viết —
+`list_price` là feature bị loại khỏi regression vì là leakage, nên hai kịch
+bản này đổi một cột model không nhìn thấy.)**
 
 Nếu agent chỉ sinh dữ liệu từ đúng phân phối của tập train thì drift sẽ không bao giờ xảy ra, badge lúc nào cũng xanh, và không kiểm chứng được là hệ thống phát hiện đúng. Có scenario thì mới test được cả true positive lẫn false positive.
 
@@ -319,11 +364,29 @@ Nếu agent chỉ sinh dữ liệu từ đúng phân phối của tập train th
 
 ### 7.8. Monitoring & Drift (Evidently)
 
-**Baseline là profile thống kê gắn với một model version, không phải một dataset.**
+**Baseline là profile thống kê gắn với một model version, không phải một
+dataset.** *(Plan 4 phát hiện: câu này thua — xem đoạn "Baseline có hai
+dạng" ngay dưới.)*
 
 Ở stage `register`, tính profile của đúng tập train đã dùng cho version đó — per-column mean/std/quantile, histogram bins, tỉ lệ missing, phân phối category — rồi ghi `monitoring-baseline/{model_name}/{version}/profile.json`.
 
 Hai hệ quả quan trọng: baseline **tự sinh cùng lúc model được register**, không ai phải bấm "đặt làm baseline" thủ công; và không bao giờ có chuyện so model v3 với baseline của v1.
+
+**Baseline có hai dạng, không phải một — Plan 4 phát hiện ra khi cắm
+Evidently vào thật.** `profile.json` như trên vẫn được giữ nguyên, và vẫn
+là thứ rẻ nhất để trả lời "model này học từ phân phối nào" mà không phải
+đọc lại parquet — Plan 5 sẽ dùng nó cho histogram trên dashboard. Nhưng
+Evidently không ăn profile: `DataDriftPreset` chỉ nhận hai `Dataset` dựng từ
+hai DataFrame thật, không có chỗ nào nhét một bản tóm tắt thống kê vào được.
+Nên stage `monitor` đọc lại **tập train**, lần theo đường
+`model version → run_id → param "fingerprint" (log ở MLflow) →
+processed/{fingerprint}/{task_type}/train.parquet`, lấy mẫu tối đa
+`MONITOR_REFERENCE_ROWS` dòng (mặc định 10.000, seed cố định 42) làm
+reference cho Evidently. **Câu mở đầu mục này ("baseline... không phải một
+dataset") thua ở phần Evidently** — tập train đọc lại chính là một dataset,
+và bắt buộc phải vậy vì Evidently yêu cầu đúng dạng đó. `profile.json` không
+bị bỏ, chỉ là nó không còn là toàn bộ câu chuyện baseline nữa. **(Plan 4 —
+xem mục 2.1 của `docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`.)**
 
 `monitoring_dag` so **ba loại drift**, không phải một:
 
@@ -335,7 +398,18 @@ Hai hệ quả quan trọng: baseline **tự sinh cùng lúc model được regi
 
 Phân biệt ba loại này là phần đáng học nhất của cả dự án. Feature drift và prediction drift đo được ngay vì không cần nhãn. Performance drift mới là thứ thực sự quan trọng, nhưng nó **luôn đến trễ** — lúc agent hỏi giá một căn nhà, chưa ai biết nó bán được bao nhiêu.
 
-Output: report HTML + JSON lên `reports/`, kèm mức độ tổng hợp `ok` / `warning` / `high` để Dashboard hiển thị badge.
+**Mức độ có bốn trạng thái, không phải ba.** Chưa đủ ground truth join được
+(dưới `MONITOR_MIN_GROUND_TRUTH`, mặc định 50 dòng) thì phần performance
+drift trả `insufficient_data`, không được trả `ok` — báo xanh khi chưa đo là
+nói dối, và là kiểu nói dối nguy hiểm nhất ở đây. Mức tổng hợp bỏ qua
+`insufficient_data` khi lấy max giữa ba loại, nhưng trường đó vẫn hiện
+nguyên trong JSON để Dashboard phân biệt được "chưa đủ dữ liệu" với "đã đo
+và sạch". **(Plan 4 — xem mục 2.6 của
+`docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`.)**
+
+Output: report HTML + JSON lên `reports/`, kèm mức độ tổng hợp `ok` /
+`warning` / `high` (và `insufficient_data` riêng cho phần performance khi
+chưa đủ nhãn) để Dashboard hiển thị badge.
 
 ### 7.9. Cấu hình & bí mật
 
@@ -455,7 +529,7 @@ project/
 | 7      | Ghép thành`ml_pipeline` DAG, test full run cho regression.                                                                                                                                 |
 | 8      | Thêm nhánh classification (`needs_renovation`), test chạy cả hai `task_type`.                                                                                                       |
 | 9      | `services/agent/`: sinh traffic + `drift_scenario`. Mồi inference log từ dữ liệu theo `listing_date`.                                                                                |
-| 10     | `/feedback` + ghi ground truth; `monitor.py` với Evidently; `monitoring_dag`. Kiểm chứng: chạy `drift_scenario=none` phải ra `ok`, chạy `price_inflation` phải ra `high`. |
+| 10     | `/feedback` + ghi ground truth; `monitor.py` với Evidently; `monitoring_dag`. Kiểm chứng: `none` phải ra `ok` (bắt false positive); `market_shift` phải làm feature drift kêu vì nó bóp méo `city` — một feature thật; `price_inflation` chỉ đụng `list_price`, vốn bị loại khỏi feature vì leakage, nên nó là no-op có chủ ý — xem mục 8 của `docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`. |
 | 11     | `services/api/` theo contract mục 8.3.                                                                                                                                                      |
 | 12     | Nối`dashboard/` vào API layer, bỏ toàn bộ phần mock trong JS.                                                                                                                          |
 | 13     | (Nâng cao) Auto-retrain khi drift vượt ngưỡng, kèm cooldown.                                                                                                                             |

@@ -164,3 +164,20 @@ def test_upload_file_puts_the_bytes_on_storage(store, tmp_path):
 def test_upload_file_missing_local_path_raises(store, tmp_path):
     with pytest.raises(FileNotFoundError):
         store.upload_file(str(tmp_path / "nope.parquet"), "raw/v1/data.parquet")
+
+
+def test_drift_summary_key_sits_beside_the_evidently_report():
+    from ml_common.storage import drift_summary_key, report_key
+
+    summary = drift_summary_key("house_price_regressor", "abc123")
+    assert summary == "reports/house_price_regressor/abc123/summary.json"
+    # Same run prefix as the full report, so one listing finds both.
+    assert summary.rsplit("/", 1)[0] == report_key(
+        "house_price_regressor", "abc123", "html"
+    ).rsplit("/", 1)[0]
+
+
+def test_drift_latest_key_is_one_object_per_model():
+    from ml_common.storage import drift_latest_key
+
+    assert drift_latest_key("house_price_regressor") == "reports/house_price_regressor/latest.json"
