@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from .routes import health, pipeline
+from .routes import health, models, pipeline
 
 
 def create_app(
@@ -52,6 +52,7 @@ def create_app(
 
     app.include_router(health.router, prefix="/api")
     app.include_router(pipeline.router, prefix="/api")
+    app.include_router(models.router, prefix="/api")
     return app
 
 
