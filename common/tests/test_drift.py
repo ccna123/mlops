@@ -231,6 +231,55 @@ def test_feature_severity_thresholds(share, expected):
     assert drift.feature_severity(share) == expected
 
 
+def test_feature_severity_without_margins_is_unchanged():
+    # The share-only call signature from before task-11's market_shift
+    # addendum must keep working exactly as it did - no caller is forced to
+    # supply margins.
+    assert drift.feature_severity(0.0909) == "ok"
+    assert drift.feature_severity(0.5) == "warning"
+
+
+@pytest.mark.parametrize(
+    ("total_margin", "expected"),
+    [
+        (-0.2844, "ok"),  # observed: scenario=none, task-11 addendum
+        (-0.01, "ok"),
+        (0.0, "warning"),
+        (0.3901, "warning"),  # observed: market_shift, task-11 addendum
+    ],
+)
+def test_feature_margin_severity_thresholds(total_margin, expected):
+    # A single margin whose sum is the total_margin under test - the
+    # function only cares about the sum, not the individual values.
+    assert drift.feature_margin_severity([total_margin]) == expected
+
+
+def test_feature_margin_severity_with_no_columns_is_ok():
+    # No ValueDrift metrics were extractable (e.g. an empty feature set) -
+    # "ok" is the safe default, the same way an empty share is "ok".
+    assert drift.feature_margin_severity([]) == "ok"
+
+
+def test_feature_severity_share_dilutes_but_magnitude_catches_market_shift():
+    # This is the exact scenario the market_shift addendum found: city and
+    # zipcode are the only 2 of 22 compared columns that ever cross their
+    # per-column threshold, in BOTH scenario=none and market_shift (zipcode
+    # is a high-cardinality categorical that trips its 0.1 Jensen-Shannon
+    # threshold from sampling noise alone, in every run, real drift or not).
+    # Share alone can never tell these two runs apart: 2/22 = 0.0909 in
+    # both. The margin - how far PAST each column's own threshold the
+    # observed value sits, summed across all compared columns - can: it
+    # cancels out zipcode's near-identical contribution in both runs and is
+    # left with the genuine difference, city moving from barely-over-
+    # threshold to massively-over.
+    share = 2 / 22  # 0.0909..., identical in both real runs
+    none_margins_sum = -0.2844  # observed sum across all 22 columns
+    market_shift_margins_sum = 0.3901  # observed sum across all 22 columns
+
+    assert drift.feature_severity(share, [none_margins_sum]) == "ok"
+    assert drift.feature_severity(share, [market_shift_margins_sum]) == "warning"
+
+
 def test_prediction_severity_is_binary():
     assert drift.prediction_severity(False) == "ok"
     assert drift.prediction_severity(True) == "high"

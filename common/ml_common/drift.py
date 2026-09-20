@@ -209,36 +209,131 @@ MIN_GROUND_TRUTH = 50
 FEATURE_WARNING_SHARE = 0.3
 FEATURE_HIGH_SHARE = 0.5
 
+# Observed (fingerprint 1630bf27520bba7f, 500-row batches, task-11 live
+# runs): scenario=none scored a drifted-columns share of 0.0909 (2 of 22
+# compared columns). The 0.3 line above sits comfortably clear of that -
+# not miscalibrated for BROAD drift. What it cannot see is drift
+# CONCENTRATED into a few columns: see FEATURE_MAGNITUDE_WARNING below.
 RMSE_WARNING_RATIO = 1.2
 RMSE_HIGH_RATIO = 1.5
 
 AUC_WARNING_DROP = 0.05
 AUC_HIGH_DROP = 0.10
 
+# Share dilutes concentrated drift. With 22 compared columns, 7 must cross
+# their own threshold before FEATURE_WARNING_SHARE even fires. The
+# market_shift scenario (city forced to a single value) concentrates ALL
+# its drift into exactly 2 columns - city and zipcode - and measured a
+# share of 2/22 = 0.0909, IDENTICAL to scenario=none's share, because
+# zipcode (a high-cardinality categorical - thousands of distinct 5-digit
+# codes) crosses its own 0.1 Jensen-Shannon threshold from sampling noise
+# alone, in EVERY run, real drift or not: both the none and market_shift
+# runs measured zipcode at 0.825054, to six decimal places identical
+# (both used the default --seed 42 pool sample against the default
+# REFERENCE_SEED=42 reference sample, so the underlying zipcode values
+# were literally the same set in both runs).
+#
+# feature_margin_severity sums how far PAST its own threshold every
+# compared column's drift score sits (value - threshold, negative when
+# under). zipcode's near-identical ~+0.725 excess contributes almost
+# equally to both runs' sums and washes out of the COMPARISON, leaving the
+# genuine difference: city's margin, which went from +0.001 (value 0.101
+# against threshold 0.1, barely over) in scenario=none to +0.675 (value
+# 0.775 against threshold 0.1, massively over) in market_shift.
+#
+# Observed sums across all 22 compared columns (task-11 market_shift
+# addendum, same fingerprint/runs as above):
+#   scenario=none:  -0.2844
+#   market_shift:   +0.3901
+# A swing of 0.674 across the zero crossing chosen below. Margin from the
+# none observation to the line: 0.284. Margin from the line to the
+# market_shift observation: 0.390. Both comfortable - this is not a threshold
+# tuned to barely separate two samples.
+#
+# There is deliberately NO high-tier magnitude constant. Exactly one
+# above-warning observation exists (market_shift, +0.3901) and inventing a
+# "high" cutoff from a single data point is exactly the kind of guess this
+# task exists to stop making - left undefined until a second real
+# high-magnitude measurement exists to calibrate against.
+FEATURE_MAGNITUDE_WARNING = 0.0
 
-def feature_severity(drifted_share: float) -> str:
+
+def feature_severity(drifted_share: float, margins: list[float] | None = None) -> str:
     """Grades feature drift from the share of columns Evidently flagged.
 
     Args:
         drifted_share: fraction of columns reported as drifted, 0.0 to 1.0.
+        margins: optional - for every column Evidently compared,
+            (observed drift value - that column's own detection threshold).
+            None or empty runs the share-only grade exactly as before -
+            every existing caller is unaffected. When supplied, the worse
+            of the share-based grade and `feature_margin_severity(margins)`
+            wins. This is what catches drift concentrated into a few
+            columns, which the share path dilutes into invisibility - see
+            the comment above FEATURE_MAGNITUDE_WARNING.
 
     Returns:
-        "ok" below 0.3, "warning" from 0.3 through 0.5, "high" above 0.5.
+        "ok" below 0.3 share, "warning" from 0.3 through 0.5, "high" above
+        0.5 - OR whatever `feature_margin_severity(margins)` grades, if
+        that is worse.
 
     Example:
         feature_severity(0.1)   # -> "ok", a column or two moving is normal
         feature_severity(0.4)   # -> "warning"
         feature_severity(0.8)   # -> "high"
 
-        # These numbers are a starting point, not a conclusion. Calibrate
-        # them against a scenario=none run: if no-drift traffic already
-        # scores 0.25, the 0.3 line is far too close.
+        # market_shift: share alone says "ok" (2/22 = 0.0909, same as a
+        # clean run), but the magnitude of those 2 columns' drift tells a
+        # different story:
+        feature_severity(0.0909, margins=[0.3901])   # -> "warning"
     """
     if drifted_share > FEATURE_HIGH_SHARE:
-        return "high"
-    if drifted_share >= FEATURE_WARNING_SHARE:
-        return "warning"
-    return "ok"
+        share_result = "high"
+    elif drifted_share >= FEATURE_WARNING_SHARE:
+        share_result = "warning"
+    else:
+        share_result = "ok"
+
+    if not margins:
+        return share_result
+
+    magnitude_result = feature_margin_severity(margins)
+    return max((share_result, magnitude_result), key=SEVERITIES.index)
+
+
+def feature_margin_severity(margins: list[float]) -> str:
+    """Grades feature drift from HOW FAR PAST threshold the compared columns sit.
+
+    Where `feature_severity`'s share counts how many columns crossed their
+    threshold, this sums by how much - across every compared column, not
+    just the ones that crossed. That sum is robust to a single persistently
+    noisy column (like a high-cardinality zipcode) dominating the picture:
+    a column that scores the same in every run contributes the same
+    constant amount to the sum in every run, and cancels out of any
+    comparison between two runs. See FEATURE_MAGNITUDE_WARNING for the
+    numbers this was calibrated against.
+
+    Args:
+        margins: (observed drift value - detection threshold) for every
+            column Evidently compared. Positive means that column crossed
+            its own threshold; negative means it did not.
+
+    Returns:
+        "warning" when the sum is at or above FEATURE_MAGNITUDE_WARNING,
+        "ok" otherwise - including when margins is empty, the same safe
+        default an empty share gets. There is no "high" tier - see the
+        comment above FEATURE_MAGNITUDE_WARNING for why.
+
+    Example:
+        feature_margin_severity([-0.05, -0.02, 0.001, 0.725])  # -> "ok"
+        # scenario=none: sums to -0.2844 over all 22 columns in the real run
+
+        feature_margin_severity([-0.05, -0.02, 0.675, 0.725])  # -> "warning"
+        # market_shift: sums to +0.3901 over all 22 columns in the real run
+    """
+    if not margins:
+        return "ok"
+    return "warning" if sum(margins) >= FEATURE_MAGNITUDE_WARNING else "ok"
 
 
 def prediction_severity(drifted: bool) -> str:

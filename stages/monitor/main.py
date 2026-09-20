@@ -46,6 +46,7 @@ DEFAULT_REFERENCE_ROWS = 10_000
 REFERENCE_SEED = 42
 
 DRIFTED_COLUMNS_COUNT_TYPE = "evidently:metric_v2:DriftedColumnsCount"
+VALUE_DRIFT_TYPE = "evidently:metric_v2:ValueDrift"
 
 
 def load_champion_context(model_name: str) -> tuple[object, str, str, str]:
@@ -135,6 +136,52 @@ def _drifted_share(summary: dict) -> float:
         f"Evidently result; metric types seen were "
         f"{[(m.get('config') or {}).get('type') for m in summary.get('metrics', [])]}"
     )
+
+
+def _feature_margins(summary: dict) -> list[float]:
+    """Pulls (observed value - detection threshold) for every per-column drift check.
+
+    `DriftedColumnsCount` (`_drifted_share`) only counts how many columns
+    crossed their threshold. `drift.feature_margin_severity` needs to know
+    HOW FAR each one sits past (or under) its threshold, to catch drift
+    concentrated into a few columns that the share path dilutes into
+    invisibility - see the comment above `FEATURE_MAGNITUDE_WARNING` in
+    `ml_common/drift.py` for the market_shift measurement that found this.
+
+    Each `evidently:metric_v2:ValueDrift` entry carries `config["column"]`,
+    `config["threshold"]` and a bare numeric `value` - the drift score
+    itself, whose meaning depends on `config["method"]` (Jensen-Shannon
+    distance for categoricals, Wasserstein distance (normed) for most
+    numerics, text-content drift for the auto-detected `property_id`).
+    Different methods are not on the same scale, which is exactly why this
+    subtracts each column's OWN threshold before comparing across columns,
+    rather than comparing raw values.
+
+    Args:
+        summary: what `results.dict()` returned - the same dict `_drifted_share`
+            reads.
+
+    Returns:
+        One float per `ValueDrift` entry found, in whatever order Evidently
+        listed them. Empty when there are none - `feature_margin_severity`
+        treats that as "ok", not an error, since a feature-less comparison
+        is not this function's problem to flag.
+
+    Example:
+        _feature_margins(results.dict())
+        # -> [-0.0409, 0.0193, ..., 0.7250]  # zipcode's ~0.725 excess, last
+    """
+    margins = []
+    for metric in summary.get("metrics", []):
+        config = metric.get("config") or {}
+        if config.get("type") != VALUE_DRIFT_TYPE:
+            continue
+        threshold = config.get("threshold")
+        value = metric.get("value")
+        if threshold is None or value is None:
+            continue
+        margins.append(float(value) - float(threshold))
+    return margins
 
 
 def clean_for_drift(frame):
@@ -296,7 +343,10 @@ def main() -> int:
     feature_report = run_drift_report(
         reference_clean, current_clean, shared_numeric, shared_categorical
     )
-    feature_part = drift.feature_severity(_drifted_share(feature_report.dict()))
+    feature_report_summary = feature_report.dict()
+    feature_part = drift.feature_severity(
+        _drifted_share(feature_report_summary), _feature_margins(feature_report_summary)
+    )
 
     # Prediction drift. The champion has to be run over the reference here:
     # training never logged the distribution of its own output.
@@ -360,7 +410,7 @@ def main() -> int:
     }
     storage.write_json(summary, drift_summary_key(model_name, run_id))
     storage.write_json(summary, drift_latest_key(model_name))
-    storage.write_json(feature_report.dict(), report_key(model_name, run_id, "json"))
+    storage.write_json(feature_report_summary, report_key(model_name, run_id, "json"))
 
     emit_result(
         {
