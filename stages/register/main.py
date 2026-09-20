@@ -40,7 +40,7 @@ def main() -> int:
     # Baseline comes from the TRAIN split: Plan 4 compares production traffic
     # against the distribution the model actually learned from.
     storage = Storage.from_env()
-    train_df = storage.read_parquet(processed_key(fingerprint, "train"))
+    train_df = storage.read_parquet(processed_key(fingerprint, task_type, "train"))
     profile = compute_profile(train_df, schema.feature_columns(task_type))
 
     destination = baseline_key(model_name, version)

@@ -36,7 +36,7 @@ def main() -> int:
     print(f"champion is version {version.version} from run {version.run_id}")
 
     fingerprint = client.get_run(version.run_id).data.params["fingerprint"]
-    test_df = Storage.from_env().read_parquet(processed_key(fingerprint, "test"))
+    test_df = Storage.from_env().read_parquet(processed_key(fingerprint, TASK_TYPE, "test"))
     raw_records = test_df.drop(columns=[schema.target_column(TASK_TYPE)]).head(SAMPLE_SIZE)
 
     print("feeding RAW records straight in — no cleaning on this side:")

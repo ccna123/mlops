@@ -27,7 +27,7 @@ def main() -> int:
     estimator_name = os.environ.get("ESTIMATOR_NAME", "ridge")
 
     storage = Storage.from_env()
-    train_df = storage.read_parquet(processed_key(fingerprint, "train"))
+    train_df = storage.read_parquet(processed_key(fingerprint, task_type, "train"))
     target = schema.target_column(task_type)
 
     # Drop the target so X looks exactly like a serving record does: no target.

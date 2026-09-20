@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.request
 
 import pendulum
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
-from airflow.operators.python import BranchPythonOperator
+from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 
 DOCKER_URL = "unix://var/run/docker.sock"
@@ -23,7 +24,12 @@ NETWORK = "mlops_default"
 
 MODEL_NAME_BY_TASK_TYPE = {
     "regression": "house_price_regressor",
-    "classification": "house_sold_fast_classifier",
+    "classification": "house_needs_renovation_classifier",
+}
+
+DEFAULT_ESTIMATOR_BY_TASK_TYPE = {
+    "regression": "ridge",
+    "classification": "logistic",
 }
 
 # Passed into every stage container. Read from the scheduler's own environment,
@@ -69,7 +75,8 @@ def stage_result(lines: list[str]) -> dict:
 FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['fingerprint'] }}"
 RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | stage_result)['run_id'] }}"
 TASK_TYPE = "{{ params.task_type }}"
-MODEL_NAME = "{{ params.model_name }}"
+MODEL_NAME = "{{ model_name_for(params.task_type) }}"
+ESTIMATOR_NAME = "{{ params.estimator_name or default_estimator_for(params.task_type) }}"
 
 
 def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
@@ -98,6 +105,22 @@ def choose_branch(ti) -> str:
     return "register" if verdict["passed"] else "stop_no_deploy"
 
 
+SERVING_RELOAD_URL = os.environ.get("SERVING_URL", "http://serving:8000").rstrip("/") + "/reload"
+
+
+def reload_serving() -> str:
+    """Tells serving to pick up the version that was just registered.
+
+    One HTTP call, so no image and no Airflow Connection: a PythonOperator with
+    the standard library is the whole task.
+    """
+    request = urllib.request.Request(SERVING_RELOAD_URL, data=b"", method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read().decode("utf-8")
+    print(f"serving reloaded: {body}")
+    return body
+
+
 with DAG(
     dag_id="ml_pipeline",
     schedule=None,
@@ -108,8 +131,13 @@ with DAG(
         "task_type": "regression",
         "force_reprocess": False,
         "dataset_version": "v1",
-        "estimator_name": "ridge",
-        "model_name": MODEL_NAME_BY_TASK_TYPE["regression"],
+        "estimator_name": None,
+    },
+    # model_name is derived, never passed: a run that names the wrong registered
+    # model does not fail, it quietly registers a classifier under the regressor.
+    user_defined_macros={
+        "model_name_for": MODEL_NAME_BY_TASK_TYPE.__getitem__,
+        "default_estimator_for": DEFAULT_ESTIMATOR_BY_TASK_TYPE.__getitem__,
     },
     # Airflow 2.10 has no built-in JSON filter, so register the scan-for-result
     # helper (see stage_result() above) as a Jinja filter for use in templates.
@@ -147,7 +175,7 @@ with DAG(
             "FINGERPRINT": FINGERPRINT,
             "TASK_TYPE": TASK_TYPE,
             "MODEL_NAME": MODEL_NAME,
-            "ESTIMATOR_NAME": "{{ params.estimator_name }}",
+            "ESTIMATOR_NAME": ESTIMATOR_NAME,
         },
     )
 
@@ -177,5 +205,8 @@ with DAG(
 
     stop_no_deploy = EmptyOperator(task_id="stop_no_deploy")
 
+    deploy = PythonOperator(task_id="deploy", python_callable=reload_serving)
+
     extract >> validate >> prepare_dataset >> train >> evaluate >> branch
     branch >> [register, stop_no_deploy]
+    register >> deploy

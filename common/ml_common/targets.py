@@ -1,9 +1,10 @@
-"""Parses the target column, which the Pipeline never sees.
+"""Builds the target column, which the Pipeline never sees.
 
 sklearn transformers act on X, not y, so the target arrives at fit() exactly as
-raw as it was in the file: "$450,000" for regression, "Y" for classification.
-This module applies the same parser RawRecordCleaner would have used for that
-column kind.
+raw as it was in the file. Regression reads "$450,000" from `sale_price` and
+applies the same parser RawRecordCleaner would have used for that column kind.
+Classification has no target column in the raw data: `needs_renovation` is
+derived from `condition`.
 
 Doing this outside the Pipeline is safe in a way that cleaning a FEATURE would
 not be: serving has no target — it is the thing being asked for — so there is no
@@ -46,3 +47,50 @@ def parse_target(series: pd.Series, task_type: str) -> pd.Series:
     if kind == "money":
         return pd.to_numeric(parsed, errors="coerce")
     return parsed
+
+
+TARGET_SOURCE: dict[str, str] = {
+    "regression": schema.TARGET_REGRESSION,
+    "classification": "condition",
+}
+
+NEEDS_RENOVATION_CONDITIONS = frozenset({"poor", "fair"})
+
+
+def derive_target(df: pd.DataFrame, task_type: str) -> pd.Series:
+    """Produces the target column a model is fitted on.
+
+    Regression reads `sale_price` straight from the data. Classification has no
+    target column in the raw data at all: `needs_renovation` is derived from
+    `condition`, which is why `condition` is leakage for that task.
+
+    Args:
+        df: the raw DataFrame, with the source column present.
+        task_type: "regression" or "classification".
+
+    Returns:
+        A Series with the same index. Values that cannot be read become null
+        rather than a guess, so the caller can count and drop them.
+
+    Raises:
+        KeyError: when the source column is absent. Silently returning nulls
+            would drop every row and look like empty data instead of a bug.
+    """
+    if task_type not in schema.TASK_TYPES:
+        raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")
+
+    source = TARGET_SOURCE[task_type]
+    if source not in df.columns:
+        raise KeyError(f"missing source column {source!r} needed to build the target")
+
+    if task_type == "regression":
+        return parse_target(df[source], task_type)
+
+    values = []
+    for raw_value in df[source]:
+        normalized = parsers.normalize_text(raw_value)
+        if normalized is None or normalized not in schema.COLUMNS["condition"].allowed:
+            values.append(None)
+        else:
+            values.append(normalized in NEEDS_RENOVATION_CONDITIONS)
+    return pd.Series(values, index=df.index, dtype="object")

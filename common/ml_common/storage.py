@@ -19,6 +19,8 @@ import boto3
 import pandas as pd
 from botocore.exceptions import ClientError
 
+from . import schema
+
 _SPLITS = ("train", "test")
 
 
@@ -27,20 +29,29 @@ def raw_key(dataset_version: str) -> str:
     return f"raw/{dataset_version}/data.parquet"
 
 
-def processed_key(fingerprint: str, split: str) -> str:
-    """Path to processed data, named after the raw data's fingerprint.
+def _check_task_type(task_type: str) -> None:
+    if task_type not in schema.TASK_TYPES:
+        raise ValueError(f"task_type must be one of {schema.TASK_TYPES}, got: {task_type!r}")
 
-    The fingerprint acts as a cache key: `prepare_dataset_for_train` skips work if this
-    prefix already exists.
+
+def processed_key(fingerprint: str, task_type: str, split: str) -> str:
+    """Path to processed data, named after the raw data's fingerprint and the task.
+
+    The fingerprint acts as a cache key: `prepare_dataset_for_train` skips work if the
+    files already exist. It hashes only the raw data, so both task types share it —
+    yet their processed files differ (different target, different rows dropped).
+    The task type is part of the path so one task can never pick up the other's cache.
     """
+    _check_task_type(task_type)
     if split not in _SPLITS:
         raise ValueError(f"split must be one of {_SPLITS}, got: {split!r}")
-    return f"processed/{fingerprint}/{split}.parquet"
+    return f"processed/{fingerprint}/{task_type}/{split}.parquet"
 
 
-def processed_prefix(fingerprint: str) -> str:
-    """Prefix covering both train and test for a fingerprint."""
-    return f"processed/{fingerprint}/"
+def processed_prefix(fingerprint: str, task_type: str) -> str:
+    """Prefix covering both train and test for one fingerprint and task type."""
+    _check_task_type(task_type)
+    return f"processed/{fingerprint}/{task_type}/"
 
 
 def extracted_key(fingerprint: str) -> str:
