@@ -118,7 +118,7 @@ docker build -f services/agent/Dockerfile -t ml-agent:latest .
 docker build -f services/api/Dockerfile -t ml-api:latest .
 ```
 
-Chỉ build `ml-base` là **chưa đủ**. Sáu stage image (kể cả `ml-monitor`),
+Chỉ build `ml-base` là **chưa đủ**. Bảy stage image (kể cả `ml-monitor`),
 `ml-serving`, `ml-agent` và `ml-api` đều `FROM ml-base:latest`, nên tới khi được
 build lại chúng vẫn giữ nguyên bản `ml_common` cũ nướng sẵn bên trong — `docker
 images` sẽ cho thấy `ml-base` mới tinh còn phần còn lại thì không. Triệu
@@ -139,7 +139,7 @@ docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3
 | Airflow | http://localhost:8080 | admin / admin |
 | MLflow | http://localhost:5000 | — |
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
-| API layer (`services/api/`) | http://localhost:8001/api (Swagger: `/docs`) | — (chưa có auth, xem `mlops-pipeline-design.md` mục 3.2) |
+| API layer (`services/api/`) | http://localhost:8001 — endpoint ở `/api/...` (vd `/api/health`), Swagger ở `/docs` | — (chưa có auth, xem `mlops-pipeline-design.md` mục 3.2) |
 | Dashboard | — chưa dựng (Plan 5b) | — |
 
 ## Giới hạn máy — đã gây ra quyết định thiết kế
@@ -213,8 +213,9 @@ mục 5.1. Mỗi plan viết sau khi plan trước chạy xong.
 - **Preview chỉ đọc 200.000 dòng đầu** của file raw (`PREVIEW_STATS_ROWS`), nên
   thống kê cột là của phần đầu file; `total_rows` mới là của cả file. Object
   vẫn được tải nguyên về bộ nhớ mỗi lần gọi; đo ở Task 12, mỗi lần gọi đẩy RSS
-  của process API lên khoảng 0,9–1,3 GB (ba lần gọi, chưa đủ để chứng minh nó
-  ngừng tăng).
+  của process API lên khoảng 0,9–1,2 GB (đỉnh RSS 909.420 / 1.085.624 /
+  1.162.148 kB trong ba lần gọi liên tiếp; ba lần chưa đủ để chứng minh nó ngừng
+  tăng). Một lần gọi thứ hai sau khi khởi động lại container đạt 1.261.240 kB.
 - **Trần upload 500 MiB** (`app.state.max_upload_bytes`) chỉ chặn phần handler
   copy và chuyển đổi. FastAPI đã nhận và ghi cả body ra đĩa trước khi handler
   chạy, nên 413 chỉ đến **sau khi** upload xong, và đỉnh dùng đĩa có thể tới
