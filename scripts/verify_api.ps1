@@ -6,11 +6,14 @@
 #
 # Every step must be able to fail: a curl that cannot connect, an empty body or
 # a wrong value throws. The only thing that is not a failure is a check that has
-# nothing to look at (no model versions yet); it is printed as SKIP and counted
-# separately in the last line, never as a pass.
+# nothing to look at (a model with an empty versions list); it is printed as SKIP
+# and counted separately in the last lines, never as a pass. A payload that is
+# malformed - a model with no `versions` key at all - is a failure, not a skip.
 $ErrorActionPreference = "Stop"
 $api = "http://localhost:8001/api"
-$passed = 0
+$totalSteps = 6
+$stepsPassed = 0
+$modelsChecked = 0
 $skipped = 0
 
 function Get-HttpCode {
@@ -41,12 +44,12 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 Write-Host "== 1/6 Tests on the dev machine ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m pytest common/ services/ -q
 if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
-$passed++
+$stepsPassed++
 
 Write-Host "== 2/6 Ruff ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m ruff check .
 if ($LASTEXITCODE -ne 0) { throw "ruff failed" }
-$passed++
+$stepsPassed++
 
 Write-Host "== 3/6 Airflow REST accepts basic auth ==" -ForegroundColor Cyan
 $code = Get-HttpCode "http://localhost:8080/api/v1/dags" @("-u", "admin:admin")
@@ -54,7 +57,7 @@ if ($code -ne "200") {
     throw "Airflow REST returned HTTP $code - check AIRFLOW__API__AUTH_BACKENDS includes basic_auth"
 }
 Write-Host "   HTTP 200"
-$passed++
+$stepsPassed++
 
 Write-Host "== 4/6 /api/health reports exactly the five dependencies ==" -ForegroundColor Cyan
 $health = Get-Json "$api/health"
@@ -72,15 +75,20 @@ foreach ($name in @("airflow", "mlflow", "minio")) {
         throw "/api/health says $name is '$($health.services.$name)' - the stack must be up"
     }
 }
-$passed++
+$stepsPassed++
 
 Write-Host "== 5/6 /api/models returns metrics that fit each model's task type ==" -ForegroundColor Cyan
 $models = Get-Json "$api/models"
 if ($models.PSObject.Properties.Name -notcontains "models") { throw "/api/models has no models list" }
-$checkedModels = 0
 foreach ($m in @($models.models)) {
+    # "versions": [] is a model nothing was registered for yet (skip); no
+    # `versions` key, or null, is a payload the API should never send (fail).
+    if ($m.PSObject.Properties.Name -notcontains "versions" -or $null -eq $m.versions) {
+        throw "$($m.name) has no versions list in /api/models - malformed payload"
+    }
     if (@($m.versions).Count -eq 0) {
         Write-Host "   SKIP: $($m.name) has no versions" -ForegroundColor Yellow
+        $skipped++
         continue
     }
     $keys = @($m.versions[0].metrics.PSObject.Properties.Name)
@@ -94,23 +102,27 @@ foreach ($m in @($models.models)) {
     } else {
         throw "$($m.name) has task_type '$($m.task_type)', expected regression or classification"
     }
-    $checkedModels++
-    $passed++
+    $modelsChecked++
 }
-if ($checkedModels -eq 0) {
+if ($modelsChecked -eq 0) {
+    # Nothing was actually looked at, so this step is not counted as passed.
     Write-Host "   SKIP: no model versions" -ForegroundColor Yellow
-    $skipped++
+} else {
+    $stepsPassed++
 }
 
 Write-Host "== 6/6 /api/drift/latest ==" -ForegroundColor Cyan
 $code = Get-HttpCode "$api/drift/latest?model_name=house_price_regressor"
 if ($code -ne "200" -and $code -ne "404") { throw "/api/drift/latest returned HTTP $code, expected 200 or 404" }
 Write-Host "   HTTP $code (404 is valid before monitoring has ever run)"
-$passed++
+$stepsPassed++
 
-$summary = "Plan 5a green: $passed checks passed, $skipped skipped."
-if ($skipped -gt 0) {
-    Write-Host "`n$summary" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "steps passed:   $stepsPassed/$totalSteps"
+Write-Host "models checked: $modelsChecked"
+Write-Host "skipped:        $skipped"
+if ($stepsPassed -eq $totalSteps -and $skipped -eq 0) {
+    Write-Host "`nPlan 5a green." -ForegroundColor Green
 } else {
-    Write-Host "`n$summary" -ForegroundColor Green
+    Write-Host "`nPlan 5a: no check failed, but it is NOT fully verified - see SKIP above." -ForegroundColor Yellow
 }

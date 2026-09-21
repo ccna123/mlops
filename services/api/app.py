@@ -13,6 +13,7 @@ every backend swap would become a frontend change.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import httpx
@@ -24,6 +25,8 @@ from .clients.airflow import AirflowClient
 from .clients.registry import RegistryClient
 from .clients.reports import ReportsClient
 from .routes import data, drift, health, models, pipeline
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -91,7 +94,9 @@ def _real_airflow() -> AirflowClient | None:
         An `AirflowClient`, or None when a variable is absent. None means
         /health reports airflow as down instead of the container dying at
         startup and restarting forever - a dashboard that loads and says what
-        is broken beats one that never loads. Building the client makes no
+        is broken beats one that never loads. The None is never silent: a
+        WARNING names the missing variable, since a typo'd variable would
+        otherwise look like an Airflow outage. Building the client makes no
         request.
 
     Example:
@@ -103,7 +108,13 @@ def _real_airflow() -> AirflowClient | None:
             os.environ["AIRFLOW_USERNAME"],
             os.environ["AIRFLOW_PASSWORD"],
         )
-    except KeyError:
+    except KeyError as err:
+        logger.warning(
+            "airflow client not configured, /health will report it down: "
+            "missing environment variable %s",
+            err,
+            exc_info=True,
+        )
         return None
 
 
@@ -114,15 +125,22 @@ def _real_registry() -> RegistryClient | None:
         None. Reads MLFLOW_TRACKING_URI.
 
     Returns:
-        A `RegistryClient`, or None when MLFLOW_TRACKING_URI is absent. Same
-        reasoning as `_real_airflow`. Building the client makes no request.
+        A `RegistryClient`, or None when MLFLOW_TRACKING_URI is absent, with a
+        WARNING naming it. Same reasoning as `_real_airflow`. Building the
+        client makes no request.
 
     Example:
         _real_registry()  # -> RegistryClient(...) or None
     """
     try:
         return RegistryClient()
-    except KeyError:
+    except KeyError as err:
+        logger.warning(
+            "mlflow client not configured, /health will report it down: "
+            "missing environment variable %s",
+            err,
+            exc_info=True,
+        )
         return None
 
 
@@ -134,15 +152,22 @@ def _real_storage() -> Storage | None:
         MINIO_SECRET_KEY and ML_BUCKET (see `Storage.from_env`).
 
     Returns:
-        A `Storage`, or None when a required variable is absent. Same
-        reasoning as `_real_airflow`. Building the client makes no request.
+        A `Storage`, or None when a required variable is absent, with a
+        WARNING naming it. Same reasoning as `_real_airflow`. Building the
+        client makes no request.
 
     Example:
         _real_storage()  # -> Storage(...) or None
     """
     try:
         return Storage.from_env()
-    except KeyError:
+    except KeyError as err:
+        logger.warning(
+            "minio client not configured, /health will report it down: "
+            "missing environment variable %s",
+            err,
+            exc_info=True,
+        )
         return None
 
 

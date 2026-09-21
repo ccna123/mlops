@@ -9,6 +9,7 @@ connection or DNS lookup into a recorded attempt, and the tests that build
 real clients assert none was made.
 """
 
+import logging
 import socket
 
 import httpx
@@ -458,3 +459,65 @@ def test_injected_clients_and_probes_are_used_as_given():
     assert app.state.registry is registry
     assert app.state.storage is storage
     assert app.state.probes is probes
+
+
+# --- 6. a dependency that is not configured is logged, not silently None ----
+
+APP_LOGGER = "services.api.app"
+
+
+def _warnings(caplog):
+    return [r for r in caplog.records if r.name == APP_LOGGER and r.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize(
+    ("builder", "dependency", "missing"),
+    [
+        ("_real_airflow", "airflow", "AIRFLOW_API_URL"),
+        ("_real_airflow", "airflow", "AIRFLOW_USERNAME"),
+        ("_real_airflow", "airflow", "AIRFLOW_PASSWORD"),
+        ("_real_registry", "mlflow", "MLFLOW_TRACKING_URI"),
+        ("_real_storage", "minio", "MINIO_ACCESS_KEY"),
+        ("_real_storage", "minio", "MINIO_SECRET_KEY"),
+        ("_real_storage", "minio", "MINIO_ENDPOINT"),
+    ],
+)
+def test_a_builder_warns_naming_the_dependency_and_the_missing_variable(
+    monkeypatch, caplog, builder, dependency, missing
+):
+    _set_dummy_environment(monkeypatch)
+    monkeypatch.delenv(missing)
+    if missing == "MINIO_ENDPOINT":
+        monkeypatch.delenv("MINIO_ENDPOINT_INTERNAL")
+
+    with caplog.at_level(logging.WARNING, logger=APP_LOGGER):
+        result = getattr(app_module, builder)()
+
+    assert result is None
+    (record,) = _warnings(caplog)
+    assert dependency in record.getMessage()
+    assert missing in record.getMessage()
+    # The traceback rides along, so a KeyError from deeper than the env read
+    # can still be traced to where it came from.
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], KeyError)
+
+
+def test_create_app_with_no_environment_logs_one_warning_per_unbuilt_client(caplog):
+    with caplog.at_level(logging.WARNING, logger=APP_LOGGER):
+        create_app()
+
+    messages = [r.getMessage() for r in _warnings(caplog)]
+    assert len(messages) == 3
+    assert any("airflow" in m and "AIRFLOW_API_URL" in m for m in messages)
+    assert any("mlflow" in m and "MLFLOW_TRACKING_URI" in m for m in messages)
+    assert any("minio" in m and "MINIO_ENDPOINT" in m for m in messages)
+
+
+def test_a_fully_configured_environment_logs_no_warning(monkeypatch, caplog):
+    _set_dummy_environment(monkeypatch)
+
+    with caplog.at_level(logging.WARNING, logger=APP_LOGGER):
+        create_app()
+
+    assert _warnings(caplog) == []
