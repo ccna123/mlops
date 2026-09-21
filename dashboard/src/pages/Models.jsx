@@ -32,6 +32,7 @@ export default function Models({ onNavigateToOverview }) {
   const [promoting, setPromoting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteModelTarget, setDeleteModelTarget] = useState(null);
 
   async function load() {
     setState({ status: "loading" });
@@ -80,6 +81,25 @@ export default function Models({ onNavigateToOverview }) {
     }
   }
 
+  async function confirmDeleteModel() {
+    if (!deleteModelTarget) return;
+    setDeleting(true);
+    try {
+      await client.deleteModel(deleteModelTarget.name);
+      pushToast({ type: "success", text: `Đã xoá model ${deleteModelTarget.name}` });
+    } catch (error) {
+      const detail = error instanceof ApiError ? error.detail : null;
+      pushToast({
+        type: "error",
+        text: `Không xoá được model: ${typeof detail === "string" ? detail : "lỗi không xác định"}`,
+      });
+    } finally {
+      setDeleting(false);
+      setDeleteModelTarget(null);
+      load();
+    }
+  }
+
   return (
     <div className="page-grid-single">
       {state.status === "loading" && <LoadingSkeleton rows={6} />}
@@ -106,6 +126,13 @@ export default function Models({ onNavigateToOverview }) {
                   <h2>{model.name}</h2>
                   <p className="section-sub">{model.task_type}</p>
                 </div>
+                <button
+                  className="btn-danger-ghost"
+                  disabled={promoting || deleting}
+                  onClick={() => setDeleteModelTarget({ name: model.name, versionCount: model.versions.length })}
+                >
+                  <Trash2 size={14} /> Xoá model
+                </button>
               </div>
 
               {champion && (
@@ -220,6 +247,28 @@ export default function Models({ onNavigateToOverview }) {
           <p className="warn-note">
             Không hoàn tác được. Metric và lịch sử của version này biến mất khỏi Registry; các báo cáo drift đã tính
             trên nó vẫn còn trong object storage nhưng sẽ trỏ tới một version không còn tồn tại.
+          </p>
+        </ConfirmDialog>
+      )}
+
+      {deleteModelTarget && (
+        <ConfirmDialog
+          title="Xoá toàn bộ model này?"
+          confirmLabel="Xoá toàn bộ model"
+          danger
+          busy={deleting}
+          onConfirm={confirmDeleteModel}
+          onCancel={() => setDeleteModelTarget(null)}
+        >
+          <p>
+            Xoá <b>{deleteModelTarget.name}</b> khỏi Model Registry, kèm <b>tất cả {deleteModelTarget.versionCount}</b>{" "}
+            version và alias champion.
+          </p>
+          <p className="warn-note">
+            Không hoàn tác được. Sau khi xoá, <code>serving</code> vẫn trả lời bằng model đang nằm sẵn trong bộ nhớ
+            cho tới lần khởi động lại hoặc <code>/reload</code> kế tiếp; từ đó trở đi <code>/predict</code> trả 503
+            &ldquo;no champion loaded&rdquo; cho loại model này. Muốn có model trở lại thì phải chạy pipeline train
+            và qua được cổng promote.
           </p>
         </ConfirmDialog>
       )}

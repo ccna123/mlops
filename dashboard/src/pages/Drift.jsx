@@ -133,6 +133,9 @@ export default function Drift({ onRetrain }) {
       .then((body) => {
         setModels(body.models);
         if (body.models.length > 0) setModelName(body.models[0].name);
+        // With no models there is nothing to select and load() never runs, so
+        // say so here — otherwise the screen sits on its skeleton forever.
+        else setLatestState({ status: "no-models" });
       })
       .catch(() => setModels([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -210,17 +213,29 @@ export default function Drift({ onRetrain }) {
             <button className="btn-secondary" onClick={load}>
               <RefreshCw size={14} /> Tải lại
             </button>
-            <button className="btn-primary" disabled={triggeringRun} onClick={() => setRunConfirmOpen(true)}>
+            <button
+              className="btn-primary"
+              disabled={triggeringRun || models.length === 0}
+              onClick={() => setRunConfirmOpen(true)}
+            >
               <Play size={14} /> Tính drift ngay
             </button>
           </div>
         </div>
 
-        <p className="hint-note">
-          Báo cáo tính lúc thời điểm <code>computed_at</code> dưới đây. Traffic mới gửi có thể chưa được ghi và chưa
-          có trong báo cáo này.
-        </p>
+        {latestState.status !== "no-models" && (
+          <p className="hint-note">
+            Báo cáo tính lúc thời điểm <code>computed_at</code> dưới đây. Traffic mới gửi có thể chưa được ghi và
+            chưa có trong báo cáo này.
+          </p>
+        )}
 
+        {latestState.status === "no-models" && (
+          <EmptyState
+            title="Chưa có model nào."
+            description="Registry đang trống, nên không có gì để đo drift. Chạy pipeline để train model trước."
+          />
+        )}
         {latestState.status === "loading" && <LoadingSkeleton rows={4} />}
         {latestState.status === "error" && (
           <ErrorState kind="system" detail={latestState.error?.detail} onRetry={load} />

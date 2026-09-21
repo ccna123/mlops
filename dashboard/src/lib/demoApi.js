@@ -75,6 +75,11 @@ export const demoApi = {
     return { name, version, deleted: true };
   },
 
+  deleteModel: async (name) => {
+    await delay(300);
+    return { name, deleted: true };
+  },
+
   triggerDriftRun: async () => {
     await delay(300);
     return { run_id: `manual__${new Date().toISOString()}`, dag_id: "monitoring_dag", state: "queued" };

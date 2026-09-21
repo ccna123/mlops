@@ -145,6 +145,8 @@ export const api = {
   deleteModelVersion: (name, version) =>
     request(`/models/${encodeURIComponent(name)}/${encodeURIComponent(version)}`, { method: "DELETE" }),
 
+  deleteModel: (name) => request(`/models/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
   triggerDriftRun: () => request("/drift/run", { method: "POST" }),
 
   driftLatest: (modelName) => request(`/drift/latest?model_name=${encodeURIComponent(modelName)}`),
