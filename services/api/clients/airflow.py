@@ -225,9 +225,13 @@ class AirflowClient:
             in the route, so this stays a transport concern.
 
         Raises:
-            AirflowNotFoundError: when Airflow has no such run, task or
-                attempt log. An empty string here would be indistinguishable
-                from a task that genuinely logged nothing.
+            AirflowNotFoundError: when Airflow answers 404, which live it does
+                for an unknown run and for an unknown task_id in an existing
+                run. It does NOT for a `try_number` that has no log: Airflow
+                answers 200 and puts its own error text ("*** Could not read
+                served logs: 403 ...") in the body, so that text comes back
+                here as if it were the log. Callers must pass the try_number
+                the run detail reports for the task.
             Exception: any other failure (Airflow unreachable, 401, 5xx) is
                 left to propagate.
 

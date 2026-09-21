@@ -187,8 +187,12 @@ def get_logs(
         and a "Found local files" banner.
 
     Raises:
-        HTTPException: 404 when Airflow has no such run, task or attempt log.
-            Nothing else is caught: Airflow being down, refusing the
+        HTTPException: 404 when Airflow has no such run, or no such task
+            (`stage`) in that run. NOT a 404: a `try_number` that has no log.
+            Airflow answers 200 there and its own error text ("*** Could not
+            read served logs: 403 ...") comes back in `lines` as if it were
+            the log, so pass the `try_number` that the run detail reports for
+            the task. Nothing else is caught: Airflow being down, refusing the
             credentials or failing escapes as a 500.
 
     Example:
