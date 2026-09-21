@@ -96,15 +96,22 @@ Mỗi màn hình dưới đây mô tả đủ: **loading**, **empty**, **error**
 
 `StatusBadge` (bốn trạng thái, mục 2) · `MetricTile` (số lớn, nhãn, hướng tốt/xấu) · `DataTable` (sort, filter, phân trang) · `EmptyState` · `ErrorState` (có hai biến thể: không tìm thấy / hệ thống hỏng) · `LoadingSkeleton` · `ConfirmDialog` · `Toast` · `RelativeTime`.
 
-Chỉ **ba** thao tác ghi cần `ConfirmDialog`, và chúng đều là ghi thật:
+**Năm** thao tác ghi cần `ConfirmDialog`, và chúng đều là ghi thật:
 
 | Thao tác | Endpoint | Khi nào có dialog |
 | --- | --- | --- |
 | Khởi động một lần train | `POST /pipeline/run` | Luôn luôn (mục 4.1, và từ nút retrain ở mục 4.5) |
 | Đổi champion | `POST /models/{name}/{version}/promote` | Luôn luôn (mục 4.4) |
 | Upload dataset | `POST /data/upload` | Chỉ khi phiên bản đích **đã tồn tại** (sẽ bị ghi đè âm thầm, mục 4.3) |
+| Xoá một model version | `DELETE /models/{name}/{version}` | Luôn luôn (mục 4.4) |
+| Tính drift thủ công | `POST /drift/run` | Luôn luôn (mục 4.5) |
 
-Mọi `GET` không cần xác nhận. Không có thao tác xoá nào trong API.
+Mọi `GET` không cần xác nhận.
+
+> **Sửa ngày 2026-09-21.** Bản đầu của brief ghi "ba thao tác" và "không có thao tác
+> xoá nào trong API". Chủ dự án sau đó yêu cầu thêm xoá model version và trigger
+> drift thủ công, nên Plan 5b thêm hai endpoint vào `services/api/`:
+> `DELETE /models/{name}/{version}` và `POST /drift/run`. Xem mục 4.4 và 4.5.
 
 ### 3.5. Nhịp lấy dữ liệu
 
@@ -630,6 +637,6 @@ Plan 5b vì vậy cần **một** trong hai:
 - Không auto-retrain: drift chỉ cảnh báo, người quyết định.
 - Không gọi thẳng Airflow, MLflow, MinIO.
 - Không liệt kê phiên bản dữ liệu, không xoá hay đổi tên dữ liệu (API không có endpoint).
-- Không bật/tắt DAG (`ml_pipeline`, `monitoring_dag`), không gọi `/reload` của serving, không gửi traffic cho model (đó là việc của agent).
+- Không **bật/tắt** DAG (`ml_pipeline`, `monitoring_dag`), không gọi `/reload` của serving, không gửi traffic cho model (đó là việc của agent). Từ 2026-09-21 dashboard **trigger** được `monitoring_dag` qua `POST /drift/run`, nhưng vẫn không bật/tắt DAG: cả hai DAG được để unpaused sẵn ở tầng hạ tầng, vì một run của DAG paused sẽ nằm `queued` vĩnh viễn mà không có tín hiệu nào báo lý do.
 - Không nhúng báo cáo Evidently cho tới khi có cách phục vụ nó (mục 4.5).
 - Không chuẩn hoá hay làm sạch dữ liệu trên UI: preview hiển thị dữ liệu thô đúng như đã lưu.

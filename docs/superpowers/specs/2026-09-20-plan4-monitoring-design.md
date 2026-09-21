@@ -259,6 +259,16 @@ nổ mỗi giờ trong nền, mỗi lần kéo Evidently và 10.000 dòng refere
 người ta quên mất rồi tự hỏi sao máy chậm. Bật tay khi cần; lúc migrate lên
 MWAA thì bỏ cờ này.
 
+> **Thay đổi ngày 2026-09-21 (Plan 5b).** Mục này không còn mô tả đúng code.
+> Dashboard nay có nút "Tính drift ngay" gọi `POST /api/drift/run` để trigger
+> `monitoring_dag`, nên DAG đổi thành **`schedule=None`, không còn
+> `is_paused_upon_creation`, và được để unpaused**, kèm `max_active_runs=1`.
+> Lý do: cờ paused sinh ra để chặn lịch `@hourly` ngốn RAM; khi không còn lịch
+> thì nó không bảo vệ gì nữa, chỉ còn gây ra cái bẫy "run nằm `queued` vĩnh
+> viễn mà không có tín hiệu nào báo lý do" — đúng sự cố đã xảy ra với
+> `ml_pipeline` ngày 2026-09-21. Khi migrate lên MWAA thì trả lại
+> `schedule="@hourly"`, nơi chi phí mỗi giờ không thành vấn đề.
+
 ### 2.8. `/feedback` nhận cả lô, và ngày do agent cung cấp
 
 `POST /feedback/{task_type}` nhận **một danh sách** kết quả, không phải một.

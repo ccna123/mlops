@@ -197,6 +197,11 @@ nổ mỗi giờ, kéo Evidently và mẫu reference vào bộ nhớ, trong lúc
 `docs/superpowers/specs/2026-09-20-plan4-monitoring-design.md`, đã vá lại
 đoạn dưới đây.)**
 
+**Plan 5b (2026-09-21) đổi tiếp:** không còn DAG nào tự chạy. `monitoring_dag`
+thành `schedule=None` + unpaused + `max_active_runs=1`, chạy khi dashboard gọi
+`POST /api/drift/run`. `ml_pipeline` cũng nhận `max_active_runs=1`. Chi tiết và
+lý do ở mục 2.7 của spec Plan 4 nói trên.
+
 Không phải ba task như bản phác thảo ban đầu của mục này. Plan 4 dựng **một
 task mỗi model** (`house_price_regressor`, `house_needs_renovation_classifier`),
 chạy song song, mỗi task gọi **một container `ml-monitor`** làm hết cả việc

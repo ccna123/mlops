@@ -140,7 +140,7 @@ docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3
 | MLflow | http://localhost:5000 | — |
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
 | API layer (`services/api/`) | http://localhost:8001 — endpoint ở `/api/...` (vd `/api/health`), Swagger ở `/docs` | — (chưa có auth, xem `mlops-pipeline-design.md` mục 3.2) |
-| Dashboard | — chưa dựng (Plan 5b) | — |
+| Dashboard | http://localhost:5173 (`cd dashboard; npm run dev`) | — (chưa có auth) |
 
 ## Giới hạn máy — đã gây ra quyết định thiết kế
 
@@ -183,8 +183,8 @@ Chỉ commit khi được yêu cầu hoặc khi plan nói rõ ở step đó.
 
 Bốn plan đầu **đã xong và đã merge vào `main`** (merge commit của Plan 4 là
 `706f45a`; `git branch --merged main` liệt kê cả `plan1-infra` tới
-`plan4-monitoring`). Plan 5 được tách đôi: 5a (API) đã xong trên nhánh
-`plan5a-api`, **chưa merge**; 5b (dashboard) chưa bắt đầu:
+`plan4-monitoring`). Plan 5a (API) đã merge vào `main`. Plan 5b (dashboard) đã
+dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 
 | Plan | Nội dung | Verify |
 | --- | --- | --- |
@@ -192,17 +192,38 @@ Bốn plan đầu **đã xong và đã merge vào `main`** (merge commit của P
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
-| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 11 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 13 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version, trigger drift thủ công | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-21: 599 test pass ở Python 3.13 (local, `pytest common/ services/`);
-323 pass + 7 skip ở 3.12 (container) — image `ml-base` chỉ chứa `common/`, nên
-test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và **test của
-`services/api/` chỉ chạy ở máy dev**, không chạy trong container.
+Đo ngày 2026-09-21 (sau Plan 5b): 660 test pass ở Python 3.13 (local,
+`pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
+`common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
+**test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
 
-Còn lại: **Plan 5b — dashboard**. Nó đang **bị chặn bởi một quyết định của chủ
-dự án**: file HTML một trang tới được API bằng cách nào (API tự phục vụ file đó
-cùng origin, hay thêm `CORSMiddleware`) — xem `docs/superpowers/specs/2026-09-20-plan5b-ui-brief.md`
-mục 5.1. Mỗi plan viết sau khi plan trước chạy xong.
+### Plan 5b — dashboard (2026-09-21)
+
+Không còn dùng "một file HTML tự chứa" như brief mô tả: chủ dự án chọn **Vite +
+React + Tailwind + lucide-react + Chart.js**, có bước build. Quyết định CORS ở
+mục 5.1 của brief được giải bằng **proxy của Vite dev server** (`/api` →
+`http://localhost:8001`), nên `API_BASE` là đường dẫn tương đối `/api` và
+trình duyệt không hề gọi cross-origin. **Bản production vẫn chưa chọn cách phục
+vụ** — hoặc API tự serve thư mục build, hoặc thêm `CORSMiddleware`.
+
+```powershell
+cd dashboard; npm install; npm run dev    # http://localhost:5173
+```
+
+Sidebar có nút **"Chế độ minh hoạ"**: bật lên thì mọi màn dùng fixture JSON
+chép từ brief (`src/lib/demoFixtures.js`) thay vì gọi API, để xem giao diện khi
+stack chưa chạy.
+
+**Hai DAG đều để unpaused và đều `max_active_runs=1`.** `ml_pipeline` giữ
+`schedule=None`; `monitoring_dag` đổi từ `@hourly` + paused sang `schedule=None`
++ unpaused (xem mục 2.7 spec Plan 4). Lý do: run của một DAG paused nằm
+`queued` vĩnh viễn và **không tín hiệu nào trên API hay dashboard cho biết vì
+sao** — đúng sự cố mất nửa buổi ngày 2026-09-21. Hệ quả cần nhớ: lưới an toàn
+cũ không còn, bấm Trigger từ Airflow UI mà quên `conf` sẽ chạy toàn bộ 2 triệu
+dòng. Dashboard thì luôn gửi `sample_rows` nên an toàn.
 
 ### Plan 5a — những điều không tự suy ra được từ code
 
@@ -227,5 +248,9 @@ mục 5.1. Mỗi plan viết sau khi plan trước chạy xong.
   chạy, nên 413 chỉ đến **sau khi** upload xong, và đỉnh dùng đĩa có thể tới
   khoảng ba bản (body của framework, CSV, parquet). Đường 413 chưa được chạy
   thật trên hệ thống sống.
-- **Chưa có auth**: `require_auth` rỗng, nên `promote`, `upload` và `pipeline/run`
-  mở cho bất kỳ ai tới được cổng 8001.
+- **Chưa có auth**: `require_auth` rỗng, nên `promote`, `upload`, `pipeline/run`,
+  và (từ Plan 5b) `DELETE /models/{name}/{version}` lẫn `POST /drift/run` mở cho
+  bất kỳ ai tới được cổng 8001. Xoá model version là thao tác **không hoàn tác
+  được** duy nhất trong API, và nó không được bảo vệ bởi gì ngoài một
+  `ConfirmDialog` ở phía trình duyệt — cộng với luật chặn xoá champion, luật này
+  thì nằm ở backend nên gọi thẳng API cũng không lách được.
