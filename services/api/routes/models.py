@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..clients.registry import RegistryNotFoundError
 from ..deps import require_auth
 
 router = APIRouter()
@@ -48,6 +49,10 @@ def promote(request: Request, name: str, version: str) -> dict:
         HTTPException: 404 when the model or version does not exist. This is
             a real write against the Registry, so the UI must confirm before
             calling it and must not report success on a failure.
+        Exception: any failure other than not-found - MLflow down, a timeout -
+            is deliberately not caught and escapes as a 500, because "the
+            Registry is unreachable" and "that version does not exist" call
+            for different reactions from the UI.
 
     Example:
         # POST /api/models/house_price_regressor/4/promote
@@ -56,5 +61,5 @@ def promote(request: Request, name: str, version: str) -> dict:
     """
     try:
         return request.app.state.registry.promote(name, version)
-    except Exception as err:  # noqa: BLE001 - surfaced as 404 with the reason
+    except RegistryNotFoundError as err:
         raise HTTPException(status_code=404, detail=f"cannot promote: {err}") from err

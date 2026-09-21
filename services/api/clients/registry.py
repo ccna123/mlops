@@ -14,12 +14,50 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 
+from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import INVALID_PARAMETER_VALUE, RESOURCE_DOES_NOT_EXIST, ErrorCode
+
 CHAMPION_ALIAS = "champion"
+
+# MlflowException.error_code is always the enum's name as a string.
+NOT_FOUND_CODE = ErrorCode.Name(RESOURCE_DOES_NOT_EXIST)
+INVALID_PARAMETER_CODE = ErrorCode.Name(INVALID_PARAMETER_VALUE)
 
 MODEL_TASK_TYPES = {
     "house_price_regressor": "regression",
     "house_needs_renovation_classifier": "classification",
 }
+
+
+class RegistryNotFoundError(Exception):
+    """The registered model or model version does not exist in the Registry.
+
+    The one failure the routes turn into a 404. Anything else MLflow raises
+    (it is down, it timed out, it rejected the request) is not "not found"
+    and must not be reported as such.
+    """
+
+
+def _is_missing_alias(err: MlflowException) -> bool:
+    """Tells "this model has no champion alias" from a genuine failure.
+
+    Args:
+        err: the exception `get_model_version_by_alias` raised.
+
+    Returns:
+        True when MLflow said the alias, model or version does not exist.
+        Observed against MLflow 2.22: a missing alias comes back as
+        INVALID_PARAMETER_VALUE with "not found" in the message, not as
+        RESOURCE_DOES_NOT_EXIST, so both are accepted. The message check keeps
+        other INVALID_PARAMETER_VALUE failures from being read as "no champion".
+
+    Example:
+        # alias never set -> True
+        # MLflow unreachable, or a 500 from the server -> False
+    """
+    if err.error_code == NOT_FOUND_CODE:
+        return True
+    return err.error_code == INVALID_PARAMETER_CODE and "not found" in str(err).lower()
 
 
 class RegistryClient:
@@ -63,6 +101,11 @@ class RegistryClient:
             with the `test_` prefix the evaluate stage adds stripped off - so
             regression and classification legitimately differ.
 
+        Raises:
+            MlflowException: when MLflow fails for any reason other than a
+                model having no champion alias yet, which is a normal state
+                and yields `is_champion: False` on every version.
+
         Example:
             list_models()
             # -> regression versions carry rmse/mae/r2,
@@ -70,13 +113,7 @@ class RegistryClient:
         """
         result: list[dict] = []
         for registered in self._client.search_registered_models():
-            champion_version = None
-            try:
-                champion_version = self._client.get_model_version_by_alias(
-                    registered.name, CHAMPION_ALIAS
-                ).version
-            except Exception:  # noqa: BLE001 - no champion yet is a normal state
-                champion_version = None
+            champion_version = self._champion_version(registered.name)
 
             versions = []
             for version in self._client.search_model_versions(f"name='{registered.name}'"):
@@ -117,9 +154,11 @@ class RegistryClient:
             `name`, `version` and `alias`.
 
         Raises:
-            Exception: when the model or version does not exist. The route
-                turns that into a 404 rather than reporting a promotion that
-                did not happen.
+            RegistryNotFoundError: when the model or version does not exist
+                (MLflow's RESOURCE_DOES_NOT_EXIST). The route turns that into
+                a 404 rather than reporting a promotion that did not happen.
+            MlflowException: any other MLflow failure, left to propagate so an
+                outage is not mistaken for a missing model.
 
         Example:
             promote("house_price_regressor", "4")
@@ -127,5 +166,35 @@ class RegistryClient:
             #     "alias": "champion"}
             # Older versions stay exactly as they were; nothing is archived.
         """
-        self._client.set_registered_model_alias(name, CHAMPION_ALIAS, version)
+        try:
+            self._client.set_registered_model_alias(name, CHAMPION_ALIAS, version)
+        except MlflowException as err:
+            if err.error_code == NOT_FOUND_CODE:
+                raise RegistryNotFoundError(str(err)) from err
+            raise
         return {"name": name, "version": version, "alias": CHAMPION_ALIAS}
+
+    def _champion_version(self, name: str) -> str | None:
+        """Finds which version of a model currently holds the champion alias.
+
+        Args:
+            name: the registered model.
+
+        Returns:
+            The champion's version as a string, or None when the alias was
+            never set.
+
+        Raises:
+            MlflowException: when the lookup fails for a reason other than the
+                alias not existing - an outage must not read as "no champion".
+
+        Example:
+            _champion_version("house_price_regressor")  # -> "3"
+            _champion_version("never_promoted_model")   # -> None
+        """
+        try:
+            return str(self._client.get_model_version_by_alias(name, CHAMPION_ALIAS).version)
+        except MlflowException as err:
+            if _is_missing_alias(err):
+                return None
+            raise

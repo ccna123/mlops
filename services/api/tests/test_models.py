@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from services.api.app import create_app
+from services.api.clients.registry import RegistryNotFoundError
 
 
 class FakeRegistry:
@@ -85,6 +86,16 @@ def test_promote_moves_the_champion_alias():
 
 
 def test_promote_a_version_that_does_not_exist_is_404():
-    registry = FakeRegistry([], promote_error=KeyError("no such version"))
+    registry = FakeRegistry([], promote_error=RegistryNotFoundError("no such version"))
     response = _client(registry).post("/api/models/house_price_regressor/99/promote")
     assert response.status_code == 404
+
+
+def test_promote_failing_for_another_reason_is_not_a_404():
+    # MLflow being down must not read as "that version does not exist".
+    registry = FakeRegistry([], promote_error=RuntimeError("mlflow down"))
+    client = TestClient(create_app(registry=registry), raise_server_exceptions=False)
+
+    response = client.post("/api/models/house_price_regressor/4/promote")
+
+    assert response.status_code == 500
