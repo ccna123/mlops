@@ -17,6 +17,7 @@ from datetime import date
 
 import boto3
 import pandas as pd
+import pyarrow.parquet as pq
 from botocore.exceptions import ClientError
 
 from . import schema
@@ -471,6 +472,32 @@ class Storage:
         buffer.seek(0)
         self._client.put_object(Bucket=self.bucket, Key=key, Body=buffer.getvalue())
 
+    def _get_object_bytes(self, key: str) -> bytes:
+        """Downloads one whole object into memory.
+
+        Args:
+            key: the key to read, built by one of the *_key() functions.
+
+        Returns:
+            The object's bytes.
+
+        Raises:
+            FileNotFoundError: when the key does not exist. Any other S3 error
+                (credentials, network) propagates as it is: a missing object is
+                an ordinary outcome, a broken connection is not.
+
+        Example:
+            data = self._get_object_bytes(raw_key("v1"))
+            len(data)     # -> 124000000
+        """
+        try:
+            response = self._client.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as err:
+            if err.response["Error"]["Code"] in ("NoSuchKey", "404"):
+                raise FileNotFoundError(f"Key not found: {key}") from err
+            raise
+        return response["Body"].read()
+
     def read_parquet(self, key: str) -> pd.DataFrame:
         """Reads a parquet file into a DataFrame.
 
@@ -493,13 +520,49 @@ class Storage:
             except FileNotFoundError:
                 ...  # prepare has not run for this fingerprint yet
         """
-        try:
-            response = self._client.get_object(Bucket=self.bucket, Key=key)
-        except ClientError as err:
-            if err.response["Error"]["Code"] in ("NoSuchKey", "404"):
-                raise FileNotFoundError(f"Key not found: {key}") from err
-            raise
-        return pd.read_parquet(io.BytesIO(response["Body"].read()))
+        return pd.read_parquet(io.BytesIO(self._get_object_bytes(key)))
+
+    def read_parquet_head(self, key: str, rows: int) -> tuple[pd.DataFrame, int]:
+        """Reads the first rows of a parquet file, plus how many rows it has in total.
+
+        Use this instead of `read_parquet` when only a sample is needed: the
+        full frame of a 2,000,000-row all-string raw dataset takes several
+        gigabytes of RAM, while the head takes a few megabytes. The total row
+        count comes free from the parquet footer.
+
+        The compressed object is still downloaded into memory once (about
+        120 MB for the raw dataset), because a true ranged read would need
+        s3fs, which this project does not depend on. Only the decoding into a
+        DataFrame is bounded.
+
+        Args:
+            key: the key to read, built by one of the *_key() functions.
+            rows: how many leading rows to return. Must be at least 1.
+
+        Returns:
+            A tuple `(head, total_rows)`. `head` has at most `rows` rows, fewer
+            when the file is smaller, and a fresh positional index. `total_rows`
+            is the file's exact row count. A file with no rows returns an empty
+            frame that still has the file's columns, and a total of 0.
+
+        Raises:
+            ValueError: when `rows` is less than 1.
+            FileNotFoundError: when the key does not exist. Any other S3 error
+                (credentials, network) propagates as it is.
+
+        Example:
+            head, total = storage.read_parquet_head(raw_key("v1"), 200_000)
+            len(head)     # -> 200000
+            total         # -> 2000000
+        """
+        if rows < 1:
+            raise ValueError(f"rows must be at least 1, got: {rows}")
+        parquet_file = pq.ParquetFile(io.BytesIO(self._get_object_bytes(key)))
+        total_rows = parquet_file.metadata.num_rows
+        first_batch = next(parquet_file.iter_batches(batch_size=rows), None)
+        if first_batch is None:
+            return parquet_file.schema_arrow.empty_table().to_pandas(), 0
+        return first_batch.to_pandas(), total_rows
 
     def write_json(self, obj: dict, key: str) -> None:
         """Writes a dict as UTF-8 JSON.

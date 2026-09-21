@@ -27,11 +27,13 @@ import os
 import tempfile
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
+from ml_common import schema
 from ml_common.rawdata import csv_to_parquet
 from ml_common.storage import raw_key
+from ml_common.validation import validate_dataframe
 
 from ..deps import require_auth
 
@@ -43,6 +45,16 @@ CHUNK_BYTES = 1024 * 1024
 # excludes "/" so a version cannot nest. The pipeline's extract stage looks
 # for exactly one `raw/<version>/data.parquet`.
 DATASET_VERSION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+
+MAX_PREVIEW_ROWS = 200
+DEFAULT_PREVIEW_ROWS = 50
+
+# How many leading rows the column stats are computed on. The raw dataset can
+# have 2,000,000 all-string rows, several gigabytes as a DataFrame, and this
+# runs on every visit to the Data page. It matches the head slice the extract
+# stage takes for `sample_rows`, so the preview looks at the same kind of data
+# a development run trains on.
+PREVIEW_STATS_ROWS = 200_000
 
 
 @router.post("/data/upload", dependencies=[Depends(require_auth)])
@@ -132,3 +144,87 @@ async def upload(
             "rows": row_count,
             "size_mb": round(os.path.getsize(parquet_path) / 2**20, 2),
         }
+
+
+@router.get("/data/{dataset_version}/preview", dependencies=[Depends(require_auth)])
+def preview(
+    request: Request,
+    dataset_version: Annotated[str, Path(pattern=DATASET_VERSION_PATTERN)],
+    rows: int = Query(DEFAULT_PREVIEW_ROWS, gt=0),
+) -> dict:
+    """Shows a sample of a raw dataset and the state of each column.
+
+    Only the first `PREVIEW_STATS_ROWS` rows of the file are read, never the
+    whole dataset. The column stats therefore cover those rows only, the same
+    head slice the extract stage takes for `sample_rows`. They are an estimate
+    for the whole file only when the file is not ordered in a way that makes
+    its start unrepresentative; nothing here shuffles it.
+
+    Args:
+        request: the FastAPI request.
+        dataset_version: which version to read, e.g. "v1". Same pattern as the
+            upload route: letters, digits, dots, underscores and hyphens, at
+            most 64 characters, starting with a letter or digit.
+        rows: how many sample rows to show. Must be greater than zero (422
+            otherwise); anything above MAX_PREVIEW_ROWS is silently reduced to
+            it. This is ONLY the preview size; it has nothing to do with the
+            `sample_rows` that limits a training run, and the UI must not
+            let the two look like the same control.
+
+    Returns:
+        `total_rows` (the exact row count of the whole file, from the parquet
+        footer), `stats_rows` (how many rows the column stats were computed
+        on: `min(total_rows, PREVIEW_STATS_ROWS)`, so the UI can say "stats
+        from the first N of M rows"), `sample` (a list of row dicts, missing
+        values as null) and `columns`, each with `name`, `kind`,
+        `missing_rate` and `out_of_bounds`, sorted by name. `stats_rows` is an
+        addition to the `{columns, sample, total_rows}` shape of the spec. The
+        stats come from `ml_common.validation`, the same code the validate
+        stage runs, so the dashboard and the pipeline cannot disagree about
+        how dirty the data is.
+
+    Raises:
+        HTTPException: 404 when that dataset version has not been uploaded.
+            Every other storage error propagates as a 500. A `dataset_version`
+            that does not match the pattern, or `rows` that is not positive,
+            is a 422 raised by FastAPI before this runs.
+
+    Example:
+        # GET /api/data/v1/preview?rows=50
+        # -> {"total_rows": 2000000, "stats_rows": 200000,
+        #     "sample": [{"property_id": "p1", "city": "  NEW YORK ", ...}],
+        #     "columns": [{"name": "bedrooms", "kind": "numeric",
+        #                  "missing_rate": 0.031, "out_of_bounds": 87}]}
+    """
+    try:
+        head, total_rows = request.app.state.storage.read_parquet_head(
+            raw_key(dataset_version), PREVIEW_STATS_ROWS
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(
+            status_code=404, detail=f"no dataset at version {dataset_version}"
+        ) from error
+
+    report = validate_dataframe(head, "regression")
+
+    # NaN is not valid JSON, and the response encoder raises on it. Turn every
+    # missing value into None; astype(object) first so a float column can
+    # actually hold None.
+    sample_frame = head.head(min(rows, MAX_PREVIEW_ROWS)).astype(object)
+    sample_frame = sample_frame.where(sample_frame.notna(), None)
+
+    columns = [
+        {
+            "name": name,
+            "kind": schema.COLUMNS[name].kind,
+            "missing_rate": counts["missing_rate"],
+            "out_of_bounds": counts["out_of_bounds"],
+        }
+        for name, counts in sorted(report["columns"].items())
+    ]
+    return {
+        "total_rows": total_rows,
+        "stats_rows": report["row_count"],
+        "sample": sample_frame.to_dict(orient="records"),
+        "columns": columns,
+    }

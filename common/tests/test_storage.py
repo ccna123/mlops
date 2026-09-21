@@ -225,3 +225,64 @@ def test_is_drift_summary_key_rejects_keys_from_outside_the_reports_tree():
 
     assert not is_drift_summary_key(validation_report_key("abc123"))
     assert not is_drift_summary_key("inference-log/m/dt=2026-09-20/summary.json")
+
+
+class TestReadParquetHead:
+    def test_returns_exactly_rows_and_the_true_total_when_the_file_is_bigger(self, store):
+        frame = pd.DataFrame({"a": [str(i) for i in range(25)]})
+        store.write_parquet(frame, "raw/v1/data.parquet")
+
+        head, total = store.read_parquet_head("raw/v1/data.parquet", 10)
+
+        assert total == 25
+        assert list(head["a"]) == [str(i) for i in range(10)]
+
+    def test_returns_every_row_when_the_file_is_smaller_than_rows(self, store):
+        frame = pd.DataFrame({"a": ["x", "y", "z"]})
+        store.write_parquet(frame, "raw/v1/data.parquet")
+
+        head, total = store.read_parquet_head("raw/v1/data.parquet", 100)
+
+        assert total == 3
+        assert list(head["a"]) == ["x", "y", "z"]
+
+    def test_rows_larger_than_one_row_group_still_returns_rows(self, store, tmp_path):
+        local = tmp_path / "grouped.parquet"
+        frame = pd.DataFrame({"a": [str(i) for i in range(50)]})
+        frame.to_parquet(local, index=False, row_group_size=7)
+        store.upload_file(str(local), "raw/v1/data.parquet")
+
+        head, total = store.read_parquet_head("raw/v1/data.parquet", 20)
+
+        assert total == 50
+        assert list(head["a"]) == [str(i) for i in range(20)]
+
+    def test_an_empty_file_gives_an_empty_frame_with_its_columns_and_total_zero(self, store):
+        empty = pd.DataFrame(
+            {"a": pd.Series([], dtype="object"), "b": pd.Series([], dtype="object")}
+        )
+        store.write_parquet(empty, "raw/v1/data.parquet")
+
+        head, total = store.read_parquet_head("raw/v1/data.parquet", 10)
+
+        assert total == 0
+        assert len(head) == 0
+        assert list(head.columns) == ["a", "b"]
+
+    def test_a_missing_key_raises_file_not_found(self, store):
+        with pytest.raises(FileNotFoundError, match="missing/file.parquet"):
+            store.read_parquet_head("missing/file.parquet", 10)
+
+    def test_string_columns_stay_strings(self, store):
+        frame = pd.DataFrame({"zip": ["02134", "00501"], "price": ["$450,000", None]})
+        store.write_parquet(frame, "raw/v1/data.parquet")
+
+        head, _ = store.read_parquet_head("raw/v1/data.parquet", 10)
+
+        assert list(head["zip"]) == ["02134", "00501"]
+        assert head["price"].iloc[0] == "$450,000"
+        assert pd.isna(head["price"].iloc[1])
+
+    def test_rows_below_one_is_rejected_before_any_download(self, store):
+        with pytest.raises(ValueError, match="rows must be at least 1"):
+            store.read_parquet_head("missing/file.parquet", 0)
