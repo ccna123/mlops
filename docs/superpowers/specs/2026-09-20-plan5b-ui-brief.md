@@ -43,7 +43,7 @@ Quy tắc:
 - Mọi badge luôn có **chữ nhãn**; màu không bao giờ là kênh duy nhất.
 - Hoa văn gạch chéo **chỉ dành cho `insufficient_data`**. Đừng dùng nó cho thứ khác (ví dụ task chưa chạy), kẻo mất ý nghĩa.
 - Tương phản chữ/nền tối thiểu 4.5:1 (các cặp trên đã chọn để đạt mức này).
-- Trạng thái của **run và task** Airflow (`queued`, `running`, `success`, `failed`, `skipped`, và `null`) là một từ vựng khác, không nhét vào bốn trạng thái trên. Gợi ý: `success` dùng màu của `ok`; `failed` dùng màu của `high`; `running` xanh dương có chuyển động; `queued` xanh dương nhạt viền liền; `skipped` xám đặc, chữ gạch ngang, **không phải lỗi**; `null` là "chưa chạy": viền xám rỗng, không hoa văn. Giá trị lạ không có trong danh sách: hiện nguyên chuỗi trong badge xám trung tính.
+- Trạng thái của **run và task** Airflow (`queued`, `running`, `success`, `failed`, `skipped`, và `null`) là một từ vựng khác, không nhét vào bốn trạng thái trên. Gợi ý: `success` dùng màu của `ok`; `failed` dùng màu của `high`; `running` xanh dương có chuyển động; `queued` xanh dương nhạt viền liền; `skipped` xám đặc, chữ gạch ngang (một task bị bỏ qua vì nhánh không được chọn thì **không phải lỗi**; nhưng khi cả run đang `failed`, các trạng thái `failed` phải nổi bật hơn `skipped`); `null` là "chưa chạy": viền xám rỗng, không hoa văn. Airflow còn hai trạng thái task **chưa quan sát được trong bằng chứng** (run hỏng duy nhất của Task 12 chỉ có `skipped`, vì nó bị đánh dấu `failed` bằng tay): `upstream_failed` (task phía sau một task lỗi, bị chặn; phải đọc là **hỏng/bị chặn**, dùng màu gần `high` nhưng khác `failed` bằng nhãn "bị chặn", không được vẽ như `skipped`) và `up_for_retry` (task lỗi và sẽ được thử lại; màu `warning`, nhãn "chờ thử lại"). Giá trị lạ không có trong danh sách: hiện nguyên chuỗi trong badge xám trung tính.
 - Trạng thái dịch vụ ở `/health` là `ok` hoặc `down`: `ok` dùng màu `ok`, `down` dùng màu `high`. Trạng thái tổng `status` là `ok` hoặc `degraded`: `degraded` dùng màu `warning`.
 
 ---
@@ -76,8 +76,8 @@ Hôm nay API phân biệt được "không tìm thấy" với "hệ thống hỏ
 
 | Tình huống | Dấu hiệu từ API | Hiển thị |
 | --- | --- | --- |
-| **Không tìm thấy** | HTTP 404, body là JSON có khoá `detail` (một chuỗi) | `NotFound`: "Không tìm thấy" kèm chuỗi `detail` nguyên văn. Đây không phải sự cố hạ tầng. |
-| **Chưa có dữ liệu** (không phải lỗi) | `GET /drift/latest` trả 404 khi monitoring chưa từng chạy cho model đó; `GET /drift/history` trả `{"history":[]}`; danh sách rỗng | `EmptyState`: nói vì sao trống và làm gì tiếp. |
+| **Không tìm thấy** | HTTP 404, body là JSON có khoá `detail` (một chuỗi). Ngoại lệ: hai trường hợp ở dòng ngay dưới, nơi 404 là empty state | `NotFound`: "Không tìm thấy" kèm chuỗi `detail` nguyên văn. Đây không phải sự cố hạ tầng. |
+| **Chưa có dữ liệu** (không phải lỗi) | `GET /drift/latest` trả 404 khi monitoring chưa từng chạy cho model đó; `GET /data/{dataset_version}/preview` trả 404 (`no dataset at version ...`) khi phiên bản dữ liệu chưa được tải lên, **cho phiên bản mặc định lẫn phiên bản người dùng gõ vào** (cùng mã, cùng nghĩa); `GET /drift/history` trả `{"history":[]}`; danh sách rỗng | `EmptyState`: nói vì sao trống và làm gì tiếp (drift: "chưa có báo cáo"; dữ liệu: "Chưa có dữ liệu ở phiên bản này" kèm nút tải lên). |
 | **Dữ liệu gửi sai** | HTTP 422 | Thông báo ngay tại trường bị lỗi; UI nên ngăn được hầu hết trước khi gửi. Hai dạng `detail`, xem dưới. |
 | **Hệ thống đang hỏng** | HTTP 500, hoặc `fetch` ném lỗi mạng (`TypeError`) | `ErrorState`: "Hệ thống đang hỏng", nút "Thử lại", và trỏ tới `HealthPill` để biết dịch vụ nào chết. |
 
@@ -90,7 +90,7 @@ Chi tiết cần biết khi viết lớp gọi API (một hàm `api()` dùng chu
 
 ### 3.3. Bốn trạng thái của mỗi màn hình
 
-Mỗi màn hình dưới đây mô tả đủ: **loading**, **empty**, **error** (không tìm thấy và hệ thống hỏng là hai thứ khác nhau), **có dữ liệu**. `LoadingSkeleton` bắt buộc ở mọi nơi: pipeline chạy khoảng 10 phút, không được để màn trắng. `RelativeTime` ("3 phút trước", tooltip giờ tuyệt đối) cho mọi mốc thời gian; API trả ISO 8601 có múi giờ.
+Mỗi màn hình dưới đây mô tả đủ: **loading**, **empty**, **error** (không tìm thấy và hệ thống hỏng là hai thứ khác nhau), **có dữ liệu**. `LoadingSkeleton` bắt buộc ở mọi nơi: một lần chạy pipeline không tức thì (spec 5a ước tính khoảng 10 phút, **chưa đo**; Task 12 chỉ có một run 1000 dòng thành công trong khoảng 43 giây, xem `started_at`/`ended_at` ở khối JSON của mục 4.1, và chưa có số đo cho run toàn bộ dòng), không được để màn trắng. `RelativeTime` ("3 phút trước", tooltip giờ tuyệt đối) cho mọi mốc thời gian; API trả ISO 8601 có múi giờ.
 
 ### 3.4. Danh sách component dùng chung
 
@@ -151,14 +151,14 @@ Mọi `GET` không cần xác nhận. Không có thao tác xoá nào trong API.
 | --- | --- | --- |
 | `task_type` | **Bắt buộc.** `"regression"` hoặc `"classification"`; thiếu hoặc sai là 422. | `TaskTypeSelector` là nút chọn một trong hai. Gợi ý: không chọn sẵn, vì đây là một lần train thật. |
 | `force_reprocess` | Boolean, mặc định `false`. | Nhãn "Xử lý lại dữ liệu từ đầu". |
-| `sample_rows` | Số nguyên **> 0**, hoặc `null`/vắng mặt = **dùng toàn bộ dòng**. `0` và số âm bị từ chối bằng 422 (khai báo `gt=0` trong route; chưa được gọi thử trực tiếp ở Task 12). | Đây là **số dòng dùng để train** (lấy N dòng đầu của file). Bật/tắt "Dùng toàn bộ dòng" thay vì để người dùng gõ `0`. Với dataset `v1` toàn bộ là 2.012.000 dòng: cần cảnh báo về thời gian (khoảng 10 phút) và RAM (máy 16 GB) trong dialog xác nhận. |
+| `sample_rows` | Số nguyên **> 0**, hoặc `null`/vắng mặt = **dùng toàn bộ dòng**. `0` và số âm bị từ chối bằng 422 (khai báo `gt=0` trong route; chưa được gọi thử trực tiếp ở Task 12). | Đây là **số dòng dùng để train** (lấy N dòng đầu của file). Bật/tắt "Dùng toàn bộ dòng" thay vì để người dùng gõ `0`. Với dataset `v1` toàn bộ là 2.012.000 dòng: cần cảnh báo trong dialog xác nhận rằng run toàn bộ dòng lâu hơn và tốn RAM hơn nhiều so với run nhỏ (máy 16 GB). Đừng ghi một con số phút cụ thể vào câu chữ của dialog: spec 5a ước tính khoảng 10 phút nhưng con số này chưa đo. |
 | `dataset_version` | Chuỗi, mặc định `"v1"`. Route này **không** kiểm định dạng; phiên bản không tồn tại sẽ chỉ hỏng ở stage `extract` (chưa quan sát được). | Áp cùng luật với upload: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. API **không có endpoint liệt kê các phiên bản dữ liệu**, nên đây là ô nhập chữ, không phải dropdown. |
 
 **Đừng để `sample_rows` (số dòng của lần train) trông giống `rows` của màn Dữ liệu (số dòng xem trước, tối đa 200).** Khác nhãn, khác vị trí, khác màn hình. Xem 4.3.
 
 **`ConfirmDialog` bắt buộc** trước khi gọi `POST /pipeline/run`, vì nó khởi động một lần train thật. Dialog nêu đủ bốn tham số sẽ gửi (đặc biệt `sample_rows`: "toàn bộ dòng" hay "N dòng"), và nút xác nhận đặt tên rõ ("Bắt đầu train"), không phải "OK".
 
-Nguồn: `POST /api/pipeline/run`, body `{"task_type":"regression","sample_rows":1000}` → 200. Run mới chỉ ở trạng thái `queued`: chưa chạy xong, sẽ mất nhiều phút.
+Nguồn: `POST /api/pipeline/run`, body `{"task_type":"regression","sample_rows":1000}` → 200. Run mới chỉ ở trạng thái `queued`: chưa chạy xong; thời gian chạy phụ thuộc số dòng.
 
 ```json
 {"run_id":"manual__2026-09-21T03:53:17.127926+00:00","dag_id":"ml_pipeline","state":"queued"}
@@ -197,7 +197,7 @@ extract → validate → prepare_dataset_for_train → train → evaluate → br
     → nhánh không đạt: stop_no_deploy
 ```
 
-`branch_on_gates` chọn **đúng một** trong hai nhánh; nhánh còn lại sẽ có `state` là `skipped`, đó là chuyện bình thường, không phải lỗi. Dải stage vẽ chín ô theo thứ tự trên, nhánh `register → deploy` và `stop_no_deploy` đặt song song sau `branch_on_gates`. (Spec 5a mục 4 nói "7 stage"; API thực tế trả 9 task, và brief này theo API.) `duration` tính bằng giây (số thực) hoặc `null`; `try_number` lớn hơn 1 nghĩa là task đã chạy lại, hiện kèm "lần thử N".
+`branch_on_gates` chọn **đúng một** trong hai nhánh; nhánh còn lại sẽ có `state` là `skipped`, đó là chuyện bình thường, không phải lỗi. Đừng lẫn với `upstream_failed` (các task phía sau một stage đã lỗi, xem mục 2): loại này là hỏng/bị chặn. Cả `upstream_failed` và `up_for_retry` là trạng thái của Airflow chưa quan sát được trong bằng chứng. Dải stage vẽ chín ô theo thứ tự trên, nhánh `register → deploy` và `stop_no_deploy` đặt song song sau `branch_on_gates`. (Spec 5a mục 4 nói "7 stage"; API thực tế trả 9 task, và brief này theo API.) `duration` tính bằng giây (số thực) hoặc `null`; `try_number` lớn hơn 1 nghĩa là task đã chạy lại, hiện kèm "lần thử N".
 
 Nguồn: `GET /api/pipeline/runs/{run_id}` → 200, ngay sau khi trigger. Run `queued`, mọi task `state: null`.
 
@@ -251,7 +251,8 @@ Ghi chú về component: spec 5a liệt kê stage là một phần của `LogFil
 - `level` lọc theo **từ nguyên** (`level=ERROR` không khớp dòng "no errors found"), không phân biệt hoa thường. `q` lọc theo chuỗi con, không phân biệt hoa thường. Cả hai làm **ở server**, UI không lọc lại bằng JS. Ô chọn `level` gợi ý: Tất cả / INFO / WARNING / ERROR.
 - **`try_number`: luôn truyền đúng số mà phản hồi chi tiết run báo cho task đó.** Mặc định của API là `1` (lần thử đầu tiên), có thể đã cũ nếu task từng chạy lại. Chỉ gọi log khi `try_number ≥ 1`; với `0` (task chưa chạy hoặc bị bỏ qua chưa bao giờ bắt đầu), không gọi mà hiện "chưa chạy, chưa có log". Tab của task có `state: null` nên bị làm mờ.
 - **Một lần thử không có log KHÔNG phải 404.** Airflow trả 200 và chính chuỗi báo lỗi của Airflow ("*** Could not read served logs: ...") quay về dưới dạng các dòng log. UI phải nhận ra điều này: nếu các dòng bắt đầu bằng `*** Could not read served logs` hay `*** !!!! Please make sure`, hiện banner cảnh báo "Airflow không có log cho lần thử này" và làm mờ các dòng đó, đừng trình bày như một log thật. (Đây là lưới an toàn bằng so khớp chuỗi, mong manh; cách phòng chính là truyền đúng `try_number`.)
-- **Những dòng đầu của log không lọc không phải output của task.** Dòng 1 là tên máy chạy (ví dụ `e59fd8ef0e61`, hoặc rỗng nếu task bị `skipped`), tiếp theo là dòng `*** Found local files:` và một dòng đường dẫn. Nên làm mờ hoặc gấp lại ba dòng đầu này; output thật của task bắt đầu từ dòng 4.
+- **Log không lọc không có vị trí dòng cố định cho "phần của task".** Thứ tự đã quan sát ở log `extract`: dòng 1 là tên máy chạy (ví dụ `e59fd8ef0e61`, hoặc rỗng ở log của task `skipped`); rồi `*** Found local files:` và một dòng đường dẫn file log; rồi các dòng của **bộ chạy task của Airflow** (ví dụ `::group::Pre task execution logs`, "Dependencies all met", "Starting attempt 1 of 1", "Executing <Task(DockerOperator): extract>", `Running: ['airflow', 'tasks', 'run', ...]`); rồi mới tới output của chính stage (ví dụ dòng `XCOM_RESULT ...`). Có thể còn các dòng đánh dấu nhóm khác như `::endgroup::`; phần được ghi lại của Task 12 không cho thấy chúng, nên chưa xác nhận. Vì vậy đừng hứa "N dòng đầu là hệ thống" và đừng làm mờ theo vị trí dòng. **`level` và `q` là cách chính để tới nội dung** (ví dụ `q=fingerprint` trả đúng một dòng ở dữ liệu thật): đặt hai điều khiển đó nổi bật trong `LogFilterBar`, coi log không lọc là dạng xem thô đầy đủ. Nếu muốn làm mờ, chỉ làm theo nội dung (ví dụ dòng bắt đầu bằng `***`), không theo vị trí.
+- **Chỉ log của `extract` (thành công) và `validate` (bị `skipped`, thuộc run đã bị đánh dấu `failed` bằng tay) đã được quan sát.** Log của `prepare_dataset_for_train`, `train`, `evaluate`, `register` (các stage DockerOperator còn lại), của `branch_on_gates` và `deploy` (PythonOperator), và của `stop_no_deploy` (EmptyOperator) **chưa từng được quan sát** và có thể trông khác hoặc rỗng. Thiết kế chín tab đồng nhất không được giả định tab nào cũng có banner, có dòng runner của Airflow hay có output; log rỗng hoặc rất ngắn là một trạng thái hợp lệ (xem empty state (d) bên dưới).
 - `truncated: true` nghĩa là log bị cắt ở 2.000 dòng (`MAX_LOG_LINES` trong route). UI phải **nói ra** ("Đã cắt ở 2.000 dòng, hãy lọc để thấy phần còn lại"), không im lặng hiển thị thiếu.
 - Log lấy **khi người dùng bấm "Tải log"**, không stream, không tự làm mới.
 - API trả log là mảng chuỗi thô. Mức log (INFO/WARNING/ERROR) do UI nhận ra từ nội dung dòng để tô màu; dạng dòng thật là `[thời gian] {file:dòng} MỨC - nội dung`.
@@ -270,7 +271,7 @@ Nguồn: cùng endpoint với `q=fingerprint` → 200. Lọc ở server, còn đ
 {"lines":["[2026-09-21T03:53:19.138+0000] {docker.py:438} INFO - XCOM_RESULT {\"fingerprint\": \"3b318b364660175f\", \"row_count\": 1000}"],"truncated":false}
 ```
 
-Nguồn: `stage=validate`, task đã bị `skipped` → 200. Log của task bị bỏ qua chỉ có dòng hệ thống; dòng 1 rỗng. Hiện nó như một log bình thường kèm ghi chú "task đã bị bỏ qua".
+Nguồn: `stage=validate`, task đã bị `skipped` → 200. Log của task bị bỏ qua chỉ có banner và các dòng của bộ chạy task Airflow, không có output của stage; dòng 1 rỗng. Hiện nó như một log bình thường kèm ghi chú "task đã bị bỏ qua".
 
 ```json
 {"lines":["","*** Found local files:","***   * /opt/airflow/logs/dag_id=ml_pipeline/run_id=manual__2026-09-21T03:53:17.127926+00:00/task_id=validate/attempt=1.log","[2026-09-21T03:53:19.834+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs","[2026-09-21T03:53:19.847+0000] {taskinstance.py:2603} INFO - Dependencies not met for <TaskInstance: ml_pipeline.validate manual__2026-09-21T03:53:17.127926+00:00 [skipped]>, dependency 'Task Instance State' FAILED: Task is in the 'skipped' state.","[2026-09-21T03:53:19.855+0000] {local_task_job_runner.py:166} INFO - Task is not able to be run"],"truncated":false}
@@ -307,10 +308,10 @@ Theo ghi chú của Task 12, một run vừa trigger mà `extract` chưa bắt �
 | Trạng thái | Nội dung |
 | --- | --- |
 | Loading | Chưa chọn stage: gợi ý chọn run và stage. Đang tải (khoảng 0,1 giây): vài dòng skeleton trong khung mono. |
-| Empty | Ba loại khác nhau: (a) task `null` hoặc `try_number` 0: "chưa chạy, chưa có log", không gọi API; (b) bộ lọc không khớp dòng nào (`lines` rỗng; chưa quan sát được trên hệ thống thật): "Không có dòng nào khớp bộ lọc" kèm nút xoá lọc; (c) log của task `skipped` chỉ có dòng hệ thống. |
+| Empty | Ba loại khác nhau: (a) task `null` hoặc `try_number` 0: "chưa chạy, chưa có log", không gọi API; (b) bộ lọc không khớp dòng nào (`lines` rỗng; chưa quan sát được trên hệ thống thật): "Không có dòng nào khớp bộ lọc" kèm nút xoá lọc; (c) log của task `skipped` chỉ có banner và dòng của bộ chạy task Airflow, không có output của stage; (d) log rỗng hoặc gần rỗng của task không sinh output (chưa quan sát được, đặc biệt `stop_no_deploy`, `branch_on_gates`, `deploy`): "Task này không có output", không phải lỗi. |
 | Lỗi: không tìm thấy | 404 (run hoặc stage không tồn tại): `NotFound` với `detail` nguyên văn. |
 | Lỗi: hệ thống hỏng | 500 hoặc mất kết nối (Airflow không trả lời): `ErrorState` "Hệ thống đang hỏng", nút thử lại. Phân biệt rõ với 404 ở trên. |
-| Có dữ liệu | `LogViewer` chữ mono, tô màu theo mức, dòng hệ thống làm mờ, banner khi `truncated`, đếm "N dòng". Có thể có banner "không có log cho lần thử này" (ở trên). |
+| Có dữ liệu | `LogViewer` chữ mono, tô màu theo mức, banner khi `truncated`, đếm "N dòng". Có thể có banner "không có log cho lần thử này" (ở trên). |
 
 Màn này **không có thao tác ghi**, nên không có `ConfirmDialog`.
 
@@ -363,7 +364,7 @@ Nguồn: upload không có `dataset_version` → 422.
 `GET /data/{dataset_version}/preview?rows=N` trả `total_rows`, `stats_rows`, `sample` và `columns`.
 
 - **Thống kê chỉ tính trên `stats_rows` dòng đầu (200.000), còn `total_rows` là tổng của cả file.** Luôn hiện "thống kê trên **200.000 / 2.012.000** dòng" ngay cạnh `ColumnStatsTable` (số thật lấy từ `stats_rows` và `total_rows`, định dạng `vi-VN`). File nhỏ thì hai số bằng nhau (ví dụ 4 / 4). Đầu file có thể không đại diện cho cả file.
-- **`sample` là dòng THÔ.** Mọi giá trị là chuỗi, và một ô thiếu là chuỗi rỗng `""`, **không phải `null`**. Hiện ô rỗng bằng một dấu hiệu nhìn thấy được (ví dụ chip "(trống)"), không để ô trắng trơn lẫn với ô chưa tải. Cột `property_type`, `condition`, `price_category`, `has_pool` có nhiều cách viết khác nhau (`CONDO`, `Single_Family`, `0`, `False`): đó là dữ liệu bẩn thật, hiện nguyên văn, đừng chuẩn hoá trên UI.
+- **`sample` là dòng THÔ.** Mọi giá trị là chuỗi, và một ô thiếu là chuỗi rỗng `""`, **không phải `null`**. Hiện ô rỗng bằng một dấu hiệu nhìn thấy được (ví dụ chip "(trống)"), không để ô trắng trơn lẫn với ô chưa tải. Trong hai dòng mẫu của khối JSON dưới đây, cùng một cột xuất hiện với các cách viết khác nhau: `property_type` (`CONDO`, `Single_Family`), `has_pool` (`0`, `False`) và `listing_date` (`10/18/2021`, `2024-06-03`). Đó là dữ liệu bẩn thật: hiện nguyên văn, đừng chuẩn hoá trên UI. Hai dòng mẫu này không chứng minh điều đó cho các cột khác (chẳng hạn `condition`, `price_category`).
 - **`missing_rate` ở đây đếm cả chuỗi rỗng là thiếu** (dữ liệu thật: `hoa_fee_monthly` khoảng 63,2%). Stage `validate` của pipeline chỉ đếm giá trị `null`, nên con số ở đây có thể **cao hơn** con số trong báo cáo của `validate` trên cùng dữ liệu. Đó là khác biệt đã biết; nếu UI đặt hai số cạnh nhau, phải giải thích.
 - `out_of_bounds` là **số dòng** (trong `stats_rows` dòng đầu) có giá trị ngoài biên hợp lệ của cột. Nó không bị ảnh hưởng bởi khác biệt trên.
 - `columns` đã sắp theo tên; `kind` thấy trong dữ liệu thật: `numeric`, `categorical`, `boolean`, `money`, `date`, `id`, `zipcode`. `missing_rate` là số thực từ 0 đến 1 (hiện thành phần trăm).
@@ -379,7 +380,7 @@ Nguồn: `GET /api/data/v1/preview?rows=2` → 200 (2,04 s, 3.188 byte), dataset
 
 `rows=2` nên `sample` có 2 dòng; `columns` đủ 24 cột. Chú ý dòng thứ hai của `sample`: `hoa_fee_monthly` là `""`. Trong `columns`, 11 cột có `missing_rate` khác 0.
 
-Nguồn: `GET /api/data/v9/preview` → 404 (phiên bản chưa được tải lên).
+Nguồn: `GET /api/data/v9/preview` → 404 (phiên bản chưa được tải lên). Đây là **empty state** (mục 3.2), không phải lỗi.
 
 ```json
 {"detail":"no dataset at version v9"}
@@ -396,8 +397,8 @@ Nguồn: `GET /api/data/v1/preview?rows=0` → 422.
 | Trạng thái | Nội dung |
 | --- | --- |
 | Loading | Upload: thanh tiến độ, rồi "Đang chuyển sang parquet". Preview: skeleton bảng (1,4–2 giây, không được để trắng). |
-| Empty | Chưa chọn phiên bản: "Nhập phiên bản dữ liệu để xem, hoặc tải một CSV lên." Preview 404 (phiên bản chưa có) là **empty**, không phải sự cố: "Chưa có dữ liệu ở phiên bản `v9`", kèm nút tải lên phiên bản đó. |
-| Lỗi: không tìm thấy | Đường dẫn/tên phiên bản không hợp lệ hoặc không có (404/422) hiện tại chỗ nhập, không phải trang lỗi. |
+| Empty | Chưa chọn phiên bản: "Nhập phiên bản dữ liệu để xem, hoặc tải một CSV lên." **Preview trả 404 là empty state, không phải lỗi**, với mọi phiên bản (phiên bản mặc định `v1` hay phiên bản người dùng gõ vào ô nhập, cùng mã, cùng nghĩa): "Chưa có dữ liệu ở phiên bản này" (nêu tên phiên bản) kèm nút "Tải lên phiên bản này". |
+| Lỗi: dữ liệu nhập sai | 422 (tên phiên bản sai định dạng, `rows` không hợp lệ): thông báo ngay tại ô nhập, không phải trang lỗi. Màn này không có trạng thái "không tìm thấy" riêng: 404 của preview là empty state ở dòng trên. |
 | Lỗi: hệ thống hỏng | 500 hoặc mất kết nối (object storage không trả lời): `ErrorState`. Upload hỏng giữa chừng: `Toast` thất bại, **không** báo đã tải lên; phiên bản có thể chưa được ghi. |
 | Có dữ liệu | `DataPreviewTable` (bảng cuộn ngang, 24 cột), `ColumnStatsTable`, dòng ghi "thống kê trên N / M dòng", `RowLimitPicker`. Upload thành công: `Toast` với `rows`, `size_mb`, và nút "Xem trước". |
 
@@ -496,8 +497,8 @@ Mọi request drift bắt buộc có `model_name` (thiếu là 422). Ô chọn m
 Một `summary` gồm: `model_name`, `model_version`, `task_type`, `run_id` (mã theo thời gian của lần tính, dạng `20260920T075645`, **không phải** run id của Airflow), `computed_at`, `window_hours`, `severity`, `parts`, `n_predictions`, `n_ground_truth`, `current_metrics`, `report_key`.
 
 - **`parts` có ba khoá `feature`, `prediction`, `performance`, mỗi khoá một trong bốn trạng thái.** `SeverityOverview` vẽ **ba ô riêng**, mỗi ô một `StatusBadge`. Đây là nguyên tắc 2. `parts.performance` có thể là `insufficient_data` và phải **trông khác `ok`** (nguyên tắc 1): ground truth đến trễ.
-- `severity` là mức cao nhất trong ba, **không tính `insufficient_data`**. Vì thế nó có thể là `high` khi `performance` chưa đo được (thấy ở dữ liệu thật bên dưới). Nếu hiện `severity` thì hiện như một dòng phụ nhỏ hơn ba ô ("mức cao nhất trong các phép đo đã có"), **không bao giờ** như một badge tổng lớn. Nếu `severity` là `ok` mà có phần `insufficient_data`, đừng hiện nó bằng màu `ok`: chỉ hiện ba ô.
-- `n_ground_truth` là số kết quả thật đã ghép được với dự đoán; `n_predictions` là số dự đoán trong cửa sổ `window_hours` (giờ). Khi `performance` là `insufficient_data`, `n_ground_truth` thường nhỏ (dữ liệu thật: 0 và 33) và `current_metrics` là `{}` rỗng. Ngưỡng tối thiểu của monitor mặc định là 50 dòng ghép được (`MONITOR_MIN_GROUND_TRUTH`, Plan 4 mục 2.6); con số này **không có trong phản hồi API**, nên đừng viết cứng nó ở chỗ khác ngoài câu giải thích.
+- `severity` là mức tệ nhất trong các phần **đã đo được**; `insufficient_data` bị bỏ qua khi lấy mức tệ nhất (`overall_severity` trong `common/ml_common/drift.py`). Vì thế nó có thể là `high` khi `performance` chưa đo được (thấy ở dữ liệu thật bên dưới). Khi **cả ba** phần đều `insufficient_data` thì `severity` chính là `insufficient_data` (không phải `ok`, vì `ok` sẽ khẳng định một phép kiểm chưa từng xảy ra); trường hợp này có trong code nhưng **chưa thấy** trong 12 bản tóm tắt thật, nơi `severity` chỉ là `ok`, `warning` hoặc `high`. Nên `severity` cũng có thể cần vẽ bằng trạng thái `insufficient_data` (gạch chéo). Nếu hiện `severity` thì hiện như một dòng phụ nhỏ hơn ba ô ("mức cao nhất trong các phép đo đã có"), **không bao giờ** như một badge tổng lớn. Nếu `severity` là `ok` mà có phần `insufficient_data`, đừng hiện nó bằng màu `ok`: chỉ hiện ba ô.
+- `n_ground_truth` là số kết quả thật đã ghép được với dự đoán; `n_predictions` là số dự đoán trong cửa sổ `window_hours` (giờ). Trong 12 bản tóm tắt thật của `house_price_regressor`, **2 bản** có `performance` là `insufficient_data`: `n_ground_truth` là 0 (`run_id` `20260920T074759`) và 33 (`run_id` `20260920T073734`), cả hai dưới ngưỡng bên dưới, và **ở cả hai bản đó `current_metrics` là `{}`** (đã kiểm từng bản); 10 bản còn lại có `current_metrics` gồm `rmse`, `mae`, `r2`. Đó là quan sát trên 12 bản, không phải luật của API: thiết kế phải xử lý cả hai trường hợp, `current_metrics` có khoá (hiện `MetricTile`) hoặc rỗng (không hiện ô nào). Ngưỡng tối thiểu của monitor mặc định là 50 dòng ghép được (`MONITOR_MIN_GROUND_TRUTH`, Plan 4 mục 2.6); con số này **không có trong phản hồi API**, nên đừng viết cứng nó ở chỗ khác ngoài câu giải thích.
 - `current_metrics` có khoá **động** giống metric của model (regression: `rmse`, `mae`, `r2`). Hiện bằng `MetricTile`, sinh từ khoá có trong dữ liệu. Không có khoá thì không hiện ô nào.
 - `report_key` trỏ tới file HTML của Evidently trong object storage. **API không có endpoint nào phục vụ file đó** (spec 5a nói API không proxy nó). Xem `EvidentlyReportFrame` dưới đây.
 - Phản hồi không cho biết nó có phải bản mới nhất hay không: chỉ `run_id` và `computed_at` là dấu hiệu. Luôn hiện `computed_at` bằng `RelativeTime` cạnh `SeverityOverview`.
@@ -516,13 +517,13 @@ Nguồn: `GET /api/drift/history?model_name=house_price_regressor&limit=2` → 2
 
 Danh sách rút gọn theo `limit=2`: 2 phần tử mới nhất, nguyên văn từ phản hồi thật (mặc định `limit=20` trả cả 12 bản tóm tắt hiện có). Mới nhất trước, nên `DriftHistoryChart` phải **đảo thứ tự** khi vẽ theo thời gian. Phần tử đầu trùng với `latest`.
 
-Nguồn: một phần tử của `GET /api/drift/history?model_name=house_price_regressor` (mặc định `limit=20`, trả 12 phần tử) → 200, gọi đọc-chỉ ngày 2026-09-21. Đây là phần tử duy nhất có `performance` là `insufficient_data` và `current_metrics` rỗng, trong khi `severity` vẫn là `high` do `prediction` cao:
+Nguồn: một phần tử của `GET /api/drift/history?model_name=house_price_regressor` (mặc định `limit=20`, trả 12 phần tử) → 200, gọi đọc-chỉ ngày 2026-09-21. Đây là một trong **2** phần tử (trong 12) có `performance` là `insufficient_data`: phần tử thứ 3 tính từ mới nhất, `n_ground_truth` là 0, `current_metrics` là `{}`, trong khi `severity` vẫn là `high` do `prediction` cao:
 
 ```json
 {"history":[{"model_name":"house_price_regressor","model_version":"3","task_type":"regression","run_id":"20260920T074759","computed_at":"2026-09-20T07:47:59.264677+00:00","window_hours":0.029,"severity":"high","parts":{"feature":"warning","prediction":"high","performance":"insufficient_data"},"n_predictions":100,"n_ground_truth":0,"current_metrics":{},"report_key":"reports/house_price_regressor/20260920T074759/evidently.html"}]}
 ```
 
-Danh sách rút gọn: 1 trong 12 phần tử (`run_id` là `20260920T074759`), nguyên văn từ phản hồi thật, bọc lại trong `{"history":[...]}` để giữ đúng hình dạng phản hồi. (Có một phần tử `insufficient_data` khác trong 12 phần tử, ở `run_id` `20260920T073734`, với `n_ground_truth` là 33.)
+Danh sách rút gọn: 1 trong 12 phần tử (`run_id` là `20260920T074759`), nguyên văn từ phản hồi thật, bọc lại trong `{"history":[...]}` để giữ đúng hình dạng phản hồi. (Phần tử `insufficient_data` còn lại, thứ 10 trong 12, không được dán ở đây: `run_id` `20260920T073734`, `feature` `high`, `prediction` `high`, `performance` `insufficient_data`, `n_predictions` 33, `n_ground_truth` 33, và `current_metrics` cũng là `{}`; đã kiểm lại bằng lần GET đọc-chỉ ngày 2026-09-21.)
 
 Nguồn: `GET /api/drift/latest?model_name=house_needs_renovation_classifier` → **404**. Đây là **empty state, không phải lỗi**: monitoring chưa từng chạy cho model này.
 
@@ -596,12 +597,12 @@ Sự thật đã kiểm trong code của API (`services/api/`):
 Hệ quả trong trình duyệt, với một file HTML gọi `http://localhost:8001/api`:
 
 - Mở file từ `file://`, hoặc phục vụ nó từ một origin khác (bất kỳ cổng nào khác `8001`, hay `python -m http.server`): trình duyệt **chặn phản hồi**. Với JavaScript đó chỉ là `TypeError: Failed to fetch`, không có thông báo nào giải thích.
-- `POST /pipeline/run` mang body JSON (`Content-Type: application/json`) nên kích hoạt **preflight `OPTIONS`**; API không xử lý nó nên request bị chặn ngay ở đó. Upload multipart và promote (không có body) là request "đơn giản" nên không bị preflight, nhưng phản hồi của chúng vẫn không đọc được, và request vẫn tới server (một thao tác ghi có thể được thực hiện dù UI không đọc được kết quả).
+- `POST /pipeline/run` mang body JSON (`Content-Type: application/json`) nên kích hoạt **preflight `OPTIONS`**; API không xử lý nó nên request bị chặn ngay ở đó. Upload multipart và promote (không có body) là request "đơn giản" nên không bị preflight, nhưng phản hồi của chúng vẫn không đọc được, và request vẫn tới server (một thao tác ghi có thể được thực hiện dù trang không đọc được kết quả). Lưu ý: điểm này và điểm preflight ở trên là **suy ra từ luật CORS của trình duyệt, chưa được thử trong một trình duyệt thật**.
 
 Plan 5b vì vậy cần **một** trong hai:
 
-- **(a) API tự phục vụ file HTML** từ cùng origin (`http://localhost:8001/`). Không cần CORS, không mở thêm bề mặt tấn công. Đây là hướng được khuyến nghị.
-- **(b) Thêm `CORSMiddleware`** để một origin khác gọi được. Đây là một **quyết định bảo mật**: API hiện **không có xác thực**, và vài endpoint ghi thật (`POST /pipeline/run`, `POST /models/.../promote`, `POST /data/upload`). Mở CORS quá rộng cho phép bất kỳ trang web nào trong trình duyệt của người dùng bắn vào chúng.
+- **(a) API tự phục vụ file HTML** từ cùng origin (`http://localhost:8001/`). Câu hỏi CORS biến mất vì không còn request cross-origin. Nhưng (a) tự nó **không** giải quyết việc API không có xác thực: bất kỳ ai tới được cổng `8001` vẫn gọi được các endpoint ghi. Đây là hướng brief khuyến nghị; quyết định vẫn thuộc chủ dự án.
+- **(b) Thêm `CORSMiddleware`** để một origin khác gọi được. Đây là một **quyết định bảo mật**. Mở CORS mở rộng những gì một trang ở origin khác được **đọc** (phản hồi của mọi endpoint, gồm dữ liệu và `detail` của lỗi) và cho phép nó gửi request JSON (như `POST /pipeline/run`) qua preflight. Riêng việc **gửi** một số request ghi "đơn giản" (upload multipart, promote không body) từ một trang web bất kỳ tới `localhost:8001` là rủi ro do thiếu xác thực và, theo luật CORS của trình duyệt (chưa thử), tồn tại ở **cả hai hướng**: CORS quyết định trang có đọc được phản hồi hay không, không phải request có tới được server hay không. Hướng (b) vì vậy cần chọn danh sách origin cụ thể, không dùng "cho phép tất cả".
 
 Điều này để mở có chủ ý, vì CORS là quyết định bảo mật và Plan 5a không có xác thực. **Đừng thiết kế dựa trên một cách triển khai không chạy được.** Yêu cầu dành cho thiết kế:
 
