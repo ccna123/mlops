@@ -327,3 +327,89 @@ def test_a_404_from_airflow_on_the_list_and_trigger_routes_is_still_a_500():
 
     assert client.get("/api/pipeline/runs").status_code == 500
     assert client.post("/api/pipeline/run", json={"task_type": "regression"}).status_code == 500
+
+
+# --- caller-supplied path parts must not steer the outbound Airflow request --
+
+
+def _recording_airflow():
+    """A real AirflowClient whose transport records every URL and answers 200 text."""
+    seen = []
+
+    def handler(request):
+        seen.append(request.url)
+        return httpx.Response(200, text="log text", headers={"content-type": "text/plain"})
+
+    return _real_airflow(handler), seen
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "../../variables?",
+        "../../../../../variables?",
+        "..",
+        ".",
+        "a/b",
+        "a?b",
+        "a b",
+        "-leading-dash",
+        "",
+        "x" * 251,
+    ],
+)
+def test_a_stage_that_is_not_a_task_id_is_422_and_sends_nothing(stage):
+    airflow, seen = _recording_airflow()
+
+    response = _client(airflow).get("/api/pipeline/runs/anyrun/logs", params={"stage": stage})
+
+    assert response.status_code == 422
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    "stage", ["extract", "prepare_dataset_for_train", "train-model", "_x", "0abc", "a" * 250]
+)
+def test_real_looking_task_ids_are_accepted(stage):
+    airflow, seen = _recording_airflow()
+
+    response = _client(airflow).get("/api/pipeline/runs/anyrun/logs", params={"stage": stage})
+
+    assert response.status_code == 200
+    assert len(seen) == 1
+
+
+def test_a_run_id_carrying_a_question_mark_stays_inside_the_run_path():
+    airflow, seen = _recording_airflow()
+
+    # %3F decodes to "?" before the route sees it; unencoded it would start a
+    # query string and the request would go to /variables.
+    _client(airflow).get("/api/pipeline/runs/x%3F/logs?stage=extract")
+
+    (url,) = seen
+    assert url.query == b""
+    assert url.raw_path == b"/api/v1/dags/ml_pipeline/dagRuns/x%3F/taskInstances/extract/logs/1"
+
+
+def test_a_real_run_id_reaches_airflow_encoded():
+    airflow, seen = _recording_airflow()
+    run_id = "manual__2026-09-21T03:53:17.127926+00:00"
+
+    response = _client(airflow).get(f"/api/pipeline/runs/{run_id}/logs?stage=extract")
+
+    assert response.status_code == 200
+    assert seen[0].raw_path == (
+        b"/api/v1/dags/ml_pipeline/dagRuns/manual__2026-09-21T03%3A53%3A17.127926%2B00%3A00"
+        b"/taskInstances/extract/logs/1"
+    )
+
+
+@pytest.mark.parametrize("run_id", ["%2e%2e", "%2E"])
+@pytest.mark.parametrize("suffix", ["", "/logs?stage=extract"])
+def test_a_dots_only_run_id_is_404_like_any_unknown_run_and_sends_nothing(run_id, suffix):
+    airflow, seen = _recording_airflow()
+
+    response = _client(airflow).get(f"/api/pipeline/runs/{run_id}{suffix}")
+
+    assert response.status_code == 404
+    assert seen == []

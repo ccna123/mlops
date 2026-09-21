@@ -17,8 +17,11 @@ C: drive. Bounding reception itself would take a reverse proxy or middleware
 and is deliberately out of scope here.
 
 The conversion and the upload are blocking calls, so they run in a worker
-thread. Only the network read stays on the event loop, which keeps `/health`
-answering while a large upload is being processed.
+thread, which keeps `/health` answering while a large upload is being
+processed. The copy of the upload into the temporary file is not: it runs on
+the event loop in chunks. `await file.read(...)` there reads from the file the
+framework has already spooled, not from the network, and each chunk is written
+with a plain synchronous `write`.
 """
 
 from __future__ import annotations

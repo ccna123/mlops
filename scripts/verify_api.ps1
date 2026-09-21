@@ -147,17 +147,45 @@ if ($null -eq $runList.runs -or @($runList.runs).Count -eq 0) {
     if ($null -eq $logs.lines -or @($logs.lines).Count -eq 0) {
         throw "the extract log of run $newestRunId came back with no lines"
     }
-    Write-Host "   extract log: $(@($logs.lines).Count) lines, truncated = $($logs.truncated)"
+    # Airflow's banner alone (the worker host, "*** Found local files:" and the
+    # log path) is already three non-empty lines. A real task log also has lines
+    # such as "[2026-09-21T03:53:19.138+0000] {docker.py:438} INFO - ...", so
+    # require at least one, or a log that lost the task's own output would pass.
+    $infoLines = @(@($logs.lines) | Where-Object { "$_" -match " INFO - " })
+    if ($infoLines.Count -eq 0) {
+        throw "the extract log of run $newestRunId has $(@($logs.lines).Count) lines but none contains ' INFO - ': only Airflow's banner came back, not the task's own output"
+    }
+    Write-Host "   extract log: $(@($logs.lines).Count) lines ($($infoLines.Count) INFO), truncated = $($logs.truncated)"
     $stepsPassed++
 }
 
 Write-Host "== 8/9 an unknown run is a 404, not a 500 ==" -ForegroundColor Cyan
 $unknownRunId = "does-not-exist-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
-$code = Get-HttpCode "$api/pipeline/runs/$unknownRunId"
-if ($code -ne "404") {
-    throw "GET /api/pipeline/runs/$unknownRunId returned HTTP $code, expected exactly 404"
+# Any 404 is not enough: FastAPI also answers {"detail":"Not Found"} for a path
+# that no route matches. The run route's own 404 names the id it looked for
+# ({"detail":"no run '<id>' in DAG 'ml_pipeline'"}), so require that.
+$unknownRunUrl = "$api/pipeline/runs/$unknownRunId"
+$unknownRunBodyFile = [System.IO.Path]::GetTempFileName()
+try {
+    $code = curl.exe -s -S --max-time 30 -o $unknownRunBodyFile -w "%{http_code}" $unknownRunUrl
+    if ($LASTEXITCODE -ne 0) { throw "curl could not reach $unknownRunUrl (exit code $LASTEXITCODE)" }
+    $unknownRunBody = Get-Content -Raw -Encoding UTF8 -LiteralPath $unknownRunBodyFile
+} finally {
+    Remove-Item -LiteralPath $unknownRunBodyFile -Force
 }
-Write-Host "   HTTP 404 for $unknownRunId"
+if ("$code" -ne "404") {
+    throw "GET $unknownRunUrl returned HTTP $code, expected exactly 404"
+}
+try {
+    $unknownRunError = $unknownRunBody | ConvertFrom-Json
+} catch {
+    throw "the 404 for $unknownRunId has no JSON body: $unknownRunBody"
+}
+$unknownRunDetail = "$($unknownRunError.detail)"
+if (-not $unknownRunDetail.Contains($unknownRunId)) {
+    throw "the 404 for $unknownRunId does not name that run (detail: '$unknownRunDetail') - this looks like an unrouted path, not the run route reporting an unknown run"
+}
+Write-Host "   HTTP 404 for $($unknownRunId): $unknownRunDetail"
 $stepsPassed++
 
 Write-Host "== 9/9 the data preview counts blank cells as missing ==" -ForegroundColor Cyan

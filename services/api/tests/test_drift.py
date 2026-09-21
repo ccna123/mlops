@@ -1,3 +1,5 @@
+import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError
 from fastapi.testclient import TestClient
 
 from ml_common.storage import drift_latest_key, drift_summary_key, report_key
@@ -30,6 +32,9 @@ class FakeStorage:
         return key in self._objects
 
     def read_json(self, key):
+        # The real Storage.read_json raises FileNotFoundError for a missing key.
+        if key not in self._objects:
+            raise FileNotFoundError(f"Key not found: {key}")
         return self._objects[key]
 
     def list_keys(self, prefix):
@@ -225,3 +230,83 @@ def test_history_puts_a_summary_without_a_usable_computed_at_last():
     ids = [item["run_id"] for item in body["history"]]
     assert ids[:2] == ["new", "old"]
     assert set(ids[2:]) == {"missing", "garbled", "naive"}
+
+
+# --- an unreachable object store is not "no drift report yet" ---------------
+
+
+class ScriptedStorage:
+    """Storage whose `read_json` either raises `error` or returns `payload`.
+
+    Records every key `read_json` was asked for, so a test can prove which key
+    was read. `exists` behaves like the real `Storage.exists`, which swallows
+    every error and answers False: a client that asks it first cannot tell a
+    missing key from an unreachable store.
+    """
+
+    def __init__(self, error=None, payload=None):
+        self.error = error
+        self.payload = payload
+        self.reads = []
+
+    def exists(self, key):
+        return self.error is None
+
+    def read_json(self, key):
+        self.reads.append(key)
+        if self.error is not None:
+            raise self.error
+        return self.payload
+
+
+def _scripted_client(storage, **kwargs):
+    return TestClient(create_app(reports=ReportsClient(storage)), **kwargs)
+
+
+def test_latest_reads_exactly_the_latest_key_of_the_requested_model():
+    storage = ScriptedStorage(payload=SUMMARY)
+
+    body = _scripted_client(storage).get(f"/api/drift/latest?model_name={CLASSIFIER}").json()
+
+    assert body == SUMMARY
+    assert storage.reads == [drift_latest_key(CLASSIFIER)]
+
+
+def test_latest_is_404_only_because_the_key_does_not_exist():
+    storage = ScriptedStorage(error=FileNotFoundError("Key not found"))
+
+    response = _scripted_client(storage).get(f"/api/drift/latest?model_name={REGRESSOR}")
+
+    assert response.status_code == 404
+    assert REGRESSOR in response.json()["detail"]
+    assert storage.reads == [drift_latest_key(REGRESSOR)]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject"),
+        EndpointConnectionError(endpoint_url="http://minio:9000"),
+        RuntimeError("minio unreachable"),
+        KeyError("latest"),
+    ],
+    ids=["access-denied", "connection-refused", "runtime", "key-error"],
+)
+def test_latest_when_storage_fails_for_any_other_reason_is_a_500_not_a_404(error):
+    # A MinIO outage or bad credentials must not read as "monitoring never ran".
+    storage = ScriptedStorage(error=error)
+
+    response = _scripted_client(storage, raise_server_exceptions=False).get(
+        f"/api/drift/latest?model_name={REGRESSOR}"
+    )
+
+    assert response.status_code == 500
+
+
+def test_latest_client_returns_none_only_for_a_missing_key_and_propagates_the_rest():
+    missing = ReportsClient(ScriptedStorage(error=FileNotFoundError("Key not found")))
+    broken = ReportsClient(ScriptedStorage(error=RuntimeError("minio unreachable")))
+
+    assert missing.latest(REGRESSOR) is None
+    with pytest.raises(RuntimeError, match="unreachable"):
+        broken.latest(REGRESSOR)

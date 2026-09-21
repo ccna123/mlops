@@ -28,7 +28,9 @@ def latest(request: Request, model_name: str) -> dict:
 
     Raises:
         HTTPException: 404 when monitoring has never run for this model. The
-            UI shows an empty state for that, not an error.
+            UI shows an empty state for that, not an error. Object storage
+            being unreachable or refusing the credentials is NOT a 404: it
+            escapes as a 500, so an outage never reads as "no report yet".
 
     Example:
         # GET /api/drift/latest?model_name=house_price_regressor

@@ -8,7 +8,7 @@ với thay đổi code tối thiểu. Dự án để học và thực hành.
 | File | Nội dung |
 | --- | --- |
 | `mlops-pipeline-design.md` | Spec đầy đủ. Mục 12 là bảng đổi so với v1, đọc nhanh mục đó trước. |
-| `docs/superpowers/plans/2026-09-17-foundation.md` | Plan 1/5 đang thực thi. Mỗi task có code thật cho từng step. |
+| `docs/superpowers/plans/2026-09-17-foundation.md` | Plan 1/5 (foundation), đã xong. Mỗi task có code thật cho từng step. |
 | `house_pricing_README.md` | Mô tả dataset và 8 loại dirty cần xử lý. |
 
 Không suy đoán thiết kế từ code — spec là nguồn sự thật. Nếu code và spec lệch
@@ -144,8 +144,14 @@ docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3
 
 ## Giới hạn máy — đã gây ra quyết định thiết kế
 
-- **RAM 16GB** chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi dev, đặt
-  `SAMPLE_ROWS=200000` trong `.env`. Xoá biến đó khi chạy thật.
+- **RAM 16GB** chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi dev, giới
+  hạn số dòng **theo từng lần chạy** qua `conf` của DAG `ml_pipeline`:
+  `{"sample_rows": 200000}` (gửi từ API/dashboard, hoặc nhập vào ô config của
+  "Trigger DAG w/ config" trên Airflow UI). Biến môi trường `SAMPLE_ROWS` trong
+  `.env` **không còn tác dụng** — DAG tự truyền giá trị từ `conf` cho stage
+  `extract`. **Cảnh báo:** bấm Trigger từ Airflow UI mà **không** kèm config thì
+  chạy **toàn bộ** ~2 triệu dòng và có thể làm cạn RAM máy 16GB. Không còn lưới
+  an toàn ở `.env` nữa, nên nhớ luôn đặt `sample_rows` khi dev.
 - **Ổ C còn ~16GB (94% đã dùng, đo ngày 2026-09-19).** Kiểm tra dung lượng trước khi pull image lớn.
   `docker system prune -a` nếu cần chỗ.
 - `house_pricing_dirty.csv` (373MB) và bản `.gz` đã được gitignore. Không bao giờ

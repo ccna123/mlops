@@ -18,13 +18,15 @@ router = APIRouter()
 # longer), so the bound is enforced here rather than trusted to them.
 PROBE_TIMEOUT_S = 5.0
 
-# Probes whose thread is still running, keyed by (name, probe). Module-level so
-# it survives from one /health call to the next, which is the point: a probe
-# still stuck from the previous poll must not get a second thread. Keying on the
-# probe callable keeps it per app - every `create_app()` builds its own probe
-# closures - and tests that build their own fakes cannot see each other's.
-# Entries exist only while a thread runs, so nothing accumulates.
-_running: dict[tuple[str, Callable[[], bool]], threading.Thread] = {}
+# Probes whose thread is still running, keyed by (name, probe), each with the
+# box that thread will write its outcome into. Module-level so it survives from
+# one /health call to the next, which is the point: a probe still running from
+# an earlier call must not get a second thread, and the later call needs its
+# box to read the outcome from. Keying on the probe callable keeps it per app -
+# every `create_app()` builds its own probe closures - and tests that build
+# their own fakes cannot see each other's. Entries exist only while a thread
+# runs, so nothing accumulates.
+_running: dict[tuple[str, Callable[[], bool]], tuple[threading.Thread, dict]] = {}
 _running_lock = threading.Lock()
 
 
@@ -61,19 +63,23 @@ def build_health(probes: dict, timeout: float | None = None) -> dict:
             dependency answers. A probe that raises, returns False, or has not
             finished by the deadline counts as down - the dashboard needs an
             answer, not a traceback and not a hang.
-        timeout: seconds to wait for the probes, counted from when they all
-            start. None uses `PROBE_TIMEOUT_S`. Probes run side by side on
-            daemon threads, so the whole call takes about `timeout` at worst
-            however many dependencies hang; a hung thread is abandoned rather
-            than waited for. Injectable so tests need not wait five seconds.
+        timeout: seconds to wait for the probes, counted from when this call
+            has started or found all of them. None uses `PROBE_TIMEOUT_S`.
+            Probes run side by side on daemon threads, so the whole call takes
+            about `timeout` at worst however many dependencies hang; a hung
+            thread is abandoned rather than waited for. Injectable so tests
+            need not wait five seconds.
 
     Returns:
         `status`, "ok" when every probe passed and "degraded" otherwise, and
         `services`, each probe's name mapped to "ok" or "down", in the order of
         `probes`. A probe whose thread from an earlier call is still running is
-        reported "down" at once and NOT started again, so a dashboard polling
-        every few seconds leaves at most one stuck thread per dependency
-        instead of one per poll.
+        NOT started again: this call waits for that same thread until its own
+        deadline and reports what it returned, or "down" if it has not
+        finished by then. So two overlapping requests both see a merely slow
+        probe as "ok", while a dashboard polling every few seconds still
+        leaves at most one stuck thread per dependency instead of one per
+        poll.
 
     Example:
         build_health({"airflow": lambda: True, "mlflow": lambda: False})
@@ -89,22 +95,26 @@ def build_health(probes: dict, timeout: float | None = None) -> dict:
     for name, probe in probes.items():
         key = (name, probe)
         with _running_lock:
-            if key in _running:
+            running = _running.get(key)
+            if running is not None:
+                # An earlier call's probe is still going. Wait for that one
+                # below; a second thread would only pile up behind it.
+                started[name] = running
                 continue
             box: dict = {}
             thread = threading.Thread(
                 target=_run_probe, args=(key, probe, box), name=f"health-probe-{name}", daemon=True
             )
-            _running[key] = thread
+            # Registered and started under one lock, so no other call can find
+            # an entry whose thread has not started (joining it would raise).
+            try:
+                thread.start()
+            except RuntimeError:
+                # No thread could be created: leave no entry behind that would
+                # read "still running" forever, and report the dependency down.
+                continue
+            _running[key] = (thread, box)
         started[name] = (thread, box)
-        try:
-            thread.start()
-        except RuntimeError:
-            # No thread could be created: leave no entry behind that would
-            # read "still running" forever, and report the dependency down.
-            with _running_lock:
-                _running.pop(key, None)
-            del started[name]
 
     deadline = time.monotonic() + limit
     services: dict[str, str] = {}

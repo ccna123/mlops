@@ -30,8 +30,10 @@ class ReportsClient:
         """Records where the reports live.
 
         Args:
-            storage: a `Storage`, or anything with `exists`, `read_json` and
-                `list_keys`. Injected so the tests need no MinIO.
+            storage: a `Storage`, or anything with `read_json` and
+                `list_keys`. `read_json` must raise `FileNotFoundError` for a
+                key that does not exist, as `Storage.read_json` does. Injected
+                so the tests need no MinIO.
         """
         self._storage = storage
 
@@ -47,15 +49,24 @@ class ReportsClient:
             error - the route turns it into a 404 so the UI can show an empty
             state rather than an alarming one.
 
+        Raises:
+            Exception: anything the storage raises other than
+                `FileNotFoundError` (MinIO unreachable, bad credentials, a
+                corrupt object) propagates, so the route answers 500. The key
+                is read directly instead of being checked with
+                `Storage.exists` first, because `exists` answers False for
+                EVERY error and an outage would then read as "monitoring has
+                never run".
+
         Example:
             latest("house_price_regressor")
             # -> {"severity": "high", "parts": {...}, "n_ground_truth": 500,
             #     "report_key": "reports/.../evidently.html"}
         """
-        key = drift_latest_key(model_name)
-        if not self._storage.exists(key):
+        try:
+            return self._storage.read_json(drift_latest_key(model_name))
+        except FileNotFoundError:
             return None
-        return self._storage.read_json(key)
 
     def history(self, model_name: str, limit: int) -> list[dict]:
         """Reads recent drift verdicts, newest first.

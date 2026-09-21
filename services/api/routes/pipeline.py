@@ -7,9 +7,9 @@ as soon as Airflow has queued the run, and the dashboard polls for the rest.
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..clients.airflow import AirflowNotFoundError
@@ -117,6 +117,11 @@ def get_run(request: Request, run_id: str) -> dict:
 
 MAX_LOG_LINES = 2000
 
+# What an Airflow task id may look like. The value becomes part of a URL path
+# on the way to Airflow, so anything outside this shape (slashes, dots, "?",
+# spaces) is refused with a 422 instead of being forwarded.
+TASK_ID_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_-]*$"
+
 
 def filter_log_lines(text: str, level: str | None, keyword: str | None) -> tuple[list[str], bool]:
     """Splits a log into lines and keeps only the ones asked for.
@@ -161,7 +166,7 @@ def filter_log_lines(text: str, level: str | None, keyword: str | None) -> tuple
 def get_logs(
     request: Request,
     run_id: str,
-    stage: str,
+    stage: Annotated[str, Query(pattern=TASK_ID_PATTERN, min_length=1, max_length=250)],
     level: str | None = None,
     q: str | None = None,
     try_number: int = 1,
@@ -172,7 +177,9 @@ def get_logs(
         request: the FastAPI request.
         run_id: the run whose log is wanted.
         stage: which task's log - required, because a run has seven tasks and
-            "the log" is not a thing that exists.
+            "the log" is not a thing that exists. Must look like a task id
+            (letters, digits, "_" and "-", not starting with "-", at most 250
+            characters); anything else is a 422.
         level: keep only lines at this level.
         q: keep only lines containing this text.
         try_number: which attempt; Airflow numbers them from 1. Defaults to
@@ -187,8 +194,10 @@ def get_logs(
         and a "Found local files" banner.
 
     Raises:
-        HTTPException: 404 when Airflow has no such run, or no such task
-            (`stage`) in that run. NOT a 404: a `try_number` that has no log.
+        HTTPException: 404 when Airflow has no such run (a `run_id` made only
+            of dots counts as no such run and is never sent), or no such task
+            (`stage`) in that run. 422 when `stage` is not shaped like a task
+            id. NOT a 404: a `try_number` that has no log.
             Airflow answers 200 there and its own error text ("*** Could not
             read served logs: 403 ...") comes back in `lines` as if it were
             the log, so pass the `try_number` that the run detail reports for

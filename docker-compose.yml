@@ -102,7 +102,6 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       ML_BUCKET: ${ML_BUCKET}
-      SAMPLE_ROWS: ${SAMPLE_ROWS}
       SERVING_URL: ${SERVING_URL}
     volumes: &airflow-volumes
       - ./dags:/opt/airflow/dags
@@ -192,6 +191,7 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
     image: ml-api:latest
+    container_name: mlops-api
     ports:
       - "8001:8001"
     depends_on:
@@ -211,6 +211,17 @@ services:
       AIRFLOW_USERNAME: ${AIRFLOW_USERNAME:-admin}
       AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:-admin}
       SERVING_URL: http://serving:8000
+    # Any HTTP 200 means the container is alive: /api/health answers 200 with
+    # status "degraded" when a dependency is down, and that must not make this
+    # container "unhealthy". The image has no curl, so use Python. The timeout
+    # is above /health's own 5 s probe deadline, which a dead dependency can use up.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
 
   agent:
     build:

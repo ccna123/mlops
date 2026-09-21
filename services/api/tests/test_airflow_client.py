@@ -325,3 +325,116 @@ def test_list_runs_and_trigger_run_keep_propagating_a_404_unchanged():
             call(client)
 
         assert not isinstance(raised.value, AirflowNotFoundError)
+
+
+# --- path components must not be able to steer the request ------------------
+#
+# dag_id, run_id and task_id end up inside a URL path. Unencoded, a "?" starts
+# a query string and "../" is normalised away by httpx, so a caller-supplied
+# value could redirect the authenticated request to any other Airflow
+# endpoint (/variables, /config, /connections).
+
+BASE = "http://airflow:8080/api/v1"
+REAL_RUN_ID = "manual__2026-09-21T03:53:17.127926+00:00"
+REAL_RUN_ID_ENCODED = "manual__2026-09-21T03%3A53%3A17.127926%2B00%3A00"
+
+
+def _recording_httpx(seen):
+    """A real httpx client over a transport that records the URL httpx really sends."""
+    import httpx
+
+    def handler(request):
+        seen.append(request.url)
+        return httpx.Response(200, text="log text", headers={"content-type": "text/plain"})
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_get_logs_encodes_every_path_component():
+    http = FakeHttp([FakeTextResponse("log", "text/plain")])
+    client = AirflowClient(BASE, "admin", "admin", http=http)
+
+    client.get_logs("dag/x", "x?y", "../v", 1)
+
+    assert http.calls[0][1] == f"{BASE}/dags/dag%2Fx/dagRuns/x%3Fy/taskInstances/..%2Fv/logs/1"
+
+
+def test_a_hostile_component_cannot_leave_the_dag_run_path_as_httpx_sends_it():
+    seen = []
+    client = AirflowClient(BASE, "admin", "admin", http=_recording_httpx(seen))
+
+    client.get_logs("ml_pipeline", "x?y", "../../../../../variables?", 1)
+
+    (url,) = seen
+    assert url.query == b""
+    assert url.raw_path == (
+        b"/api/v1/dags/ml_pipeline/dagRuns/x%3Fy/taskInstances/"
+        b"..%2F..%2F..%2F..%2F..%2Fvariables%3F/logs/1"
+    )
+
+
+def test_a_real_run_id_is_percent_encoded_in_the_outbound_url():
+    http = FakeHttp([FakeTextResponse("log", "text/plain")])
+    client = AirflowClient(BASE, "admin", "admin", http=http)
+
+    client.get_logs("ml_pipeline", REAL_RUN_ID, "extract", 2)
+
+    assert http.calls[0][1] == (
+        f"{BASE}/dags/ml_pipeline/dagRuns/{REAL_RUN_ID_ENCODED}/taskInstances/extract/logs/2"
+    )
+
+
+def test_get_run_encodes_the_run_id_on_both_requests():
+    http = FakeHttp(
+        [
+            FakeResponse({"dag_run_id": REAL_RUN_ID, "state": "success"}),
+            FakeResponse({"task_instances": []}),
+        ]
+    )
+    client = AirflowClient(BASE, "admin", "admin", http=http)
+
+    client.get_run("ml_pipeline", REAL_RUN_ID)
+
+    assert http.calls[0][1] == f"{BASE}/dags/ml_pipeline/dagRuns/{REAL_RUN_ID_ENCODED}"
+    assert http.calls[1][1] == (
+        f"{BASE}/dags/ml_pipeline/dagRuns/{REAL_RUN_ID_ENCODED}/taskInstances"
+    )
+
+
+def test_trigger_and_list_encode_the_dag_id_too():
+    http = FakeHttp(
+        [FakeResponse({"dag_runs": []}), FakeResponse({"dag_run_id": "r", "state": "queued"})]
+    )
+    client = AirflowClient(BASE, "admin", "admin", http=http)
+
+    client.list_runs("a?b", limit=1)
+    client.trigger_run("a?b", {})
+
+    assert http.calls[0][1] == f"{BASE}/dags/a%3Fb/dagRuns"
+    assert http.calls[1][1] == f"{BASE}/dags/a%3Fb/dagRuns"
+
+
+@pytest.mark.parametrize("dots", [".", ".."])
+def test_a_run_id_of_only_dots_is_not_found_and_sends_nothing(dots):
+    # quote() leaves dots alone and httpx would collapse the segment, turning
+    # ".../dagRuns/../taskInstances" into a request for a different endpoint.
+    http = FakeHttp([])
+    client = AirflowClient(BASE, "admin", "admin", http=http)
+
+    with pytest.raises(AirflowNotFoundError, match="no run"):
+        client.get_run("ml_pipeline", dots)
+    with pytest.raises(AirflowNotFoundError):
+        client.get_logs("ml_pipeline", dots, "extract", 1)
+
+    assert http.calls == []
+
+
+@pytest.mark.parametrize("dots", [".", ".."])
+def test_a_task_id_of_only_dots_is_not_found_and_sends_nothing(dots):
+    http = FakeHttp([])
+    client = AirflowClient(BASE, "admin", "admin", http=http)
+
+    with pytest.raises(AirflowNotFoundError):
+        client.get_logs("ml_pipeline", "r1", dots, 1)
+
+    assert http.calls == []

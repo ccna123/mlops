@@ -12,6 +12,8 @@ the session backend and answers 401 without saying why.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import httpx
 
 DEFAULT_TIMEOUT = 30.0
@@ -25,6 +27,40 @@ class AirflowNotFoundError(Exception):
     be reported as such - a dead Airflow and a missing run call for different
     reactions from the UI.
     """
+
+
+def _segment(value: str, not_found_message: str) -> str:
+    """Makes one caller-supplied value safe to place inside a URL path.
+
+    Run ids and task ids reach the URL from the browser, so they must not be
+    able to steer the request. Unencoded, a "?" would start a query string and
+    a "../" would be collapsed by the HTTP client, sending the authenticated
+    request to some other Airflow endpoint (variables, connections, config).
+    Percent-encoding covers both; Airflow decodes path parameters, so a real
+    run id such as "manual__2026-09-21T03:53:17.127926+00:00" still resolves.
+
+    Args:
+        value: a DAG id, run id or task id.
+        not_found_message: what to report when `value` cannot name anything.
+
+    Returns:
+        `value` percent-encoded with nothing left unescaped, "/" included.
+
+    Raises:
+        AirflowNotFoundError: when `value` is empty, ".", or "..". Encoding
+            leaves dots alone and the HTTP client collapses a whole path
+            segment made of them, so these are refused before any request is
+            made - the same answer as for any other id Airflow does not know.
+
+    Example:
+        _segment("manual__2026-09-21T03:53:17+00:00", "no run")
+        # -> "manual__2026-09-21T03%3A53%3A17%2B00%3A00"
+        _segment("x?y", "no run")   # -> "x%3Fy"
+        _segment("..", "no run")    # raises AirflowNotFoundError("no run")
+    """
+    if value in ("", ".", ".."):
+        raise AirflowNotFoundError(not_found_message)
+    return quote(value, safe="")
 
 
 class AirflowClient:
@@ -117,12 +153,17 @@ class AirflowClient:
             `run_id`, `dag_id` and `state`. The run has only been QUEUED -
             it has not finished, and on this pipeline it will take minutes.
 
+        Raises:
+            AirflowNotFoundError: only when `dag_id` is empty, "." or ".."
+                (never sent - see `_segment`).
+
         Example:
             trigger_run("ml_pipeline", {"task_type": "regression", "sample_rows": 1000})
             # -> {"run_id": "manual__2026-09-20T10:00:00+00:00",
             #     "dag_id": "ml_pipeline", "state": "queued"}
         """
-        body = self._call("POST", f"/dags/{dag_id}/dagRuns", json={"conf": conf})
+        dag = _segment(dag_id, f"no DAG {dag_id!r}")
+        body = self._call("POST", f"/dags/{dag}/dagRuns", json={"conf": conf})
         return {"run_id": body["dag_run_id"], "dag_id": dag_id, "state": body["state"]}
 
     def list_runs(self, dag_id: str, limit: int) -> list[dict]:
@@ -138,6 +179,10 @@ class AirflowClient:
             for a run triggered from the Airflow UI without one. `ended_at` is
             None while the run is still going.
 
+        Raises:
+            AirflowNotFoundError: only when `dag_id` is empty, "." or ".."
+                (never sent - see `_segment`).
+
         Example:
             list_runs("ml_pipeline", limit=5)
             # -> [{"run_id": "manual__...", "state": "success",
@@ -147,9 +192,10 @@ class AirflowClient:
         # start_date is when the run actually started; execution_date is its
         # logical schedule slot. They track together for manual runs but
         # diverge for scheduled/backfilled ones, so sort by start_date.
+        dag = _segment(dag_id, f"no DAG {dag_id!r}")
         body = self._call(
             "GET",
-            f"/dags/{dag_id}/dagRuns",
+            f"/dags/{dag}/dagRuns",
             params={"limit": limit, "order_by": "-start_date"},
         )
         return [
@@ -176,8 +222,10 @@ class AirflowClient:
             task is still running).
 
         Raises:
-            AirflowNotFoundError: when Airflow has no such run. Returning an
-                empty task list instead would look like a run that did nothing.
+            AirflowNotFoundError: when Airflow has no such run, or when
+                `run_id` is "." or ".." (never sent - see `_segment`).
+                Returning an empty task list instead would look like a run
+                that did nothing.
             Exception: any other failure (Airflow unreachable, 401, 5xx) is
                 left to propagate, so a dead Airflow is not read as a missing
                 run.
@@ -188,8 +236,9 @@ class AirflowClient:
             #     "tasks": [{"task_id": "extract", "state": "success", ...}]}
         """
         missing = f"no run {run_id!r} in DAG {dag_id!r}"
-        run = self._call("GET", f"/dags/{dag_id}/dagRuns/{run_id}", missing)
-        instances = self._call("GET", f"/dags/{dag_id}/dagRuns/{run_id}/taskInstances", missing)
+        run_path = f"/dags/{_segment(dag_id, missing)}/dagRuns/{_segment(run_id, missing)}"
+        run = self._call("GET", run_path, missing)
+        instances = self._call("GET", f"{run_path}/taskInstances", missing)
         return {
             "run_id": run["dag_run_id"],
             "state": run["state"],
@@ -227,11 +276,12 @@ class AirflowClient:
         Raises:
             AirflowNotFoundError: when Airflow answers 404, which live it does
                 for an unknown run and for an unknown task_id in an existing
-                run. It does NOT for a `try_number` that has no log: Airflow
-                answers 200 and puts its own error text ("*** Could not read
-                served logs: 403 ...") in the body, so that text comes back
-                here as if it were the log. Callers must pass the try_number
-                the run detail reports for the task.
+                run, and without asking Airflow when `run_id` or `task_id` is
+                "." or ".." (see `_segment`). It does NOT for a `try_number`
+                that has no log: Airflow answers 200 and puts its own error
+                text ("*** Could not read served logs: 403 ...") in the body,
+                so that text comes back here as if it were the log. Callers
+                must pass the try_number the run detail reports for the task.
             Exception: any other failure (Airflow unreachable, 401, 5xx) is
                 left to propagate.
 
@@ -241,10 +291,10 @@ class AirflowClient:
             #    "*** Found local files:" banner, then the task's own lines:
             #    "[2026-09-20T10:00:01.000+0000] {docker.py:438} INFO - raw=raw/v1/..."
         """
-        response = self._send(
-            "GET",
-            f"/dags/{dag_id}/dagRuns/{run_id}/taskInstances/{task_id}/logs/{try_number}",
-            f"no log for task {task_id!r}, attempt {try_number}, of run {run_id!r}",
-            headers={"Accept": "text/plain"},
+        missing = f"no log for task {task_id!r}, attempt {try_number}, of run {run_id!r}"
+        path = (
+            f"/dags/{_segment(dag_id, missing)}/dagRuns/{_segment(run_id, missing)}"
+            f"/taskInstances/{_segment(task_id, missing)}/logs/{try_number}"
         )
+        response = self._send("GET", path, missing, headers={"Accept": "text/plain"})
         return response.text
