@@ -1,13 +1,19 @@
-"""monitoring_dag - the only DAG that runs on a schedule.
+"""monitoring_dag - recomputes drift for every model, on demand.
 
 It measures drift for each model independently, so a missing classification
 champion never blocks the regression verdict.
 
-Created paused on purpose. The schedule stays hourly as the design says, but
-a 16GB dev box is already running Airflow, Postgres, MinIO, MLflow and
-serving; a job that quietly fires every hour and pulls Evidently plus 10,000
-reference rows is the kind of thing people forget about and then wonder why
-the machine crawls. Drop the flag when this moves to MWAA.
+Trigger-only, and left unpaused. The design (section 6.2) asked for an hourly
+schedule and Plan 4 shipped it paused to protect a 16GB dev box already
+running Airflow, Postgres, MinIO, MLflow and serving: a job that quietly
+fires every hour and pulls Evidently plus 10,000 reference rows is the kind
+of thing people forget about and then wonder why the machine crawls.
+
+Since the dashboard now has a button that triggers this DAG, `schedule=None`
+protects that same box while leaving the button useful. Staying paused would
+not: a triggered run of a paused DAG sits in `queued` forever with no signal
+anywhere that says why. Restore `schedule="@hourly"` when this moves to MWAA,
+where the hourly cost is not a problem.
 
 One container per model rather than the three tasks section 6.2 sketches.
 XCom carries only small values, so collect/report/publish as separate tasks
@@ -80,10 +86,12 @@ def stage_result(lines: list[str]) -> dict:
 
 with DAG(
     dag_id="monitoring_dag",
-    schedule="@hourly",
+    schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
-    is_paused_upon_creation=True,
+    # One monitoring run at a time: two runs would recompute the same window
+    # and race each other writing the same drift summary keys.
+    max_active_runs=1,
     tags=["ml", "monitoring"],
     user_defined_filters={"stage_result": stage_result},
 ) as dag:

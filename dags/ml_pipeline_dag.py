@@ -201,6 +201,10 @@ with DAG(
     schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
+    # One training run at a time. A second trigger is not rejected, it waits
+    # until the first finishes: two concurrent runs would compete for RAM on a
+    # 16GB box and race each other writing the same dataset_version prefix.
+    max_active_runs=1,
     tags=["ml", "training"],
     params={
         "task_type": "regression",
