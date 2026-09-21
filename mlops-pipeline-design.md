@@ -48,7 +48,7 @@
 | Sinh traffic mô phỏng              | AI agent nghiệp vụ BĐS —`services/agent/` | Bắn request`/predict` và trả ground truth trễ qua `/feedback`; có tham số `drift_scenario` |
 | Monitoring / Drift                   | Evidently AI                                    | So inference log với baseline profile của model đang giữ alias `champion`                                     |
 | Metadata DB                          | PostgreSQL                                      | **Hai database tách biệt** trên cùng instance: `airflow` và `mlflow`                    |
-| Auth                                 | API key qua FastAPI                             | Chưa cần nếu chỉ chạy local 1 người dùng; bắt buộc trước khi expose ra ngoài              |
+| Auth                                 | API key qua FastAPI                             | **Hoãn** (Plan 5a): chưa có API key. Mọi endpoint đã khai báo dependency rỗng `require_auth` (`services/api/deps.py`), nên thêm API key về sau là sửa một hàm, không phải 11 route. Khi chưa có auth, các endpoint ghi (`promote`, `upload`, `pipeline/run`) mở cho bất kỳ ai tới được cổng API. Chấp nhận được khi chạy local 1 người dùng; bắt buộc trước khi expose ra ngoài |
 | Containerize / hạ tầng offline     | Docker Compose                                  | Toàn bộ service trong 1`docker-compose.yml`                                                        |
 | Chất lượng code                   | `pre-commit` (ruff) + `pytest` chạy local  | GitHub Actions chỉ bật khi repo đã push lên GitHub — xem mục 7.8                                |
 
@@ -446,7 +446,7 @@ Bản frontend hiện tại: [MLOps Control Room](https://claude.ai/artifact/Tam
 | Stages & Logs      | Lọc log theo stage / level / từ khoá                                                                                | Đọc log thật từ Airflow                                                                                                                       |
 | Dữ liệu          | Upload CSV, xem preview + thống kê từng cột                                                                        | Parse bằng pandas ở backend, không parse trong JS                                                                                              |
 | Models             | Xem model version (tên, version, metric, stage), promote lên production                                              | **Cột metric động theo loại model**: rmse/mae/r2 cho regression, f1/auc/accuracy cho classification — không hardcode accuracy/f1 nữa |
-| Drift Detection    | Hiển thị report Evidently: 3 loại drift, badge ok/warning/high, histogram                                           | Đọc report có sẵn, không tính drift bằng JS;**thêm nút "Retrain ngay"** khi mức độ là `high`                                 |
+| Drift Detection    | Hiển thị report Evidently: 3 loại drift (feature / prediction / performance) **hiện riêng**, mỗi loại một badge **bốn trạng thái** `ok` / `warning` / `high` / `insufficient_data`, histogram | Đọc report có sẵn, không tính drift bằng JS;**thêm nút "Retrain ngay"** khi mức độ là `high`. `insufficient_data` (chưa đo được, vd chưa có ground truth) phải trông khác `ok`. Không gộp ba loại thành một badge: kịch bản `market_rally` đo được feature `ok` trong khi performance `high` (Plan 4, `docs/superpowers/specs/2026-09-20-plan4-monitoring-measurements.md`) |
 | ~~Feature Store~~ | Bỏ khỏi giai đoạn 1                                                                                                | Xem mục 11                                                                                                                                       |
 
 ### 8.2. Vì sao cần API layer
@@ -461,7 +461,7 @@ Gọi thẳng Airflow/MLflow REST API từ browser không dùng được: creden
 
 | Method   | Endpoint                                 | Mô tả                                                          | Gọi xuống                               |
 | -------- | ---------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------- |
-| `POST` | `/api/pipeline/run`                    | Body:`{task_type, force_reprocess}`. Trả `run_id`           | Airflow`POST /dags/ml_pipeline/dagRuns` |
+| `POST` | `/api/pipeline/run`                    | Body:`{task_type, force_reprocess, sample_rows, dataset_version}`. Trả `run_id` | Airflow`POST /dags/ml_pipeline/dagRuns` |
 | `GET`  | `/api/pipeline/runs`                   | Danh sách run gần đây + trạng thái                         | Airflow REST                              |
 | `GET`  | `/api/pipeline/runs/{run_id}`          | Trạng thái từng task của một run                            | Airflow REST                              |
 | `GET`  | `/api/pipeline/runs/{run_id}/logs`     | Query:`stage`, `level`, `q`                                | Airflow task log                          |
@@ -472,6 +472,15 @@ Gọi thẳng Airflow/MLflow REST API từ browser không dùng được: creden
 | `GET`  | `/api/drift/latest`                    | Report mới nhất: mức độ, 3 loại drift, dữ liệu histogram | MinIO`reports/`                         |
 | `GET`  | `/api/drift/history`                   | Diễn biến mức độ drift theo thời gian                      | MinIO`reports/`                         |
 | `GET`  | `/api/health`                          | Trạng thái các service phụ thuộc                            | Tất cả                                  |
+
+**Body của `POST /api/pipeline/run`** (thêm ở Plan 5a):
+
+- `task_type` bắt buộc: `regression` hoặc `classification`. `force_reprocess` mặc định `false`.
+- `sample_rows`: số nguyên **> 0**, hoặc vắng / `null` = dùng toàn bộ dòng. `0` hay số âm bị từ chối bằng `422`, không bị hiểu thầm thành "tất cả" — nếu không, một máy chỉ đủ RAM cho lần chạy nhỏ sẽ nhận một lần chạy 2 triệu dòng. Nó đi vào DAG qua `params.sample_rows` (Airflow gộp `conf` của lần trigger vào `params`) rồi thành biến môi trường `SAMPLE_ROWS` của stage `extract`; trước Plan 5a giá trị này lấy từ môi trường của scheduler nên dashboard không chọn được. `sample_rows` nằm trong fingerprint, nên lần chạy 1.000 dòng không bao giờ dùng lại tập processed dựng từ toàn bộ dòng.
+- `dataset_version`: chuỗi thường, mặc định `v1`. **API không kiểm nó** (khác `POST /api/data/upload`, nơi tên version phải khớp một pattern): nó được chuyển nguyên vào `conf` của lần chạy. Một version chưa có `raw/<version>/data.parquet` vẫn được xếp hàng (`queued`) và chỉ hỏng khi task `extract` chạy (`FileNotFoundError`).
+- Phản hồi trả ngay khi Airflow đã xếp hàng run (`{run_id, dag_id, state}`, `state` là `queued`), không đợi run xong.
+
+**Airflow REST cần `AIRFLOW__API__AUTH_BACKENDS`.** Airflow 2.10 mặc định chỉ bật backend `session` (cookie của trình duyệt), nên mọi lời gọi basic auth từ `services/api/` bị `401` — đo được ngày 2026-09-20 với `curl -u admin:admin http://localhost:8080/api/v1/dags`, và thông điệp 401 không gợi ý nguyên nhân là thiếu backend chứ không phải sai mật khẩu. `docker-compose.yml` đặt `AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"` trong khối `&airflow-env`, dùng chung cho `airflow-init`, `airflow-scheduler` và `airflow-webserver`; giữ `session` ở phía sau để đăng nhập Airflow UI trên trình duyệt không đổi. Sau khi bật, cùng lời gọi trên trả `200` (Task 12 của Plan 5a đo lại: `200` khi có `-u`, `401` khi không có).
 
 ---
 
@@ -569,6 +578,15 @@ Cân nhắc lại sau khi pipeline chạy ổn. Khi đó nó sẽ đứng giữa
 | CI/CD                | "GitHub Actions (offline)"                     | `pre-commit` + `pytest` local; GH Actions khi đã có remote                  |
 | Cấu trúc thư mục | Thiếu register, common, services, tests, base | Đầy đủ (mục 9)                                                                |
 | API dashboard        | Liệt kê endpoint của Airflow                | Contract riêng của API layer (mục 8.3)                                          |
+
+**Vá ngược sau Plan 5a** (so với chính bản v2 này trước khi API layer được dựng):
+
+| Hạng mục | Trước Plan 5a | Sau Plan 5a |
+| --- | --- | --- |
+| `POST /api/pipeline/run` | Body `{task_type, force_reprocess}` | Thêm `sample_rows` và `dataset_version` (mục 8.3) |
+| Airflow REST | Không nói về auth | Phải bật `AIRFLOW__API__AUTH_BACKENDS` với `basic_auth`, nếu không mọi lời gọi là `401` (mục 8.3) |
+| Màn Drift | Badge ok/warning/high | Bốn trạng thái (thêm `insufficient_data`), ba loại drift hiện riêng (mục 8.1) |
+| Auth API layer | API key qua FastAPI | Hoãn; có sẵn dependency rỗng `require_auth`, endpoint ghi đang mở (mục 3.2) |
 
 ---
 
