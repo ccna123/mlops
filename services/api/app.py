@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from .routes import drift, health, models, pipeline
+from .routes import data, drift, health, models, pipeline
 
 
 def create_app(
@@ -23,6 +23,7 @@ def create_app(
     registry=None,
     reports=None,
     probes: dict | None = None,
+    storage=None,
 ) -> FastAPI:
     """Builds the API application.
 
@@ -33,6 +34,8 @@ def create_app(
             the real one.
         probes: health probes, name to a zero-argument callable. None builds
             one probe per real dependency.
+        storage: `ml_common.storage.Storage` that uploaded datasets are
+            written to. None is treated like the other collaborators above.
 
     Returns:
         A FastAPI app serving everything under `/api`.
@@ -49,11 +52,14 @@ def create_app(
     app.state.registry = registry
     app.state.reports = reports
     app.state.probes = probes if probes is not None else {}
+    app.state.storage = storage
+    app.state.max_upload_bytes = 500 * 1024 * 1024
 
     app.include_router(health.router, prefix="/api")
     app.include_router(pipeline.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
     app.include_router(drift.router, prefix="/api")
+    app.include_router(data.router, prefix="/api")
     return app
 
 
