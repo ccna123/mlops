@@ -192,10 +192,10 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
-| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 13 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
-| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version, trigger drift thủ công | chưa có script; verify bằng trình duyệt |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 14 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-21 (sau Plan 5b): 660 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-21 (sau Plan 5b): 666 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
@@ -249,8 +249,15 @@ dòng. Dashboard thì luôn gửi `sample_rows` nên an toàn.
   khoảng ba bản (body của framework, CSV, parquet). Đường 413 chưa được chạy
   thật trên hệ thống sống.
 - **Chưa có auth**: `require_auth` rỗng, nên `promote`, `upload`, `pipeline/run`,
-  và (từ Plan 5b) `DELETE /models/{name}/{version}` lẫn `POST /drift/run` mở cho
-  bất kỳ ai tới được cổng 8001. Xoá model version là thao tác **không hoàn tác
-  được** duy nhất trong API, và nó không được bảo vệ bởi gì ngoài một
-  `ConfirmDialog` ở phía trình duyệt — cộng với luật chặn xoá champion, luật này
-  thì nằm ở backend nên gọi thẳng API cũng không lách được.
+  và (từ Plan 5b) `DELETE /models/{name}/{version}`, `DELETE /models/{name}` lẫn
+  `POST /drift/run` mở cho bất kỳ ai tới được cổng 8001. Xoá là thao tác **không
+  hoàn tác được** duy nhất trong API. `DELETE /models/{name}` xoá sạch mọi
+  version kèm alias champion và **không có luật nào chặn**, nên chỉ một request
+  là mất cả model — thứ duy nhất đứng giữa là `ConfirmDialog` ở trình duyệt.
+  Riêng xoá một *version* đang là champion thì bị chặn ở backend (409), gọi
+  thẳng API cũng không lách được.
+- **Xoá hết model không làm hỏng gì.** `serving` trả 503 `no champion loaded`
+  (đã có từ Plan 3), `/api/health` vẫn báo serving `ok` vì probe chỉ kiểm HTTP
+  200 mà serving trả 200 cả khi `degraded`, và hai màn Models/Drift đều có
+  empty state riêng. Lưu ý serving vẫn phục vụ model đang nằm trong RAM cho tới
+  lần restart hoặc `/reload` kế tiếp.

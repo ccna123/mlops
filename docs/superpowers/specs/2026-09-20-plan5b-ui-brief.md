@@ -104,14 +104,24 @@ Mỗi màn hình dưới đây mô tả đủ: **loading**, **empty**, **error**
 | Đổi champion | `POST /models/{name}/{version}/promote` | Luôn luôn (mục 4.4) |
 | Upload dataset | `POST /data/upload` | Chỉ khi phiên bản đích **đã tồn tại** (sẽ bị ghi đè âm thầm, mục 4.3) |
 | Xoá một model version | `DELETE /models/{name}/{version}` | Luôn luôn (mục 4.4) |
+| Xoá cả một model | `DELETE /models/{name}` | Luôn luôn (mục 4.4) |
 | Tính drift thủ công | `POST /drift/run` | Luôn luôn (mục 4.5) |
 
 Mọi `GET` không cần xác nhận.
 
 > **Sửa ngày 2026-09-21.** Bản đầu của brief ghi "ba thao tác" và "không có thao tác
 > xoá nào trong API". Chủ dự án sau đó yêu cầu thêm xoá model version và trigger
-> drift thủ công, nên Plan 5b thêm hai endpoint vào `services/api/`:
-> `DELETE /models/{name}/{version}` và `POST /drift/run`. Xem mục 4.4 và 4.5.
+> drift thủ công, nên Plan 5b thêm ba endpoint vào `services/api/`:
+> `DELETE /models/{name}/{version}`, `DELETE /models/{name}` và `POST /drift/run`.
+> Xem mục 4.4 và 4.5.
+>
+> **Hai mức xoá, hai luật khác nhau.** Xoá một *version* đang giữ alias champion
+> bị từ chối bằng **409**: nó để lại một model còn version nhưng không có gì để
+> serve, trong khi promote version khác chỉ mất một cú bấm. Xoá *cả model* thì
+> được phép kể cả khi nó kéo theo champion — kết quả là mạch lạc: model biến mất
+> hẳn, và `serving` trả 503 `no champion loaded` (có sẵn từ Plan 3, không phải
+> sửa gì). Chủ dự án chốt ngày 2026-09-21: phải xoá sạch được, còn lại thì chỉ
+> cần hiện "chưa có model".
 
 ### 3.5. Nhịp lấy dữ liệu
 
