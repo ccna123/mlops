@@ -11,13 +11,9 @@ import argparse
 import os
 import tempfile
 
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-
+from ml_common.rawdata import csv_to_parquet
 from ml_common.storage import Storage, raw_key
 
-CHUNK_ROWS = 200_000
 DEFAULT_SOURCE = "house_pricing_dirty.csv"
 
 
@@ -45,55 +41,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", default="v1", help="dataset version to write under")
     parser.add_argument("--limit", type=int, default=None, help="stop after this many rows")
     return parser.parse_args()
-
-
-def csv_to_parquet(source: str, destination: str, limit: int | None) -> int:
-    """Streams the CSV into a parquet file, a chunk at a time.
-
-    Every column is read as text on purpose: this is the RAW copy, and parsing
-    belongs to the Pipeline. Letting pandas infer types here would quietly fix
-    some of the dirt the pipeline exists to handle.
-
-    Args:
-        source: path to the CSV. Read 200k rows at a time, so a 373 MB file
-            never has to fit in memory whole.
-        destination: path of the parquet file to write.
-        limit: stop after this many rows, or None for all of them.
-
-    Returns:
-        How many rows were written. The parquet file is closed either way, so
-        an interrupted run leaves a readable partial file rather than a corrupt
-        one.
-
-    Example:
-        csv_to_parquet("house_pricing_dirty.csv", "/tmp/data.parquet", None)
-        # -> 2000000, printing progress every 200k rows
-
-        # Every column lands as a STRING. "$450,000" stays "$450,000" and
-        # "09/20/2026" stays text — letting pandas infer types here would
-        # quietly repair some of the dirt the pipeline exists to handle.
-    """
-    written = 0
-    writer = None
-    try:
-        reader = pd.read_csv(source, chunksize=CHUNK_ROWS, dtype=str, keep_default_na=False)
-        for chunk in reader:
-            if limit is not None and written + len(chunk) > limit:
-                chunk = chunk.head(limit - written)
-            if chunk.empty:
-                break
-            table = pa.Table.from_pandas(chunk, preserve_index=False)
-            if writer is None:
-                writer = pq.ParquetWriter(destination, table.schema, compression="snappy")
-            writer.write_table(table)
-            written += len(chunk)
-            print(f"  ... {written:,} rows")
-            if limit is not None and written >= limit:
-                break
-    finally:
-        if writer is not None:
-            writer.close()
-    return written
 
 
 def main() -> int:
@@ -131,7 +78,12 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as workdir:
         local_parquet = os.path.join(workdir, "data.parquet")
         print(f"Converting {args.source} -> parquet")
-        row_count = csv_to_parquet(args.source, local_parquet, args.limit)
+        row_count = csv_to_parquet(
+            args.source,
+            local_parquet,
+            args.limit,
+            on_chunk=lambda written: print(f"  ... {written:,} rows"),
+        )
         size_mb = os.path.getsize(local_parquet) / 2**20
         print(f"Uploading {size_mb:.1f} MB to {key}")
         storage.upload_file(local_parquet, key)

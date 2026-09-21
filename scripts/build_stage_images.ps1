@@ -15,6 +15,12 @@ $stages = @(
 foreach ($stage in $stages) {
     Write-Host "== Building $($stage.Tag) ==" -ForegroundColor Cyan
     docker build -f "stages/$($stage.Dir)/Dockerfile" -t $stage.Tag .
+    # $ErrorActionPreference does not stop on a failing native command in
+    # Windows PowerShell 5.1, so check the exit code: a stage image left stale
+    # after a failed build makes the DAG run old code while the tests are green.
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker build failed for $($stage.Tag) (exit code $LASTEXITCODE)"
+    }
 }
 
 Write-Host "`nAll stage images built." -ForegroundColor Green

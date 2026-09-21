@@ -92,12 +92,16 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      # Airflow 2.10 chi bat session backend, nen moi loi goi basic auth tu
+      # services/api/ deu bi 401 - va thong diep 401 khong he goi y rang
+      # nguyen nhan la thieu backend chu khong phai sai mat khau.
+      # Giu session phia sau de dang nhap tren trinh duyet khong doi.
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
       MINIO_ENDPOINT_INTERNAL: ${MINIO_ENDPOINT_INTERNAL}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       ML_BUCKET: ${ML_BUCKET}
-      SAMPLE_ROWS: ${SAMPLE_ROWS}
       SERVING_URL: ${SERVING_URL}
     volumes: &airflow-volumes
       - ./dags:/opt/airflow/dags
@@ -179,6 +183,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    image: ml-api:latest
+    container_name: mlops-api
+    ports:
+      - "8001:8001"
+    depends_on:
+      - minio
+      - mlflow
+      - serving
+    environment:
+      MINIO_ENDPOINT_INTERNAL: ${MINIO_ENDPOINT_INTERNAL:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      ML_BUCKET: ${ML_BUCKET:-ml-pipeline}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      MLFLOW_S3_ENDPOINT_URL: ${MINIO_ENDPOINT_INTERNAL:-http://minio:9000}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
+      AIRFLOW_USERNAME: ${AIRFLOW_USERNAME:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:-admin}
+      SERVING_URL: http://serving:8000
+    # Any HTTP 200 means the container is alive: /api/health answers 200 with
+    # status "degraded" when a dependency is down, and that must not make this
+    # container "unhealthy". The image has no curl, so use Python. The timeout
+    # is above /health's own 5 s probe deadline, which a dead dependency can use up.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
       start_period: 20s
     restart: unless-stopped
 

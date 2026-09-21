@@ -8,7 +8,7 @@ với thay đổi code tối thiểu. Dự án để học và thực hành.
 | File | Nội dung |
 | --- | --- |
 | `mlops-pipeline-design.md` | Spec đầy đủ. Mục 12 là bảng đổi so với v1, đọc nhanh mục đó trước. |
-| `docs/superpowers/plans/2026-09-17-foundation.md` | Plan 1/5 đang thực thi. Mỗi task có code thật cho từng step. |
+| `docs/superpowers/plans/2026-09-17-foundation.md` | Plan 1/5 (foundation), đã xong. Mỗi task có code thật cho từng step. |
 | `house_pricing_README.md` | Mô tả dataset và 8 loại dirty cần xử lý. |
 
 Không suy đoán thiết kế từ code — spec là nguồn sự thật. Nếu code và spec lệch
@@ -44,8 +44,8 @@ cleaning sang serving — đó chính là training/serving skew mà cả thiết
 
 ### 4. Python 3.12 trong container, 3.13 ở máy dev
 
-Airflow 2.10 chưa hỗ trợ 3.13. Container (Airflow, `ml-base`, serving) đều dùng
-Python 3.12. Máy dev chạy 3.13 để test logic thuần.
+Airflow 2.10 chưa hỗ trợ 3.13. Container (Airflow, `ml-base`, serving, agent, api)
+đều dùng Python 3.12. Máy dev chạy 3.13 để test logic thuần.
 
 - **Không dùng cú pháp chỉ có ở 3.13+.**
 - **Không train ở môi trường này rồi serve ở môi trường khác.** Model pickle bởi
@@ -100,22 +100,31 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1
 powershell -ExecutionPolicy Bypass -File scripts\verify_pipeline.ps1
 powershell -ExecutionPolicy Bypass -File scripts\verify_serving.ps1
 powershell -ExecutionPolicy Bypass -File scripts\verify_monitoring.ps1
+powershell -ExecutionPolicy Bypass -File scripts\verify_api.ps1
 ```
 
-Khi `common/` thay đổi, phải build lại **cả bốn tầng, theo đúng thứ tự này**:
+`verify_api.ps1` gọi service thật, nên cần: **cả stack đang chạy** (kể cả `api`),
+object `raw/v1/data.parquet` đã có trong MinIO (thiếu thì bước 9 **fail**, không
+skip), và Airflow đã có ít nhất một run của `ml_pipeline` (chưa có thì bước 7
+chỉ **SKIP** và script in ra là chưa verify đủ). Chi tiết ở đầu file script.
+
+Khi `common/` thay đổi, phải build lại **cả năm tầng, theo đúng thứ tự này**:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_base_image.ps1
 powershell -ExecutionPolicy Bypass -File scripts\build_stage_images.ps1
 docker build -f services/serving/Dockerfile -t ml-serving:latest .
 docker build -f services/agent/Dockerfile -t ml-agent:latest .
+docker build -f services/api/Dockerfile -t ml-api:latest .
 ```
 
-Chỉ build `ml-base` là **chưa đủ**. Sáu stage image (kể cả `ml-monitor`),
-`ml-serving` và `ml-agent` đều `FROM ml-base:latest`, nên tới khi được build
-lại chúng vẫn giữ nguyên bản `ml_common` cũ nướng sẵn bên trong — `docker
+Chỉ build `ml-base` là **chưa đủ**. Bảy stage image (kể cả `ml-monitor`),
+`ml-serving`, `ml-agent` và `ml-api` đều `FROM ml-base:latest`, nên tới khi được
+build lại chúng vẫn giữ nguyên bản `ml_common` cũ nướng sẵn bên trong — `docker
 images` sẽ cho thấy `ml-base` mới tinh còn phần còn lại thì không. Triệu
 chứng: sửa code trong `common/`, test ở máy xanh, mà DAG vẫn chạy y như cũ.
+`ml-api` còn nướng thêm `services/` (`COPY services/ /app/services/`), nên sửa
+`services/api/` cũng phải build lại riêng image này.
 
 Kiểm tra test trong container (`ml-base` không có sẵn pytest nên phải cài vào):
 
@@ -130,11 +139,19 @@ docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3
 | Airflow | http://localhost:8080 | admin / admin |
 | MLflow | http://localhost:5000 | — |
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
+| API layer (`services/api/`) | http://localhost:8001 — endpoint ở `/api/...` (vd `/api/health`), Swagger ở `/docs` | — (chưa có auth, xem `mlops-pipeline-design.md` mục 3.2) |
+| Dashboard | — chưa dựng (Plan 5b) | — |
 
 ## Giới hạn máy — đã gây ra quyết định thiết kế
 
-- **RAM 16GB** chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi dev, đặt
-  `SAMPLE_ROWS=200000` trong `.env`. Xoá biến đó khi chạy thật.
+- **RAM 16GB** chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi dev, giới
+  hạn số dòng **theo từng lần chạy** qua `conf` của DAG `ml_pipeline`:
+  `{"sample_rows": 200000}` (gửi từ API/dashboard, hoặc nhập vào ô config của
+  "Trigger DAG w/ config" trên Airflow UI). Biến môi trường `SAMPLE_ROWS` trong
+  `.env` **không còn tác dụng** — DAG tự truyền giá trị từ `conf` cho stage
+  `extract`. **Cảnh báo:** bấm Trigger từ Airflow UI mà **không** kèm config thì
+  chạy **toàn bộ** ~2 triệu dòng và có thể làm cạn RAM máy 16GB. Không còn lưới
+  an toàn ở `.env` nữa, nên nhớ luôn đặt `sample_rows` khi dev.
 - **Ổ C còn ~16GB (94% đã dùng, đo ngày 2026-09-19).** Kiểm tra dung lượng trước khi pull image lớn.
   `docker system prune -a` nếu cần chỗ.
 - `house_pricing_dirty.csv` (373MB) và bản `.gz` đã được gitignore. Không bao giờ
@@ -164,8 +181,10 @@ Chỉ commit khi được yêu cầu hoặc khi plan nói rõ ở step đó.
 
 ## Trạng thái
 
-Ba plan đầu **đã xong**, đều đã merge vào `main`. Plan 4 đã xong trên nhánh
-`plan4-monitoring`, chưa merge:
+Bốn plan đầu **đã xong và đã merge vào `main`** (merge commit của Plan 4 là
+`706f45a`; `git branch --merged main` liệt kê cả `plan1-infra` tới
+`plan4-monitoring`). Plan 5 được tách đôi: 5a (API) đã xong trên nhánh
+`plan5a-api`, **chưa merge**; 5b (dashboard) chưa bắt đầu:
 
 | Plan | Nội dung | Verify |
 | --- | --- | --- |
@@ -173,10 +192,40 @@ Ba plan đầu **đã xong**, đều đã merge vào `main`. Plan 4 đã xong tr
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 11 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
 
-358 test pass ở Python 3.13 (local); 294 pass + 7 skip ở 3.12 (container) —
-image `ml-base` chỉ chứa `common/`, nên test cần `stages/` hoặc `services/`
-bị skip có chủ ý ở đó.
+Đo ngày 2026-09-21: 599 test pass ở Python 3.13 (local, `pytest common/ services/`);
+323 pass + 7 skip ở 3.12 (container) — image `ml-base` chỉ chứa `common/`, nên
+test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và **test của
+`services/api/` chỉ chạy ở máy dev**, không chạy trong container.
 
-Một plan còn lại: **5/5 dashboard**. Mỗi plan viết sau khi plan trước chạy
-xong.
+Còn lại: **Plan 5b — dashboard**. Nó đang **bị chặn bởi một quyết định của chủ
+dự án**: file HTML một trang tới được API bằng cách nào (API tự phục vụ file đó
+cùng origin, hay thêm `CORSMiddleware`) — xem `docs/superpowers/specs/2026-09-20-plan5b-ui-brief.md`
+mục 5.1. Mỗi plan viết sau khi plan trước chạy xong.
+
+### Plan 5a — những điều không tự suy ra được từ code
+
+- **Plan 5a có sửa `common/ml_common/`**, dù non-goals của plan ghi là không
+  đụng: thêm `rawdata.py` (`csv_to_parquet`, dùng chung với `scripts/seed_raw_data.py`),
+  `Storage.read_parquet_head`, `Storage.check_reachable`, `drift_prefix` và
+  `is_drift_summary_key`. Lý do: luật "chỉ `storage.py` biết đường dẫn" (mục 2
+  ở trên) buộc key `reports/...` phải nằm ở đó, và đọc cả file raw 2 triệu dòng
+  để xem trước sẽ hết RAM. Vì vậy `common/` thay đổi kéo theo build lại cả năm tầng.
+- **Mọi collaborator của API được inject** (`create_app(airflow, registry, reports,
+  probes, storage)`), giống serving. Client không dựng được (thiếu biến môi
+  trường) thì là `None`, app vẫn lên và `/api/health` báo dependency đó `down`,
+  kèm một WARNING trong log — không phải crash-loop.
+- **Preview chỉ đọc 200.000 dòng đầu** của file raw (`PREVIEW_STATS_ROWS`), nên
+  thống kê cột là của phần đầu file; `total_rows` mới là của cả file. Object
+  vẫn được tải nguyên về bộ nhớ mỗi lần gọi; đo ở Task 12, mỗi lần gọi đẩy RSS
+  của process API lên khoảng 0,9–1,2 GB (đỉnh RSS 909.420 / 1.085.624 /
+  1.162.148 kB trong ba lần gọi liên tiếp; ba lần chưa đủ để chứng minh nó ngừng
+  tăng). Một lần gọi thứ hai sau khi khởi động lại container đạt 1.261.240 kB.
+- **Trần upload 500 MiB** (`app.state.max_upload_bytes`) chỉ chặn phần handler
+  copy và chuyển đổi. FastAPI đã nhận và ghi cả body ra đĩa trước khi handler
+  chạy, nên 413 chỉ đến **sau khi** upload xong, và đỉnh dùng đĩa có thể tới
+  khoảng ba bản (body của framework, CSV, parquet). Đường 413 chưa được chạy
+  thật trên hệ thống sống.
+- **Chưa có auth**: `require_auth` rỗng, nên `promote`, `upload` và `pipeline/run`
+  mở cho bất kỳ ai tới được cổng 8001.

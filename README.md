@@ -96,5 +96,6 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_serving.ps1
 ## Lưu ý về RAM
 
 Máy 16GB chạy đồng thời Airflow + Postgres + MinIO + MLflow. Khi phát triển,
-đặt `SAMPLE_ROWS=200000` trong `.env` để không load toàn bộ 2 triệu dòng.
-Xoá biến đó khi chạy thật.
+giới hạn số dòng theo từng lần chạy bằng `conf` `{"sample_rows": 200000}` (API,
+dashboard, hoặc "Trigger DAG w/ config" trên Airflow UI) để không load toàn bộ
+2 triệu dòng. Trigger từ Airflow UI mà không kèm config sẽ chạy toàn bộ dòng.
