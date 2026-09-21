@@ -1,10 +1,20 @@
 """Uploading a raw dataset and previewing what is in it.
 
 The source CSV is hundreds of megabytes and the machine running this has
-16GB of RAM and seven other containers on it. Nothing here reads a whole
-upload into memory: it streams to a temporary file, converts it to parquet
-a chunk at a time, uploads with `Storage.upload_file`, and deletes the
-temporary files on every path.
+16GB of RAM and seven other containers on it. Nothing in the handler reads a
+whole upload into memory: it copies the upload to a temporary file, converts
+it to parquet a chunk at a time, uploads with `Storage.upload_file`, and
+deletes its temporary files on every path.
+
+The size cap bounds what this handler copies and converts, which protects RAM
+and CPU and stops it writing a second CSV copy beyond the limit. It does NOT
+bound what the framework receives: FastAPI parses the multipart body before
+the handler or `require_auth` runs, so the whole upload has already arrived
+and been spooled to disk by the time the 413 can fire. Peak disk use for one
+upload is therefore up to about three copies (the framework's spooled body,
+the CSV copy up to the cap, and the parquet), which matters on a nearly full
+C: drive. Bounding reception itself would take a reverse proxy or middleware
+and is deliberately out of scope here.
 
 The conversion and the upload are blocking calls, so they run in a worker
 thread. Only the network read stays on the event loop, which keeps `/health`
@@ -62,10 +72,12 @@ async def upload(
         HTTPException: 422 when the file is not a `.csv`, when the CSV cannot
             be parsed (a malformed row, bytes that are not text), or when it
             has a header but no rows; 413 when it exceeds the cap. The cap
-            exists because this machine has 16GB of RAM and an out-of-memory
-            kill takes the whole stack with it, which is a far worse outcome
-            than a refused upload. A `dataset_version` that does not match
-            the pattern is also a 422, raised by FastAPI before this runs.
+            limits what this handler copies and converts, not what has
+            already been received: the framework has spooled the whole body
+            to disk before the handler starts, so a 413 arrives only after
+            the full upload has (see the module docstring). A
+            `dataset_version` that does not match the pattern is also a 422,
+            raised by FastAPI before this runs.
 
     Example:
         # POST /api/data/upload  (multipart: file=..., dataset_version=v2)
@@ -79,6 +91,9 @@ async def upload(
         csv_path = os.path.join(workdir, "upload.csv")
         parquet_path = os.path.join(workdir, "data.parquet")
 
+        # The cap is enforced on this copy only. The framework has already
+        # spooled the full body to disk, so this stops a second oversized CSV
+        # from being written and an oversized file from being converted.
         written = 0
         with open(csv_path, "wb") as handle:
             while True:
