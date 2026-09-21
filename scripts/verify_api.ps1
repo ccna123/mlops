@@ -1,17 +1,28 @@
 # Verifies Plan 5a (the API layer).
 #
-# Precondition: run from the repo root, with the WHOLE stack up (postgres, minio,
-# mlflow, airflow, serving and the api service) - steps 3 to 6 call the live
+# Preconditions: run from the repo root, with the WHOLE stack up (postgres, minio,
+# mlflow, airflow, serving and the api service) - steps 3 to 9 call the live
 # services. A dependency that is down is a failure here, not a skip.
+#
+# Step 9 also needs the raw dataset `raw/v1/data.parquet` to be in object storage
+# (upload it through POST /api/data/upload or the ingest step of the pipeline). A
+# stack without raw v1 FAILS step 9: the preview is 404 there, and this script
+# cannot tell "not uploaded yet" from "the route is broken".
 #
 # Every step must be able to fail: a curl that cannot connect, an empty body or
 # a wrong value throws. The only thing that is not a failure is a check that has
-# nothing to look at (a model with an empty versions list); it is printed as SKIP
-# and counted separately in the last lines, never as a pass. A payload that is
-# malformed - a model with no `versions` key at all - is a failure, not a skip.
+# nothing to look at (a model with an empty versions list, an Airflow that has
+# never run the pipeline); it is printed as SKIP and counted separately in the
+# last lines, never as a pass. A payload that is malformed - a model with no
+# `versions` key at all - is a failure, not a skip.
+#
+# Steps 7 to 9 each guard a bug that unit tests with mocks let through and the
+# live stack exposed (Task 12): the logs route answered 500 on Airflow's real
+# text/plain log, an unknown run answered 500 instead of 404, and the preview
+# reported every column as 0% missing.
 $ErrorActionPreference = "Stop"
 $api = "http://localhost:8001/api"
-$totalSteps = 6
+$totalSteps = 9
 $stepsPassed = 0
 $modelsChecked = 0
 $skipped = 0
@@ -41,17 +52,17 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     throw "run this script from the repo root: .venv\Scripts\python.exe not found"
 }
 
-Write-Host "== 1/6 Tests on the dev machine ==" -ForegroundColor Cyan
+Write-Host "== 1/9 Tests on the dev machine ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m pytest common/ services/ -q
 if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 $stepsPassed++
 
-Write-Host "== 2/6 Ruff ==" -ForegroundColor Cyan
+Write-Host "== 2/9 Ruff ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m ruff check .
 if ($LASTEXITCODE -ne 0) { throw "ruff failed" }
 $stepsPassed++
 
-Write-Host "== 3/6 Airflow REST accepts basic auth ==" -ForegroundColor Cyan
+Write-Host "== 3/9 Airflow REST accepts basic auth ==" -ForegroundColor Cyan
 $code = Get-HttpCode "http://localhost:8080/api/v1/dags" @("-u", "admin:admin")
 if ($code -ne "200") {
     throw "Airflow REST returned HTTP $code - check AIRFLOW__API__AUTH_BACKENDS includes basic_auth"
@@ -59,7 +70,7 @@ if ($code -ne "200") {
 Write-Host "   HTTP 200"
 $stepsPassed++
 
-Write-Host "== 4/6 /api/health reports exactly the five dependencies ==" -ForegroundColor Cyan
+Write-Host "== 4/9 /api/health reports exactly the five dependencies ==" -ForegroundColor Cyan
 $health = Get-Json "$api/health"
 if (-not $health.services) { throw "/api/health has no services object" }
 $expected = @("airflow", "minio", "mlflow", "postgres", "serving")
@@ -77,7 +88,7 @@ foreach ($name in @("airflow", "mlflow", "minio")) {
 }
 $stepsPassed++
 
-Write-Host "== 5/6 /api/models returns metrics that fit each model's task type ==" -ForegroundColor Cyan
+Write-Host "== 5/9 /api/models returns metrics that fit each model's task type ==" -ForegroundColor Cyan
 $models = Get-Json "$api/models"
 if ($models.PSObject.Properties.Name -notcontains "models") { throw "/api/models has no models list" }
 foreach ($m in @($models.models)) {
@@ -111,10 +122,70 @@ if ($modelsChecked -eq 0) {
     $stepsPassed++
 }
 
-Write-Host "== 6/6 /api/drift/latest ==" -ForegroundColor Cyan
+Write-Host "== 6/9 /api/drift/latest ==" -ForegroundColor Cyan
 $code = Get-HttpCode "$api/drift/latest?model_name=house_price_regressor"
 if ($code -ne "200" -and $code -ne "404") { throw "/api/drift/latest returned HTTP $code, expected 200 or 404" }
 Write-Host "   HTTP $code (404 is valid before monitoring has ever run)"
+$stepsPassed++
+
+Write-Host "== 7/9 the newest run's extract log comes back as lines ==" -ForegroundColor Cyan
+$runList = Get-Json "$api/pipeline/runs"
+if ($runList.PSObject.Properties.Name -notcontains "runs") { throw "/api/pipeline/runs has no runs list" }
+if ($null -eq $runList.runs -or @($runList.runs).Count -eq 0) {
+    # Nothing to read a log from. Not a failure, but not a pass either.
+    Write-Host "   SKIP: Airflow has no pipeline run yet, so there is no log to fetch" -ForegroundColor Yellow
+    $skipped++
+} else {
+    # The API lists runs newest first. Run ids contain ':' and '+' (for example
+    # manual__2026-09-21T03:53:17.127926+00:00), so the id is URL-encoded.
+    $newestRunId = @($runList.runs)[0].run_id
+    if ([string]::IsNullOrWhiteSpace("$newestRunId")) { throw "the newest run in /api/pipeline/runs has no run_id" }
+    $encodedRunId = [uri]::EscapeDataString("$newestRunId")
+    Write-Host "   newest run: $newestRunId"
+    $logs = Get-Json "$api/pipeline/runs/$encodedRunId/logs?stage=extract"
+    if ($logs.PSObject.Properties.Name -notcontains "lines") { throw "the logs response has no lines field" }
+    if ($null -eq $logs.lines -or @($logs.lines).Count -eq 0) {
+        throw "the extract log of run $newestRunId came back with no lines"
+    }
+    Write-Host "   extract log: $(@($logs.lines).Count) lines, truncated = $($logs.truncated)"
+    $stepsPassed++
+}
+
+Write-Host "== 8/9 an unknown run is a 404, not a 500 ==" -ForegroundColor Cyan
+$unknownRunId = "does-not-exist-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+$code = Get-HttpCode "$api/pipeline/runs/$unknownRunId"
+if ($code -ne "404") {
+    throw "GET /api/pipeline/runs/$unknownRunId returned HTTP $code, expected exactly 404"
+}
+Write-Host "   HTTP 404 for $unknownRunId"
+$stepsPassed++
+
+Write-Host "== 9/9 the data preview counts blank cells as missing ==" -ForegroundColor Cyan
+# The raw copy stores a missing cell as an empty string. When the preview counted
+# only nulls, every column of the real dataset read 0% missing. One request only:
+# the preview downloads the whole raw object from MinIO every time.
+$previewUrl = "$api/data/v1/preview?rows=1"
+$previewFile = [System.IO.Path]::GetTempFileName()
+try {
+    $code = curl.exe -s -S --max-time 120 -o $previewFile -w "%{http_code}" $previewUrl
+    if ($LASTEXITCODE -ne 0) { throw "curl could not reach $previewUrl (exit code $LASTEXITCODE)" }
+    if ("$code" -ne "200") {
+        throw "GET $previewUrl returned HTTP $code - raw dataset v1 must be in object storage (see the preconditions at the top of this script)"
+    }
+    $preview = Get-Content -Raw -Encoding UTF8 -LiteralPath $previewFile | ConvertFrom-Json
+} finally {
+    Remove-Item -LiteralPath $previewFile -Force
+}
+if ($preview.PSObject.Properties.Name -notcontains "columns" -or @($preview.columns).Count -eq 0) {
+    throw "the preview of v1 has no columns"
+}
+$withMissing = @($preview.columns | Where-Object { $_.missing_rate -gt 0 })
+if ($withMissing.Count -eq 0) {
+    throw "the preview of v1 reports missing_rate 0 for all $(@($preview.columns).Count) columns - blank cells are not being counted as missing"
+}
+$worst = $withMissing | Sort-Object -Property missing_rate -Descending | Select-Object -First 3
+foreach ($column in $worst) { Write-Host "   $($column.name) missing_rate = $($column.missing_rate)" }
+Write-Host "   $($withMissing.Count) of $(@($preview.columns).Count) columns have missing_rate > 0 (stats_rows = $($preview.stats_rows))"
 $stepsPassed++
 
 Write-Host ""

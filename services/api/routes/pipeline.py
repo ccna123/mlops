@@ -9,9 +9,10 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..clients.airflow import AirflowNotFoundError
 from ..deps import require_auth
 
 router = APIRouter()
@@ -96,13 +97,22 @@ def get_run(request: Request, run_id: str) -> dict:
         `run_id`, `state` and `tasks`. This is what draws the stage strip on
         the overview screen.
 
+    Raises:
+        HTTPException: 404 when Airflow has no run with that id. Nothing else
+            is caught: Airflow being down, refusing the credentials or failing
+            escapes as a 500, because "the run does not exist" and "Airflow is
+            unreachable" call for different reactions from the UI.
+
     Example:
         # GET /api/pipeline/runs/manual__2026-...
         # {"run_id": "...", "state": "running",
         #  "tasks": [{"task_id": "extract", "state": "success",
         #             "try_number": 1, "duration": 12.5}]}
     """
-    return request.app.state.airflow.get_run(DAG_ID, run_id)
+    try:
+        return request.app.state.airflow.get_run(DAG_ID, run_id)
+    except AirflowNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
 
 
 MAX_LOG_LINES = 2000
@@ -172,13 +182,23 @@ def get_logs(
             than relying on this default.
 
     Returns:
-        `lines` and `truncated`.
+        `lines` and `truncated`. The first two or three lines of an unfiltered
+        result are not the task's own output: Airflow prefixes the worker host
+        and a "Found local files" banner.
+
+    Raises:
+        HTTPException: 404 when Airflow has no such run, task or attempt log.
+            Nothing else is caught: Airflow being down, refusing the
+            credentials or failing escapes as a 500.
 
     Example:
         # GET /api/pipeline/runs/manual__.../logs?stage=validate&level=ERROR
         # {"lines": ["[...] ERROR - target source missing in 62% of rows"],
         #  "truncated": false}
     """
-    text = request.app.state.airflow.get_logs(DAG_ID, run_id, stage, try_number)
+    try:
+        text = request.app.state.airflow.get_logs(DAG_ID, run_id, stage, try_number)
+    except AirflowNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
     lines, truncated = filter_log_lines(text, level, q)
     return {"lines": lines, "truncated": truncated}

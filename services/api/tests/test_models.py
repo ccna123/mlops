@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from services.api.app import create_app
@@ -99,3 +100,28 @@ def test_promote_failing_for_another_reason_is_not_a_404():
     response = client.post("/api/models/house_price_regressor/4/promote")
 
     assert response.status_code == 500
+
+
+@pytest.mark.parametrize("version", ["abc", "1.5", "-1", "1a", "%20", "3%0A", "%E0%A5%A7"])
+def test_promote_a_version_that_is_not_a_whole_number_is_422_and_never_reaches_the_registry(
+    version,
+):
+    # MLflow answers a non-numeric version with INVALID_PARAMETER_VALUE, which
+    # used to escape as a 500. "%20" is a blank version, "%0A" a trailing
+    # newline that a lax `$` would let through, and "%E0%A5%A7" the Devanagari
+    # digit one, which a `\d` pattern would accept.
+    registry = FakeRegistry([REGRESSION])
+
+    response = _client(registry).post(f"/api/models/house_price_regressor/{version}/promote")
+
+    assert response.status_code == 422
+    assert registry.promoted == []
+
+
+def test_promote_passes_a_numeric_version_through_exactly_as_written():
+    registry = FakeRegistry([REGRESSION])
+
+    response = _client(registry).post("/api/models/house_price_regressor/3/promote")
+
+    assert response.status_code == 200
+    assert registry.promoted == [("house_price_regressor", "3")]

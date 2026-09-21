@@ -1,6 +1,7 @@
 import asyncio
 import io
 import tempfile
+import warnings
 from types import SimpleNamespace
 
 import pandas as pd
@@ -379,3 +380,83 @@ def test_a_version_the_upload_accepts_is_previewable():
     client.get("/api/data/v1.1/preview")
 
     assert storage.head_calls == [(raw_key("v1.1"), PREVIEW_STATS_ROWS)]
+
+
+# The raw copy keeps a missing cell as "" (the CSV is read as text), so the
+# stats must count blank and whitespace-only strings as missing or every
+# column of the real dataset reads 0% missing.
+BLANK_FRAME = pd.DataFrame(
+    {
+        "property_id": ["p1", "p2", "p3", "p4"],
+        "city": ["boston", "", "   ", "miami"],
+        "bedrooms": ["3", "", "999", "  "],
+        "sale_price": ["$1", "$2", "$3", "$4"],
+    }
+)
+
+
+def _column(body, name):
+    return next(column for column in body["columns"] if column["name"] == name)
+
+
+def test_preview_counts_empty_and_whitespace_only_strings_as_missing():
+    client, _ = _preview_client(BLANK_FRAME)
+    body = client.get("/api/data/v1/preview").json()
+
+    assert _column(body, "city")["missing_rate"] == 2 / 4
+    assert _column(body, "bedrooms")["missing_rate"] == 2 / 4
+
+
+def test_preview_missing_rate_is_zero_for_a_column_with_no_blanks():
+    client, _ = _preview_client(BLANK_FRAME)
+    body = client.get("/api/data/v1/preview").json()
+
+    assert _column(body, "sale_price")["missing_rate"] == 0.0
+    assert _column(body, "property_id")["missing_rate"] == 0.0
+
+
+def test_preview_out_of_bounds_is_not_changed_by_blank_cells():
+    # bedrooms holds "3", "", "999", "  ": only 999 is out of range. A blank
+    # is missing, not "0" and not out of bounds.
+    client, _ = _preview_client(BLANK_FRAME)
+    body = client.get("/api/data/v1/preview").json()
+
+    assert _column(body, "bedrooms")["out_of_bounds"] == 1
+
+
+def test_preview_sample_keeps_the_raw_blank_strings():
+    client, _ = _preview_client(BLANK_FRAME)
+    sample = client.get("/api/data/v1/preview").json()["sample"]
+
+    assert sample[1]["city"] == ""
+    assert sample[2]["city"] == "   "
+    assert sample[1]["bedrooms"] == ""
+
+
+def test_preview_does_not_modify_the_frame_it_was_given():
+    frame = BLANK_FRAME.copy()
+    client, _ = _preview_client(frame)
+    client.get("/api/data/v1/preview")
+
+    pd.testing.assert_frame_equal(frame, BLANK_FRAME)
+
+
+def test_preview_counts_real_nulls_and_blanks_together():
+    frame = pd.DataFrame(
+        {"property_id": ["p1", "p2", "p3", "p4"], "city": ["a", None, "", "\t \n"]}
+    )
+    client, _ = _preview_client(frame)
+    body = client.get("/api/data/v1/preview").json()
+
+    assert _column(body, "city")["missing_rate"] == 3 / 4
+
+
+def test_preview_of_a_column_that_is_blank_throughout_is_fully_missing_without_warnings():
+    frame = pd.DataFrame({"property_id": ["p1", "p2"], "city": ["", "  "]})
+    client, _ = _preview_client(frame)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        body = client.get("/api/data/v1/preview").json()
+
+    assert _column(body, "city")["missing_rate"] == 1.0

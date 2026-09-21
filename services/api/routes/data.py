@@ -27,6 +27,7 @@ import os
 import tempfile
 from typing import Annotated
 
+import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
@@ -55,6 +56,10 @@ DEFAULT_PREVIEW_ROWS = 50
 # stage takes for `sample_rows`, so the preview looks at the same kind of data
 # a development run trains on.
 PREVIEW_STATS_ROWS = 200_000
+
+# What `pd.api.types.infer_dtype` reports for a column the `.str` accessor can
+# read (it is also the set the accessor itself accepts, less "empty").
+TEXT_DTYPES = ("string", "mixed", "mixed-integer")
 
 
 @router.post("/data/upload", dependencies=[Depends(require_auth)])
@@ -146,6 +151,44 @@ async def upload(
         }
 
 
+def _blank_strings_as_missing(frame: pd.DataFrame) -> pd.DataFrame:
+    """Views a raw frame with empty and whitespace-only strings as missing.
+
+    The raw copy stores a missing CSV cell as "" because every column is read
+    as text, so `ml_common.validation`, which counts only nulls, would report
+    every column as complete. The stats are computed on this view instead.
+
+    Only columns that actually contain a blank get a new array. Every other
+    column is shared with `frame`, and the new arrays reuse the same string
+    objects, so this costs a few megabytes on a 200,000-row frame rather than
+    a second copy of it.
+
+    Args:
+        frame: the raw frame. Not modified.
+
+    Returns:
+        A frame with the same index and columns in which every cell that is
+        empty or only whitespace is None. Columns that are not text (nothing
+        for `.str` to strip) are left as they are.
+
+    Example:
+        # city: ["boston", "", "   ", None]  ->  ["boston", None, None, None]
+        # bedrooms: [3.0, nan]               ->  unchanged
+    """
+    view = frame.copy(deep=False)
+    for name in view.columns:
+        column = view[name]
+        if pd.api.types.infer_dtype(column, skipna=True) not in TEXT_DTYPES:
+            continue
+        blank = column.str.strip().eq("").fillna(False).to_numpy(dtype=bool)
+        if not blank.any():
+            continue
+        values = column.to_numpy(dtype=object, copy=True)
+        values[blank] = None
+        view[name] = pd.Series(values, index=column.index, dtype=object)
+    return view
+
+
 @router.get("/data/{dataset_version}/preview", dependencies=[Depends(require_auth)])
 def preview(
     request: Request,
@@ -175,13 +218,17 @@ def preview(
         `total_rows` (the exact row count of the whole file, from the parquet
         footer), `stats_rows` (how many rows the column stats were computed
         on: `min(total_rows, PREVIEW_STATS_ROWS)`, so the UI can say "stats
-        from the first N of M rows"), `sample` (a list of row dicts, missing
-        values as null) and `columns`, each with `name`, `kind`,
-        `missing_rate` and `out_of_bounds`, sorted by name. `stats_rows` is an
-        addition to the `{columns, sample, total_rows}` shape of the spec. The
-        stats come from `ml_common.validation`, the same code the validate
-        stage runs, so the dashboard and the pipeline cannot disagree about
-        how dirty the data is.
+        from the first N of M rows"), `sample` (a list of row dicts exactly as
+        stored: every value a string, and a missing cell is the empty string
+        "", not null) and `columns`, each with `name`, `kind`, `missing_rate`
+        and `out_of_bounds`, sorted by name. `stats_rows` is an addition to
+        the `{columns, sample, total_rows}` shape of the spec. The stats are
+        computed by `ml_common.validation`, the same code the validate stage
+        runs, with one difference: here an empty or whitespace-only string
+        counts as missing in `missing_rate`, because that is how the raw copy
+        stores a missing cell. The validate stage counts only nulls, so on the
+        same raw data its `missing_rate` can read lower than this one.
+        `out_of_bounds` is unaffected by the difference.
 
     Raises:
         HTTPException: 404 when that dataset version has not been uploaded.
@@ -192,7 +239,8 @@ def preview(
     Example:
         # GET /api/data/v1/preview?rows=50
         # -> {"total_rows": 2000000, "stats_rows": 200000,
-        #     "sample": [{"property_id": "p1", "city": "  NEW YORK ", ...}],
+        #     "sample": [{"property_id": "p1", "city": "  NEW YORK ",
+        #                 "hoa_fee_monthly": "", ...}],
         #     "columns": [{"name": "bedrooms", "kind": "numeric",
         #                  "missing_rate": 0.031, "out_of_bounds": 87}]}
     """
@@ -205,7 +253,8 @@ def preview(
             status_code=404, detail=f"no dataset at version {dataset_version}"
         ) from error
 
-    report = validate_dataframe(head, "regression")
+    # Blanks count as missing in the stats only; `sample` below stays raw.
+    report = validate_dataframe(_blank_strings_as_missing(head), "regression")
 
     # NaN is not valid JSON, and the response encoder raises on it. Turn every
     # missing value into None; astype(object) first so a float column can

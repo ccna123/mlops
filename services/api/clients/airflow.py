@@ -17,6 +17,16 @@ import httpx
 DEFAULT_TIMEOUT = 30.0
 
 
+class AirflowNotFoundError(Exception):
+    """Airflow does not know the run (or the task log) that was asked for.
+
+    The one failure the run routes turn into a 404. Anything else Airflow or
+    the network does (unreachable, 401, 5xx) is not "not found" and must not
+    be reported as such - a dead Airflow and a missing run call for different
+    reactions from the UI.
+    """
+
+
 class AirflowClient:
     """A thin, normalising wrapper over the Airflow REST API.
 
@@ -42,29 +52,59 @@ class AirflowClient:
         self._auth = (username, password)
         self._http = http if http is not None else httpx.Client(timeout=DEFAULT_TIMEOUT)
 
-    def _call(self, method: str, path: str, **kwargs) -> dict:
-        """Makes one authenticated request and returns the decoded body.
+    def _send(self, method: str, path: str, not_found_message: str | None = None, **kwargs):
+        """Makes one authenticated request and returns the raw response.
 
         Args:
             method: "GET" or "POST".
             path: path below the API root, starting with "/".
+            not_found_message: what to say when Airflow answers 404. None
+                leaves a 404 as the generic HTTP error, which is right for
+                endpoints where 404 means something other than "that run does
+                not exist" (a missing DAG, say).
+            **kwargs: passed through to the HTTP client.
+
+        Returns:
+            The response, whose status is known to be 2xx.
+
+        Raises:
+            AirflowNotFoundError: on a 404, only when `not_found_message` was
+                given.
+            Exception: whatever the HTTP client raises for any other non-2xx
+                status, or for a connection failure. Errors are not swallowed
+                here - a route that cannot reach Airflow must say so rather
+                than return an empty list that looks like "nothing has run
+                yet".
+
+        Example:
+            self._send("GET", "/dags/ml_pipeline/dagRuns/r1", "no run r1")
+        """
+        response = self._http.request(method, f"{self._base}{path}", auth=self._auth, **kwargs)
+        if response.status_code == 404 and not_found_message is not None:
+            raise AirflowNotFoundError(not_found_message)
+        response.raise_for_status()
+        return response
+
+    def _call(self, method: str, path: str, not_found_message: str | None = None, **kwargs) -> dict:
+        """Makes one authenticated request and returns the decoded JSON body.
+
+        Args:
+            method: "GET" or "POST".
+            path: path below the API root, starting with "/".
+            not_found_message: see `_send`.
             **kwargs: passed through to the HTTP client.
 
         Returns:
             The decoded JSON body.
 
         Raises:
-            Exception: whatever the HTTP client raises for a non-2xx status.
-                Errors are not swallowed here - a route that cannot reach
-                Airflow must say so rather than return an empty list that
-                looks like "nothing has run yet".
+            AirflowNotFoundError: see `_send`.
+            Exception: see `_send`.
 
         Example:
             self._call("GET", "/dags/ml_pipeline/dagRuns", params={"limit": 5})
         """
-        response = self._http.request(method, f"{self._base}{path}", auth=self._auth, **kwargs)
-        response.raise_for_status()
-        return response.json()
+        return self._send(method, path, not_found_message, **kwargs).json()
 
     def trigger_run(self, dag_id: str, conf: dict) -> dict:
         """Starts a DAG run and returns its identifier.
@@ -136,16 +176,20 @@ class AirflowClient:
             task is still running).
 
         Raises:
-            Exception: when the run does not exist. Returning an empty task
-                list instead would look like a run that did nothing.
+            AirflowNotFoundError: when Airflow has no such run. Returning an
+                empty task list instead would look like a run that did nothing.
+            Exception: any other failure (Airflow unreachable, 401, 5xx) is
+                left to propagate, so a dead Airflow is not read as a missing
+                run.
 
         Example:
             get_run("ml_pipeline", "manual__2026-09-20T10:00:00+00:00")
             # -> {"run_id": "...", "state": "running",
             #     "tasks": [{"task_id": "extract", "state": "success", ...}]}
         """
-        run = self._call("GET", f"/dags/{dag_id}/dagRuns/{run_id}")
-        instances = self._call("GET", f"/dags/{dag_id}/dagRuns/{run_id}/taskInstances")
+        missing = f"no run {run_id!r} in DAG {dag_id!r}"
+        run = self._call("GET", f"/dags/{dag_id}/dagRuns/{run_id}", missing)
+        instances = self._call("GET", f"/dags/{dag_id}/dagRuns/{run_id}/taskInstances", missing)
         return {
             "run_id": run["dag_run_id"],
             "state": run["state"],
@@ -163,6 +207,12 @@ class AirflowClient:
     def get_logs(self, dag_id: str, run_id: str, task_id: str, try_number: int) -> str:
         """Fetches the log of one task attempt.
 
+        Asks for `text/plain` and reads the body as text. Airflow 2.10 answers
+        a default `Accept: */*` with text/plain anyway, so parsing that as JSON
+        raises; and `Accept: application/json` gives a JSON envelope whose
+        `content` is the Python repr of a list of (host, text) tuples, which is
+        no use as a log. Plain text is the one form that arrives as real lines.
+
         Args:
             dag_id: the DAG the run belongs to.
             run_id: the run identifier.
@@ -170,21 +220,27 @@ class AirflowClient:
             try_number: which attempt; Airflow numbers them from 1.
 
         Returns:
-            The log as one block of text. Splitting and filtering happen in
-            the route, so this stays a transport concern.
+            The log as one block of text, the first line being the worker host
+            and the rest the task's own lines. Splitting and filtering happen
+            in the route, so this stays a transport concern.
 
         Raises:
-            KeyError: when Airflow's response has no "content" field. Left
-                to propagate rather than papered over with a default - an
-                empty string here would be indistinguishable from a task
-                that genuinely logged nothing.
+            AirflowNotFoundError: when Airflow has no such run, task or
+                attempt log. An empty string here would be indistinguishable
+                from a task that genuinely logged nothing.
+            Exception: any other failure (Airflow unreachable, 401, 5xx) is
+                left to propagate.
 
         Example:
             get_logs("ml_pipeline", "manual__...", "extract", 1)
-            # -> "[2026-09-20 10:00:01] INFO - raw=raw/v1/data.parquet ..."
+            # -> line 1 is the worker host ("e59fd8ef0e61"), then the
+            #    "*** Found local files:" banner, then the task's own lines:
+            #    "[2026-09-20T10:00:01.000+0000] {docker.py:438} INFO - raw=raw/v1/..."
         """
-        body = self._call(
+        response = self._send(
             "GET",
             f"/dags/{dag_id}/dagRuns/{run_id}/taskInstances/{task_id}/logs/{try_number}",
+            f"no log for task {task_id!r}, attempt {try_number}, of run {run_id!r}",
+            headers={"Accept": "text/plain"},
         )
-        return body["content"]
+        return response.text

@@ -1,6 +1,10 @@
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from services.api.app import create_app
+from services.api.clients.airflow import AirflowClient
+from services.api.tests.test_airflow_client import REAL_LOG_LINES, REAL_LOG_TEXT
 
 
 class FakeAirflow:
@@ -216,3 +220,110 @@ def test_logs_report_truncation_rather_than_hiding_it():
 def test_logs_require_a_stage():
     response = _client(FakeAirflowLogs()).get("/api/pipeline/runs/r1/logs")
     assert response.status_code == 422
+
+
+def _real_airflow(handler):
+    """The real AirflowClient over a scripted transport: real httpx, no network."""
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    return AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
+
+
+def _logs_handler(seen):
+    """Plays Airflow's log endpoint, recording each request's Accept header."""
+
+    def handler(request):
+        seen.append(request.headers["accept"])
+        if request.headers["accept"] == "application/json":
+            content = repr([("e59fd8ef0e61", REAL_LOG_TEXT)])
+            return httpx.Response(200, json={"content": content, "continuation_token": None})
+        return httpx.Response(200, text=REAL_LOG_TEXT, headers={"content-type": "text/plain"})
+
+    return handler
+
+
+def test_logs_route_returns_the_lines_of_a_real_text_plain_airflow_log():
+    seen = []
+    client = _client(_real_airflow(_logs_handler(seen)))
+
+    response = client.get("/api/pipeline/runs/r1/logs?stage=extract")
+
+    assert response.status_code == 200
+    assert response.json() == {"lines": REAL_LOG_LINES, "truncated": False}
+    assert seen == ["text/plain"]
+
+
+def test_logs_route_filters_real_airflow_lines_by_level():
+    client = _client(_real_airflow(_logs_handler([])))
+
+    info = client.get("/api/pipeline/runs/r1/logs?stage=extract&level=INFO").json()["lines"]
+    warning = client.get("/api/pipeline/runs/r1/logs?stage=extract&level=WARNING").json()["lines"]
+
+    # The host line, the "Found local files" banner and the WARNING line are
+    # not INFO. "DeprecationWarning" inside the WARNING line is not a level.
+    assert info == [line for line in REAL_LOG_LINES if " INFO - " in line]
+    assert len(info) == 4
+    assert warning == [line for line in REAL_LOG_LINES if " WARNING - " in line]
+    assert len(warning) == 1
+
+
+def test_logs_route_searches_real_airflow_lines_by_keyword():
+    client = _client(_real_airflow(_logs_handler([])))
+
+    body = client.get("/api/pipeline/runs/r1/logs?stage=extract&q=fingerprint").json()
+
+    assert len(body["lines"]) == 1
+    assert body["lines"][0].endswith(
+        'XCOM_RESULT {"fingerprint": "3b318b364660175f", "row_count": 1000}'
+    )
+    assert body["truncated"] is False
+
+
+def _not_found(request):
+    return httpx.Response(404, json={"detail": "not found", "status": 404})
+
+
+def _server_error(request):
+    return httpx.Response(500, text="boom")
+
+
+def _unauthorized(request):
+    return httpx.Response(401, json={"detail": None, "status": 401})
+
+
+def _unreachable(request):
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+RUN_PATHS = [
+    "/api/pipeline/runs/does-not-exist",
+    "/api/pipeline/runs/does-not-exist/logs?stage=extract",
+]
+
+
+@pytest.mark.parametrize("path", RUN_PATHS)
+def test_a_run_airflow_does_not_know_is_404_with_a_message(path):
+    response = _client(_real_airflow(_not_found)).get(path)
+
+    assert response.status_code == 404
+    assert "does-not-exist" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("path", RUN_PATHS)
+@pytest.mark.parametrize(
+    "handler", [_server_error, _unauthorized, _unreachable], ids=["5xx", "401", "unreachable"]
+)
+def test_airflow_failing_for_another_reason_is_a_500_not_a_404(handler, path):
+    # A dead Airflow and a missing run must stay distinguishable.
+    client = TestClient(create_app(airflow=_real_airflow(handler)), raise_server_exceptions=False)
+
+    assert client.get(path).status_code == 500
+
+
+def test_a_404_from_airflow_on_the_list_and_trigger_routes_is_still_a_500():
+    # Those two routes have no "unknown run" to report: a 404 from Airflow
+    # there means the DAG is missing, which is a server-side problem.
+    app = create_app(airflow=_real_airflow(_not_found))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    assert client.get("/api/pipeline/runs").status_code == 500
+    assert client.post("/api/pipeline/run", json={"task_type": "regression"}).status_code == 500
