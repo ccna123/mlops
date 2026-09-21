@@ -38,6 +38,15 @@ class RegistryNotFoundError(Exception):
     """
 
 
+class RegistryConflictError(Exception):
+    """The request is well formed but the Registry's current state refuses it.
+
+    Raised when deleting the version that currently holds the champion alias.
+    The routes turn this into a 409, which is neither "does not exist" (404)
+    nor "malformed" (422): the caller has to promote another version first.
+    """
+
+
 def _is_missing_alias(err: MlflowException) -> bool:
     """Tells "this model has no champion alias" from a genuine failure.
 
@@ -197,6 +206,44 @@ class RegistryClient:
                 raise RegistryNotFoundError(str(err)) from err
             raise
         return {"name": name, "version": version, "alias": CHAMPION_ALIAS}
+
+    def delete_version(self, name: str, version: str) -> dict:
+        """Deletes one model version, refusing the current champion.
+
+        Args:
+            name: the registered model.
+            version: the version to delete.
+
+        Returns:
+            `name`, `version` and `deleted`.
+
+        Raises:
+            RegistryConflictError: when `version` currently holds the champion
+                alias. serving resolves that alias to load its model, so
+                deleting it would break the next reload with no way back -
+                promote another version first. Checked before MLflow is
+                called, because the delete cannot be undone.
+            RegistryNotFoundError: when the model or version does not exist.
+            MlflowException: any other MLflow failure, left to propagate so an
+                outage is not mistaken for an already-deleted version.
+
+        Example:
+            delete_version("house_price_regressor", "2")
+            # -> {"name": "house_price_regressor", "version": "2",
+            #     "deleted": True}
+        """
+        if self._champion_version(name) == version:
+            raise RegistryConflictError(
+                f"cannot delete: version {version} of {name} is the champion; "
+                "promote another version first"
+            )
+        try:
+            self._client.delete_model_version(name, version)
+        except MlflowException as err:
+            if err.error_code == NOT_FOUND_CODE:
+                raise RegistryNotFoundError(str(err)) from err
+            raise
+        return {"name": name, "version": version, "deleted": True}
 
     def _champion_version(self, name: str) -> str | None:
         """Finds which version of a model currently holds the champion alias.

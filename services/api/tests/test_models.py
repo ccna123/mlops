@@ -2,14 +2,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from services.api.app import create_app
-from services.api.clients.registry import RegistryNotFoundError
+from services.api.clients.registry import RegistryConflictError, RegistryNotFoundError
 
 
 class FakeRegistry:
-    def __init__(self, models=None, promote_error=None):
+    def __init__(self, models=None, promote_error=None, delete_error=None):
         self.models = models if models is not None else []
         self.promote_error = promote_error
+        self.delete_error = delete_error
         self.promoted = []
+        self.deleted = []
 
     def list_models(self):
         return self.models
@@ -19,6 +21,12 @@ class FakeRegistry:
             raise self.promote_error
         self.promoted.append((name, version))
         return {"name": name, "version": version, "alias": "champion"}
+
+    def delete_version(self, name, version):
+        if self.delete_error:
+            raise self.delete_error
+        self.deleted.append((name, version))
+        return {"name": name, "version": version, "deleted": True}
 
 
 def _client(registry):
@@ -125,3 +133,54 @@ def test_promote_passes_a_numeric_version_through_exactly_as_written():
 
     assert response.status_code == 200
     assert registry.promoted == [("house_price_regressor", "3")]
+
+
+def test_delete_removes_one_version():
+    registry = FakeRegistry([REGRESSION])
+
+    response = _client(registry).delete("/api/models/house_price_regressor/2")
+
+    assert response.status_code == 200
+    assert registry.deleted == [("house_price_regressor", "2")]
+
+
+def test_deleting_the_champion_is_refused_with_409():
+    # serving loads whatever holds the champion alias. Deleting it would leave
+    # serving unable to load a model on its next reload, so the registry
+    # refuses and the caller has to promote another version first.
+    registry = FakeRegistry(
+        [REGRESSION], delete_error=RegistryConflictError("version 3 is the champion")
+    )
+
+    response = _client(registry).delete("/api/models/house_price_regressor/3")
+
+    assert response.status_code == 409
+    assert "champion" in response.json()["detail"]
+
+
+def test_delete_a_version_that_does_not_exist_is_404():
+    registry = FakeRegistry([], delete_error=RegistryNotFoundError("no such version"))
+
+    response = _client(registry).delete("/api/models/house_price_regressor/99")
+
+    assert response.status_code == 404
+
+
+def test_delete_failing_for_another_reason_is_not_a_404():
+    # MLflow being down must not read as "that version is already gone".
+    registry = FakeRegistry([], delete_error=RuntimeError("mlflow down"))
+    client = TestClient(create_app(registry=registry), raise_server_exceptions=False)
+
+    response = client.delete("/api/models/house_price_regressor/4")
+
+    assert response.status_code == 500
+
+
+@pytest.mark.parametrize("version", ["abc", "1.5", "-1", "1a", "%20", "3%0A", "%E0%A5%A7"])
+def test_delete_a_version_that_is_not_a_whole_number_is_422_and_never_reaches_the_registry(version):
+    registry = FakeRegistry([REGRESSION])
+
+    response = _client(registry).delete(f"/api/models/house_price_regressor/{version}")
+
+    assert response.status_code == 422
+    assert registry.deleted == []

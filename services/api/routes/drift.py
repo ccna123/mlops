@@ -10,6 +10,38 @@ router = APIRouter()
 
 DEFAULT_HISTORY_LIMIT = 20
 
+# monitoring_dag fans out to one task per task_type on its own, so a run
+# covers every model at once and there is nothing per-model to pass in.
+MONITORING_DAG_ID = "monitoring_dag"
+
+
+@router.post("/drift/run", dependencies=[Depends(require_auth)])
+def run_monitoring(request: Request) -> dict:
+    """Queues a monitoring run that recomputes drift for every model.
+
+    Takes no parameters: `monitoring_dag` builds one task per task_type
+    itself, so a run always covers both models.
+
+    Args:
+        request: the FastAPI request.
+
+    Returns:
+        `run_id`, `dag_id` and `state`, as soon as Airflow has queued the run.
+        The report is not ready yet at that point - the caller polls
+        `/drift/latest` afterwards.
+
+    Raises:
+        Exception: an Airflow failure escapes as a 500. Note that a queued run
+            only starts if `monitoring_dag` is unpaused; this endpoint cannot
+            tell the difference and neither can the response.
+
+    Example:
+        # POST /api/drift/run
+        # -> {"run_id": "manual__2026-09-21T11:20:00+00:00",
+        #     "dag_id": "monitoring_dag", "state": "queued"}
+    """
+    return request.app.state.airflow.trigger_run(MONITORING_DAG_ID, {})
+
 
 @router.get("/drift/latest", dependencies=[Depends(require_auth)])
 def latest(request: Request, model_name: str) -> dict:

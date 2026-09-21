@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 
-from ..clients.registry import RegistryNotFoundError
+from ..clients.registry import RegistryConflictError, RegistryNotFoundError
 from ..deps import require_auth
 
 router = APIRouter()
@@ -76,3 +76,42 @@ def promote(
         return request.app.state.registry.promote(name, version)
     except RegistryNotFoundError as err:
         raise HTTPException(status_code=404, detail=f"cannot promote: {err}") from err
+
+
+@router.delete("/models/{name}/{version}", dependencies=[Depends(require_auth)])
+def delete_version(
+    request: Request,
+    name: str,
+    version: Annotated[str, Path(pattern=VERSION_PATTERN)],
+) -> dict:
+    """Deletes one version of a registered model.
+
+    Args:
+        request: the FastAPI request.
+        name: the registered model.
+        version: the version to delete, digits only (e.g. "2").
+
+    Returns:
+        `name`, `version` and `deleted`.
+
+    Raises:
+        HTTPException: 422 when `version` is not made of digits only - raised
+            by FastAPI before this runs. 404 when the model or version does
+            not exist. 409 when the version currently holds the champion
+            alias: serving loads the model by that alias, so the caller has to
+            promote another version first. This delete is permanent and has no
+            undo, so the UI must confirm before calling it.
+        Exception: any other failure - MLflow down, a timeout - escapes as a
+            500, so an outage never reads as "already deleted".
+
+    Example:
+        # DELETE /api/models/house_price_regressor/2
+        # -> {"name": "house_price_regressor", "version": "2",
+        #     "deleted": true}
+    """
+    try:
+        return request.app.state.registry.delete_version(name, version)
+    except RegistryNotFoundError as err:
+        raise HTTPException(status_code=404, detail=f"cannot delete: {err}") from err
+    except RegistryConflictError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err

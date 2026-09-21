@@ -9,7 +9,11 @@ from mlflow.protos.databricks_pb2 import (
     RESOURCE_DOES_NOT_EXIST,
 )
 
-from services.api.clients.registry import RegistryClient, RegistryNotFoundError
+from services.api.clients.registry import (
+    RegistryClient,
+    RegistryConflictError,
+    RegistryNotFoundError,
+)
 
 REGRESSOR = "house_price_regressor"
 
@@ -29,6 +33,7 @@ class FakeMlflowClient:
         alias_error=None,
         set_alias_error=None,
         model_names=(REGRESSOR,),
+        delete_error=None,
     ):
         self.versions = versions if versions is not None else []
         self.runs = runs if runs is not None else {}
@@ -36,8 +41,10 @@ class FakeMlflowClient:
         self.alias_error = alias_error
         self.set_alias_error = set_alias_error
         self.model_names = model_names
+        self.delete_error = delete_error
         self.alias_calls = []
         self.calls = []
+        self.deleted = []
 
     def search_registered_models(self, max_results=None):
         self.calls.append(("search_registered_models", {"max_results": max_results}))
@@ -65,6 +72,11 @@ class FakeMlflowClient:
         if self.set_alias_error:
             raise self.set_alias_error
         self.alias_calls.append((name, alias, version))
+
+    def delete_model_version(self, name, version):
+        if self.delete_error:
+            raise self.delete_error
+        self.deleted.append((name, version))
 
 
 def _version(number, created_ms=1_000):
@@ -208,3 +220,52 @@ def test_ping_lets_an_mlflow_failure_propagate():
 
     with pytest.raises(MlflowException, match="connection refused"):
         RegistryClient(client=Unreachable()).ping()
+
+
+def test_delete_version_removes_a_version_that_is_not_the_champion():
+    fake = FakeMlflowClient(champion="3")
+
+    RegistryClient(client=fake).delete_version(REGRESSOR, "2")
+
+    assert fake.deleted == [(REGRESSOR, "2")]
+
+
+def test_delete_version_refuses_the_champion_and_never_calls_mlflow():
+    # serving resolves the champion alias to load its model. Deleting that
+    # version would break the next reload, so this has to be refused before
+    # MLflow is asked - an "oops" here is not recoverable.
+    fake = FakeMlflowClient(champion="3")
+
+    with pytest.raises(RegistryConflictError, match="champion"):
+        RegistryClient(client=fake).delete_version(REGRESSOR, "3")
+
+    assert fake.deleted == []
+
+
+def test_delete_version_works_when_the_model_has_no_champion_at_all():
+    fake = FakeMlflowClient(champion=None)
+
+    RegistryClient(client=fake).delete_version(REGRESSOR, "1")
+
+    assert fake.deleted == [(REGRESSOR, "1")]
+
+
+def test_delete_version_maps_a_missing_version_to_registry_not_found():
+    fake = FakeMlflowClient(
+        champion="3",
+        delete_error=MlflowException("not found", error_code=RESOURCE_DOES_NOT_EXIST),
+    )
+
+    with pytest.raises(RegistryNotFoundError):
+        RegistryClient(client=fake).delete_version(REGRESSOR, "2")
+
+
+def test_delete_version_lets_an_outage_propagate_instead_of_reading_as_missing():
+    fake = FakeMlflowClient(
+        champion="3", delete_error=MlflowException("mlflow down", error_code=INTERNAL_ERROR)
+    )
+
+    with pytest.raises(MlflowException) as caught:
+        RegistryClient(client=fake).delete_version(REGRESSOR, "2")
+
+    assert not isinstance(caught.value, RegistryNotFoundError)

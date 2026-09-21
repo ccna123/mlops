@@ -310,3 +310,37 @@ def test_latest_client_returns_none_only_for_a_missing_key_and_propagates_the_re
     assert missing.latest(REGRESSOR) is None
     with pytest.raises(RuntimeError, match="unreachable"):
         broken.latest(REGRESSOR)
+
+
+class FakeAirflow:
+    """Stands in for AirflowClient, recording which DAG the route triggered."""
+
+    def __init__(self):
+        self.triggered = []
+
+    def trigger_run(self, dag_id, conf):
+        self.triggered.append((dag_id, conf))
+        return {"run_id": "manual__2026", "dag_id": dag_id, "state": "queued"}
+
+
+def test_drift_run_triggers_the_monitoring_dag():
+    airflow = FakeAirflow()
+
+    response = TestClient(create_app(airflow=airflow)).post("/api/drift/run")
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "manual__2026"
+    assert airflow.triggered == [("monitoring_dag", {})]
+
+
+def test_drift_run_monitors_every_model_so_it_takes_no_model_name():
+    # monitoring_dag fans out to one task per task_type on its own, so there is
+    # no per-model parameter to pass - a model_name here would be a lie.
+    airflow = FakeAirflow()
+
+    response = TestClient(create_app(airflow=airflow)).post(
+        "/api/drift/run", json={"model_name": REGRESSOR}
+    )
+
+    assert response.status_code == 200
+    assert airflow.triggered == [("monitoring_dag", {})]
