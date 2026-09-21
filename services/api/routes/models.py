@@ -115,3 +115,35 @@ def delete_version(
         raise HTTPException(status_code=404, detail=f"cannot delete: {err}") from err
     except RegistryConflictError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
+
+
+@router.delete("/models/{name}", dependencies=[Depends(require_auth)])
+def delete_model(request: Request, name: str) -> dict:
+    """Deletes a registered model with all of its versions.
+
+    Args:
+        request: the FastAPI request.
+        name: the registered model to delete.
+
+    Returns:
+        `name` and `deleted`.
+
+    Raises:
+        HTTPException: 404 when no such registered model exists.
+        Exception: any other failure escapes as a 500, so an outage never
+            reads as "already deleted".
+
+    Note:
+        There is no champion guard here, unlike deleting a single version:
+        taking the champion along is what deleting a model means. serving
+        keeps answering from the model already in memory until its next
+        reload or restart, and answers 503 "no champion loaded" after that.
+
+    Example:
+        # DELETE /api/models/house_price_regressor
+        # -> {"name": "house_price_regressor", "deleted": true}
+    """
+    try:
+        return request.app.state.registry.delete_model(name)
+    except RegistryNotFoundError as err:
+        raise HTTPException(status_code=404, detail=f"cannot delete: {err}") from err

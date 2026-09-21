@@ -12,6 +12,7 @@ class FakeRegistry:
         self.delete_error = delete_error
         self.promoted = []
         self.deleted = []
+        self.deleted_models = []
 
     def list_models(self):
         return self.models
@@ -27,6 +28,12 @@ class FakeRegistry:
             raise self.delete_error
         self.deleted.append((name, version))
         return {"name": name, "version": version, "deleted": True}
+
+    def delete_model(self, name):
+        if self.delete_error:
+            raise self.delete_error
+        self.deleted_models.append(name)
+        return {"name": name, "deleted": True}
 
 
 def _client(registry):
@@ -184,3 +191,41 @@ def test_delete_a_version_that_is_not_a_whole_number_is_422_and_never_reaches_th
 
     assert response.status_code == 422
     assert registry.deleted == []
+
+
+def test_delete_model_removes_the_whole_registered_model():
+    registry = FakeRegistry([REGRESSION])
+
+    response = _client(registry).delete("/api/models/house_price_regressor")
+
+    assert response.status_code == 200
+    assert registry.deleted_models == ["house_price_regressor"]
+
+
+def test_delete_model_is_allowed_even_though_it_takes_the_champion_with_it():
+    # Deleting one champion VERSION is refused because it strands a model with
+    # versions and no champion. Deleting the whole model is a different
+    # intention with a coherent outcome: the model is simply gone, and serving
+    # answers 503 "no champion loaded" until something is trained again.
+    registry = FakeRegistry([REGRESSION])
+
+    response = _client(registry).delete("/api/models/house_price_regressor")
+
+    assert response.status_code == 200
+
+
+def test_delete_a_model_that_does_not_exist_is_404():
+    registry = FakeRegistry([], delete_error=RegistryNotFoundError("no such model"))
+
+    response = _client(registry).delete("/api/models/no_such_model")
+
+    assert response.status_code == 404
+
+
+def test_delete_model_failing_for_another_reason_is_not_a_404():
+    registry = FakeRegistry([], delete_error=RuntimeError("mlflow down"))
+    client = TestClient(create_app(registry=registry), raise_server_exceptions=False)
+
+    response = client.delete("/api/models/house_price_regressor")
+
+    assert response.status_code == 500

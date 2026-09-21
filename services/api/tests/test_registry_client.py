@@ -45,6 +45,7 @@ class FakeMlflowClient:
         self.alias_calls = []
         self.calls = []
         self.deleted = []
+        self.deleted_models = []
 
     def search_registered_models(self, max_results=None):
         self.calls.append(("search_registered_models", {"max_results": max_results}))
@@ -77,6 +78,11 @@ class FakeMlflowClient:
         if self.delete_error:
             raise self.delete_error
         self.deleted.append((name, version))
+
+    def delete_registered_model(self, name):
+        if self.delete_error:
+            raise self.delete_error
+        self.deleted_models.append(name)
 
 
 def _version(number, created_ms=1_000):
@@ -258,6 +264,25 @@ def test_delete_version_maps_a_missing_version_to_registry_not_found():
 
     with pytest.raises(RegistryNotFoundError):
         RegistryClient(client=fake).delete_version(REGRESSOR, "2")
+
+
+def test_delete_model_removes_the_registered_model_champion_and_all():
+    # No champion check here, unlike delete_version: taking the champion with
+    # it is the whole point of deleting a model.
+    fake = FakeMlflowClient(champion="3")
+
+    RegistryClient(client=fake).delete_model(REGRESSOR)
+
+    assert fake.deleted_models == [REGRESSOR]
+
+
+def test_delete_model_maps_a_missing_model_to_registry_not_found():
+    fake = FakeMlflowClient(
+        delete_error=MlflowException("not found", error_code=RESOURCE_DOES_NOT_EXIST)
+    )
+
+    with pytest.raises(RegistryNotFoundError):
+        RegistryClient(client=fake).delete_model(REGRESSOR)
 
 
 def test_delete_version_lets_an_outage_propagate_instead_of_reading_as_missing():

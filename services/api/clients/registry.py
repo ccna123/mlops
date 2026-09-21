@@ -245,6 +245,39 @@ class RegistryClient:
             raise
         return {"name": name, "version": version, "deleted": True}
 
+    def delete_model(self, name: str) -> dict:
+        """Deletes a registered model with every version and alias it has.
+
+        Unlike `delete_version` there is no champion check: removing the
+        champion is the point. What is left afterwards is coherent - the model
+        is simply gone - whereas deleting the champion version alone would
+        strand a model that still has versions but nothing to serve.
+
+        Args:
+            name: the registered model.
+
+        Returns:
+            `name` and `deleted`.
+
+        Raises:
+            RegistryNotFoundError: when no such registered model exists.
+            MlflowException: any other MLflow failure, left to propagate so an
+                outage is not mistaken for an already-deleted model.
+
+        Example:
+            delete_model("house_price_regressor")
+            # -> {"name": "house_price_regressor", "deleted": True}
+            # serving answers 503 "no champion loaded" for that task type from
+            # its next reload or restart on.
+        """
+        try:
+            self._client.delete_registered_model(name)
+        except MlflowException as err:
+            if err.error_code == NOT_FOUND_CODE:
+                raise RegistryNotFoundError(str(err)) from err
+            raise
+        return {"name": name, "deleted": True}
+
     def _champion_version(self, name: str) -> str | None:
         """Finds which version of a model currently holds the champion alias.
 
