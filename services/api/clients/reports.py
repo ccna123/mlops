@@ -10,6 +10,8 @@ bucket is laid out. Nothing here builds or parses a path itself.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from ml_common.storage import drift_latest_key, drift_prefix, is_drift_summary_key
 
 
@@ -58,6 +60,12 @@ class ReportsClient:
     def history(self, model_name: str, limit: int) -> list[dict]:
         """Reads recent drift verdicts, newest first.
 
+        Every summary under the model's prefix is read before the list is cut
+        to `limit`. The order comes from each summary's own `computed_at`, so
+        it cannot be known from the keys, and the newest N cannot be picked
+        without seeing them all. That costs one read per monitoring run ever
+        made (about 720 a month at hourly monitoring), which is accepted.
+
         Args:
             model_name: the registered model.
             limit: how many verdicts to return. Must be positive - the route
@@ -65,21 +73,62 @@ class ReportsClient:
                 list into something that is not "the newest N".
 
         Returns:
-            Summaries ordered newest first. Only per-run summaries are read
-            (see `is_drift_summary_key`) - the same prefix also holds
-            `latest.json` and Evidently's own HTML and JSON, and folding
-            those in would produce nonsense rather than an error.
+            Summaries ordered by `computed_at`, newest first. Run ids do not
+            sort chronologically: the monitor stage's own default is a
+            timestamp, but under `monitoring_dag` it is the Airflow run id,
+            where every "scheduled__..." outranks every "manual__..." by
+            name whatever time it ran. A summary whose `computed_at` is
+            missing, unparseable or lacks a timezone sorts last rather than
+            being given a guessed time, and never raises. Only per-run
+            summaries are read (see `is_drift_summary_key`) - the same prefix
+            also holds `latest.json` and Evidently's own HTML and JSON, and
+            folding those in would produce nonsense rather than an error.
 
         Example:
             history("house_price_regressor", limit=20)
-            # -> [{"run_id": "20260920T0800", "severity": "warning", ...},
-            #     {"run_id": "20260920T0700", "severity": "ok", ...}]
+            # -> [{"run_id": "20260920T080000", "computed_at": "2026-09-20T08:00:00+00:00",
+            #      "severity": "warning", ...},
+            #     {"run_id": "scheduled__2026-09-20T07-00-00-00-00",
+            #      "computed_at": "2026-09-20T07:00:00+00:00", "severity": "ok", ...}]
         """
         keys = [
             key
             for key in self._storage.list_keys(drift_prefix(model_name))
             if is_drift_summary_key(key)
         ]
-        # Run ids are timestamps, so the key order is the chronological order.
-        keys.sort(reverse=True)
-        return [self._storage.read_json(key) for key in keys[:limit]]
+        summaries = [(key, self._storage.read_json(key)) for key in keys]
+        # The key breaks ties, so equal or missing timestamps still come out in
+        # a stable order instead of whatever the listing happened to return.
+        summaries.sort(key=lambda item: (_computed_at(item[1]), item[0]), reverse=True)
+        return [summary for _, summary in summaries[:limit]]
+
+
+def _computed_at(summary: dict) -> datetime:
+    """Reads when a summary was computed, as something that sorts.
+
+    Args:
+        summary: a drift summary as the monitor stage wrote it.
+
+    Returns:
+        The `computed_at` timestamp as an aware datetime. The earliest
+        possible time when the field is missing, is not an ISO-8601 string,
+        or carries no timezone - naive and aware datetimes cannot be compared,
+        and guessing a zone would put the run at a made-up position. Such a
+        summary therefore sorts as the oldest.
+
+    Example:
+        _computed_at({"computed_at": "2026-09-20T07:56:45+00:00"})
+        # -> datetime(2026, 9, 20, 7, 56, 45, tzinfo=UTC)
+        _computed_at({"computed_at": "2026-09-20T07:56:45.123456+00:00"})
+        # -> datetime(2026, 9, 20, 7, 56, 45, 123456, tzinfo=UTC)
+        _computed_at({})                                     # -> datetime.min, UTC
+        _computed_at({"computed_at": "2026-09-20T07:56:45"})  # -> datetime.min, UTC
+    """
+    earliest = datetime.min.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(summary["computed_at"])
+    except (KeyError, TypeError, ValueError):
+        return earliest
+    if parsed.tzinfo is None:
+        return earliest
+    return parsed
