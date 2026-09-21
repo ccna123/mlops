@@ -37,8 +37,10 @@ class FakeMlflowClient:
         self.set_alias_error = set_alias_error
         self.model_names = model_names
         self.alias_calls = []
+        self.calls = []
 
-    def search_registered_models(self):
+    def search_registered_models(self, max_results=None):
+        self.calls.append(("search_registered_models", {"max_results": max_results}))
         return [SimpleNamespace(name=name) for name in self.model_names]
 
     def get_model_version_by_alias(self, name, alias):
@@ -52,9 +54,11 @@ class FakeMlflowClient:
         return SimpleNamespace(version=self.champion)
 
     def search_model_versions(self, filter_string):
+        self.calls.append(("search_model_versions", {"filter_string": filter_string}))
         return self.versions
 
     def get_run(self, run_id):
+        self.calls.append(("get_run", {"run_id": run_id}))
         return SimpleNamespace(data=SimpleNamespace(metrics=self.runs.get(run_id, {})))
 
     def set_registered_model_alias(self, name, alias, version):
@@ -185,3 +189,22 @@ def test_promote_lets_any_other_mlflow_error_propagate():
         RegistryClient(client=fake).promote(REGRESSOR, "4")
 
     assert not isinstance(caught.value, RegistryNotFoundError)
+
+
+def test_ping_asks_mlflow_for_a_single_registered_model_and_nothing_else():
+    # /health polls this: it must not walk every version of every model.
+    fake = FakeMlflowClient(versions=[_version(1), _version(2)], runs={"run1": {"test_rmse": 1.0}})
+
+    result = RegistryClient(client=fake).ping()
+
+    assert result is None
+    assert fake.calls == [("search_registered_models", {"max_results": 1})]
+
+
+def test_ping_lets_an_mlflow_failure_propagate():
+    class Unreachable(FakeMlflowClient):
+        def search_registered_models(self, max_results=None):
+            raise MlflowException("connection refused", error_code=INTERNAL_ERROR)
+
+    with pytest.raises(MlflowException, match="connection refused"):
+        RegistryClient(client=Unreachable()).ping()

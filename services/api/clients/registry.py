@@ -143,6 +143,30 @@ class RegistryClient:
             )
         return result
 
+    def ping(self) -> None:
+        """Checks that the Model Registry answers, as a health probe.
+
+        One request for at most one registered model. `list_models` would work
+        as a probe too, but it reads every version of every model and then
+        every version's run, and /health is polled.
+
+        Args:
+            None.
+
+        Returns:
+            None. Reaching the end of the call is the answer - an empty
+            registry is a healthy MLflow with nothing registered yet.
+
+        Raises:
+            MlflowException: when MLflow cannot be reached or refuses the
+                request. Left to propagate so the health route reports down.
+
+        Example:
+            RegistryClient().ping()   # -> None, MLflow answered
+            RegistryClient().ping()   # -> raises MlflowException when it is down
+        """
+        self._client.search_registered_models(max_results=1)
+
     def promote(self, name: str, version: str) -> dict:
         """Moves the champion alias onto one version.
 

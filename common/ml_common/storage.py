@@ -723,6 +723,40 @@ class Storage:
         except ClientError:
             return False
 
+    def check_reachable(self) -> None:
+        """Checks that the bucket answers, as a health probe.
+
+        One `head_bucket` request, whatever the bucket holds - it lists no keys
+        and reads no object, so a caller can poll it. It says nothing when it
+        succeeds and RAISES when it does not, unlike `exists`, which turns every
+        error into False: a probe built on `exists` would read an outage or a
+        wrong credential as "healthy, the key just is not there".
+
+        Args:
+            None.
+
+        Returns:
+            None. Reaching the end of the call is the answer.
+
+        Raises:
+            botocore.exceptions.ClientError: when storage answers but refuses -
+                the bucket does not exist, or the credentials are wrong.
+            botocore.exceptions.BotoCoreError: when storage cannot be reached
+                at all (connection refused, timeout).
+
+        Example:
+            storage.check_reachable()   # -> None, the bucket is there
+            storage.check_reachable()   # -> raises ClientError (404), no such bucket
+
+            # A health route wraps it and turns the exception into "down":
+            try:
+                storage.check_reachable()
+                state = "ok"
+            except Exception:
+                state = "down"
+        """
+        self._client.head_bucket(Bucket=self.bucket)
+
     def list_keys(self, prefix: str) -> list[str]:
         """Lists every key under a prefix.
 

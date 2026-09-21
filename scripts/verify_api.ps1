@@ -1,0 +1,116 @@
+# Verifies Plan 5a (the API layer).
+#
+# Precondition: run from the repo root, with the WHOLE stack up (postgres, minio,
+# mlflow, airflow, serving and the api service) - steps 3 to 6 call the live
+# services. A dependency that is down is a failure here, not a skip.
+#
+# Every step must be able to fail: a curl that cannot connect, an empty body or
+# a wrong value throws. The only thing that is not a failure is a check that has
+# nothing to look at (no model versions yet); it is printed as SKIP and counted
+# separately in the last line, never as a pass.
+$ErrorActionPreference = "Stop"
+$api = "http://localhost:8001/api"
+$passed = 0
+$skipped = 0
+
+function Get-HttpCode {
+    # Returns the HTTP status of a GET as a string. Throws when curl itself
+    # fails (connection refused, timeout), so "000" is never mistaken for an answer.
+    param([string]$Url, [string[]]$ExtraArgs = @())
+    $code = curl.exe -s -S --max-time 30 -o NUL -w "%{http_code}" @ExtraArgs $Url
+    if ($LASTEXITCODE -ne 0) { throw "curl could not reach $Url (exit code $LASTEXITCODE)" }
+    return "$code"
+}
+
+function Get-Json {
+    # Returns the decoded JSON body of a GET. Throws when curl fails, when the
+    # status is not 200, or when the body is empty.
+    param([string]$Url)
+    $code = Get-HttpCode $Url
+    if ($code -ne "200") { throw "GET $Url returned HTTP $code" }
+    $body = curl.exe -s -S --max-time 30 $Url
+    if ($LASTEXITCODE -ne 0) { throw "curl could not reach $Url (exit code $LASTEXITCODE)" }
+    if ([string]::IsNullOrWhiteSpace("$body")) { throw "GET $Url returned an empty body" }
+    return ($body | ConvertFrom-Json)
+}
+
+if (-not (Test-Path ".venv\Scripts\python.exe")) {
+    throw "run this script from the repo root: .venv\Scripts\python.exe not found"
+}
+
+Write-Host "== 1/6 Tests on the dev machine ==" -ForegroundColor Cyan
+.venv\Scripts\python.exe -m pytest common/ services/ -q
+if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
+$passed++
+
+Write-Host "== 2/6 Ruff ==" -ForegroundColor Cyan
+.venv\Scripts\python.exe -m ruff check .
+if ($LASTEXITCODE -ne 0) { throw "ruff failed" }
+$passed++
+
+Write-Host "== 3/6 Airflow REST accepts basic auth ==" -ForegroundColor Cyan
+$code = Get-HttpCode "http://localhost:8080/api/v1/dags" @("-u", "admin:admin")
+if ($code -ne "200") {
+    throw "Airflow REST returned HTTP $code - check AIRFLOW__API__AUTH_BACKENDS includes basic_auth"
+}
+Write-Host "   HTTP 200"
+$passed++
+
+Write-Host "== 4/6 /api/health reports exactly the five dependencies ==" -ForegroundColor Cyan
+$health = Get-Json "$api/health"
+if (-not $health.services) { throw "/api/health has no services object" }
+$expected = @("airflow", "minio", "mlflow", "postgres", "serving")
+$actual = @($health.services.PSObject.Properties.Name | Sort-Object)
+if (($actual -join ",") -ne ($expected -join ",")) {
+    throw "/api/health services are [$($actual -join ', ')], expected [$($expected -join ', ')]"
+}
+foreach ($name in $expected) { Write-Host "   $name = $($health.services.$name)" }
+# postgres and serving are printed but not required: postgres is only inferred
+# from Airflow, and serving has no model until a champion has been promoted.
+foreach ($name in @("airflow", "mlflow", "minio")) {
+    if ($health.services.$name -ne "ok") {
+        throw "/api/health says $name is '$($health.services.$name)' - the stack must be up"
+    }
+}
+$passed++
+
+Write-Host "== 5/6 /api/models returns metrics that fit each model's task type ==" -ForegroundColor Cyan
+$models = Get-Json "$api/models"
+if ($models.PSObject.Properties.Name -notcontains "models") { throw "/api/models has no models list" }
+$checkedModels = 0
+foreach ($m in @($models.models)) {
+    if (@($m.versions).Count -eq 0) {
+        Write-Host "   SKIP: $($m.name) has no versions" -ForegroundColor Yellow
+        continue
+    }
+    $keys = @($m.versions[0].metrics.PSObject.Properties.Name)
+    Write-Host "   $($m.name) [$($m.task_type)] version $($m.versions[0].version): $($keys -join ',')"
+    if ($m.task_type -eq "regression") {
+        if ($keys -notcontains "rmse") { throw "$($m.name) is a regressor but has no rmse" }
+        if ($keys -contains "accuracy") { throw "$($m.name) is a regressor but reports accuracy" }
+    } elseif ($m.task_type -eq "classification") {
+        if ($keys -notcontains "accuracy") { throw "$($m.name) is a classifier but has no accuracy" }
+        if ($keys -contains "rmse") { throw "$($m.name) is a classifier but reports rmse" }
+    } else {
+        throw "$($m.name) has task_type '$($m.task_type)', expected regression or classification"
+    }
+    $checkedModels++
+    $passed++
+}
+if ($checkedModels -eq 0) {
+    Write-Host "   SKIP: no model versions" -ForegroundColor Yellow
+    $skipped++
+}
+
+Write-Host "== 6/6 /api/drift/latest ==" -ForegroundColor Cyan
+$code = Get-HttpCode "$api/drift/latest?model_name=house_price_regressor"
+if ($code -ne "200" -and $code -ne "404") { throw "/api/drift/latest returned HTTP $code, expected 200 or 404" }
+Write-Host "   HTTP $code (404 is valid before monitoring has ever run)"
+$passed++
+
+$summary = "Plan 5a green: $passed checks passed, $skipped skipped."
+if ($skipped -gt 0) {
+    Write-Host "`n$summary" -ForegroundColor Yellow
+} else {
+    Write-Host "`n$summary" -ForegroundColor Green
+}

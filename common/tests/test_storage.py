@@ -2,6 +2,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from ml_common import storage
@@ -286,3 +287,38 @@ class TestReadParquetHead:
     def test_rows_below_one_is_rejected_before_any_download(self, store):
         with pytest.raises(ValueError, match="rows must be at least 1"):
             store.read_parquet_head("missing/file.parquet", 0)
+
+
+class TestCheckReachable:
+    def test_succeeds_when_the_bucket_exists(self, store):
+        assert store.check_reachable() is None
+
+    def test_raises_when_the_bucket_does_not_exist(self):
+        with mock_aws():
+            missing = storage.Storage(
+                endpoint_url=None,
+                access_key="test",
+                secret_key="test",
+                bucket="no-such-bucket",
+            )
+
+            with pytest.raises(ClientError):
+                missing.check_reachable()
+
+    def test_touches_no_object_and_lists_nothing(self, store):
+        # /health polls this, so it must stay one bucket-level request no matter
+        # how many objects the bucket holds.
+        store.write_json({"a": 1}, "reports/x.json")
+        calls = []
+        real_client = store._client
+
+        class Recorder:
+            def __getattr__(self, name):
+                calls.append(name)
+                return getattr(real_client, name)
+
+        store._client = Recorder()
+
+        store.check_reachable()
+
+        assert calls == ["head_bucket"]
