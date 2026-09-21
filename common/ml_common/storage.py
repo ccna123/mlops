@@ -22,6 +22,7 @@ from botocore.exceptions import ClientError
 from . import schema
 
 _SPLITS = ("train", "test")
+_DRIFT_SUMMARY_NAME = "summary.json"
 
 
 def raw_key(dataset_version: str) -> str:
@@ -302,7 +303,7 @@ def drift_summary_key(model_name: str, run_id: str) -> str:
         drift_summary_key("house_price_regressor", "a1b2c3")
         # -> "reports/house_price_regressor/a1b2c3/summary.json"
     """
-    return f"reports/{model_name}/{run_id}/summary.json"
+    return f"reports/{model_name}/{run_id}/{_DRIFT_SUMMARY_NAME}"
 
 
 def drift_latest_key(model_name: str) -> str:
@@ -323,6 +324,54 @@ def drift_latest_key(model_name: str) -> str:
         # rather than listing the whole prefix and comparing timestamps.
     """
     return f"reports/{model_name}/latest.json"
+
+
+def drift_prefix(model_name: str) -> str:
+    """Builds the prefix holding every drift object of one model.
+
+    Args:
+        model_name: the registered model.
+
+    Returns:
+        The prefix, trailing slash included so `list_keys` cannot match a
+        model whose name merely starts the same way. It covers everything
+        `drift_summary_key`, `drift_latest_key` and `report_key` produce, so
+        a listing returns all three kinds mixed together - filter the result
+        with `is_drift_summary_key` when only the summaries are wanted.
+
+    Example:
+        drift_prefix("house_price_regressor")
+        # -> "reports/house_price_regressor/"
+        storage.list_keys(drift_prefix("house_price_regressor"))
+        # -> [".../20260920T0700/evidently.html",
+        #     ".../20260920T0700/summary.json",
+        #     ".../latest.json"]
+    """
+    return f"reports/{model_name}/"
+
+
+def is_drift_summary_key(key: str) -> bool:
+    """Tells whether a key is the per-run drift summary of some monitoring run.
+
+    Args:
+        key: a full key, typically one item of `list_keys(drift_prefix(...))`.
+
+    Returns:
+        True only for the shape `drift_summary_key` builds. False for
+        `latest.json` (a copy of one summary, so counting it would show the
+        newest run twice), for Evidently's html and json (not summaries at
+        all), and for anything outside the reports tree.
+
+    Example:
+        is_drift_summary_key(drift_summary_key("house_price_regressor", "a1b2c3"))
+        # -> True
+        is_drift_summary_key(drift_latest_key("house_price_regressor"))
+        # -> False
+        is_drift_summary_key(report_key("house_price_regressor", "a1b2c3", "json"))
+        # -> False
+    """
+    parts = key.split("/")
+    return len(parts) == 4 and parts[0] == "reports" and parts[3] == _DRIFT_SUMMARY_NAME
 
 
 class Storage:

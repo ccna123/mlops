@@ -181,3 +181,47 @@ def test_drift_latest_key_is_one_object_per_model():
     from ml_common.storage import drift_latest_key
 
     assert drift_latest_key("house_price_regressor") == "reports/house_price_regressor/latest.json"
+
+
+def test_drift_prefix_holds_every_drift_object_of_one_model():
+    from ml_common.storage import (
+        drift_latest_key,
+        drift_prefix,
+        drift_summary_key,
+        report_key,
+    )
+
+    prefix = drift_prefix("house_price_regressor")
+
+    assert prefix == "reports/house_price_regressor/"
+    assert drift_summary_key("house_price_regressor", "abc123").startswith(prefix)
+    assert drift_latest_key("house_price_regressor").startswith(prefix)
+    assert report_key("house_price_regressor", "abc123", "html").startswith(prefix)
+
+
+def test_drift_prefix_does_not_match_a_model_whose_name_merely_starts_the_same():
+    from ml_common.storage import drift_prefix, drift_summary_key
+
+    other = drift_summary_key("house_price_regressor_v2", "abc123")
+    assert not other.startswith(drift_prefix("house_price_regressor"))
+
+
+def test_is_drift_summary_key_accepts_what_drift_summary_key_builds():
+    from ml_common.storage import drift_summary_key, is_drift_summary_key
+
+    assert is_drift_summary_key(drift_summary_key("house_price_regressor", "20260920T0800"))
+
+
+def test_is_drift_summary_key_rejects_the_other_objects_under_the_same_prefix():
+    from ml_common.storage import drift_latest_key, is_drift_summary_key, report_key
+
+    assert not is_drift_summary_key(drift_latest_key("house_price_regressor"))
+    assert not is_drift_summary_key(report_key("house_price_regressor", "abc123", "html"))
+    assert not is_drift_summary_key(report_key("house_price_regressor", "abc123", "json"))
+
+
+def test_is_drift_summary_key_rejects_keys_from_outside_the_reports_tree():
+    from ml_common.storage import is_drift_summary_key, validation_report_key
+
+    assert not is_drift_summary_key(validation_report_key("abc123"))
+    assert not is_drift_summary_key("inference-log/m/dt=2026-09-20/summary.json")
