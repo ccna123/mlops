@@ -408,6 +408,13 @@ def main() -> int:
     )
     prediction_part = drift.prediction_severity(_drifted_share(prediction_report.dict()) > 0)
 
+    # Read what training measured BEFORE deciding whether performance can be
+    # graded. It is the yardstick the verdict is made against, and a dashboard
+    # showing "rmse 286k" without it cannot say whether that is bad - so it
+    # goes into the summary either way, including when there is not enough
+    # ground truth to grade anything.
+    reference_metrics = train_metrics_of(champion_run_id, task_type)
+
     # Performance drift, when there is anything to measure it on.
     outcomes = drift.load_outcomes(storage, model_name, now, window_hours)
     joined = drift.join_outcomes(predictions, outcomes)
@@ -423,7 +430,7 @@ def main() -> int:
         performance_part = drift.performance_severity(
             task_type,
             current_metrics,
-            train_metrics_of(champion_run_id, task_type),
+            reference_metrics,
             len(joined),
         )
     else:
@@ -455,6 +462,10 @@ def main() -> int:
         "n_predictions": int(len(predictions)),
         "n_ground_truth": int(len(joined)),
         "current_metrics": current_metrics,
+        # What the train stage measured for this champion. Added 2026-09-22 so
+        # the dashboard can plot the baseline; summaries written before that
+        # date do not have it, and every reader must cope with it missing.
+        "reference_metrics": reference_metrics,
         "report_key": html_key,
     }
     storage.write_json(summary, drift_summary_key(model_name, run_id))
