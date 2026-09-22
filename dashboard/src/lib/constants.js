@@ -126,3 +126,18 @@ export const SCENARIO_META = {
 
 // Airflow run states that mean the traffic batch is still going.
 export const ACTIVE_TRAFFIC_STATES = new Set(["queued", "running"]);
+
+// The two tasks of one traffic_agent run, in the order the DAG runs them.
+// The ids are the DAG's task ids; the labels are what the screen shows.
+export const SIMULATE_STAGES = [
+  {
+    id: "send_traffic",
+    label: "Gửi traffic tới serving",
+    hint: "agent gọi /predict rồi báo kết quả thật về",
+  },
+  {
+    id: "compute_drift",
+    label: "Tính lại drift",
+    hint: "chạy monitoring_dag và chờ nó xong",
+  },
+];

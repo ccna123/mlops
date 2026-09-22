@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { Line } from "react-chartjs-2";
-import { Play, RefreshCw, TriangleAlert } from "lucide-react";
+import { RefreshCw, TriangleAlert } from "lucide-react";
 import "../lib/chartSetup";
 import { useClient } from "../lib/DemoModeContext";
 import { useToast } from "../components/Toast";
-import { ApiError } from "../lib/api";
-import ConfirmDialog from "../components/ConfirmDialog";
 import EmptyState from "../components/EmptyState";
 import ErrorState from "../components/ErrorState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
@@ -450,8 +448,6 @@ export default function Drift({ onRetrain }) {
   const [modelName, setModelName] = useState("");
   const [latestState, setLatestState] = useState({ status: "loading" });
   const [history, setHistory] = useState([]);
-  const [runConfirmOpen, setRunConfirmOpen] = useState(false);
-  const [triggeringRun, setTriggeringRun] = useState(false);
 
   useEffect(() => {
     client
@@ -500,23 +496,6 @@ export default function Drift({ onRetrain }) {
     pushToast({ type: "success", text: "Đã sao chép report_key" });
   }
 
-  async function confirmTriggerRun() {
-    setTriggeringRun(true);
-    try {
-      const result = await client.triggerDriftRun();
-      pushToast({ type: "success", text: `Đã tạo run tính drift ${result.run_id}` });
-      setRunConfirmOpen(false);
-    } catch (error) {
-      const detail = error instanceof ApiError ? error.detail : null;
-      pushToast({
-        type: "error",
-        text: `Không tính được drift: ${typeof detail === "string" ? detail : "lỗi không xác định"}`,
-      });
-    } finally {
-      setTriggeringRun(false);
-    }
-  }
-
   const isStale =
     latestState.status === "data" &&
     Date.now() - new Date(latestState.summary.computed_at).getTime() > STALE_THRESHOLD_MS;
@@ -525,7 +504,11 @@ export default function Drift({ onRetrain }) {
   return (
     <div className="page-grid-single">
       {selectedModel && (
-        <TrafficSimulator modelName={selectedModel.name} taskType={selectedModel.task_type} />
+        <TrafficSimulator
+          modelName={selectedModel.name}
+          taskType={selectedModel.task_type}
+          onFinished={load}
+        />
       )}
 
       <section className="card">
@@ -546,13 +529,6 @@ export default function Drift({ onRetrain }) {
             </select>
             <button className="btn-secondary" onClick={load}>
               <RefreshCw size={14} /> Tải lại
-            </button>
-            <button
-              className="btn-primary"
-              disabled={triggeringRun || models.length === 0}
-              onClick={() => setRunConfirmOpen(true)}
-            >
-              <Play size={14} /> Tính drift ngay
             </button>
           </div>
         </div>
@@ -577,7 +553,7 @@ export default function Drift({ onRetrain }) {
         {latestState.status === "empty" && (
           <EmptyState
             title="Chưa có báo cáo drift cho model này."
-            description="Chưa có run nào của monitoring_dag. Gửi traffic ở khối trên, rồi bấm Tính drift ngay."
+            description="Chưa có run nào của monitoring_dag. Bấm “Mô phỏng & tính drift” ở khối trên là có ngay."
           />
         )}
         {latestState.status === "data" && (
@@ -647,29 +623,6 @@ export default function Drift({ onRetrain }) {
         )}
       </section>
 
-      {runConfirmOpen && (
-        <ConfirmDialog
-          title="Tính drift ngay?"
-          confirmLabel="Tính drift ngay"
-          busy={triggeringRun}
-          onConfirm={confirmTriggerRun}
-          onCancel={() => setRunConfirmOpen(false)}
-        >
-          <p>
-            Chạy <code>monitoring_dag</code> một lần. Nó tính drift cho <b>cả hai model</b> — không chọn riêng được
-            model nào.
-          </p>
-          <p className="warn-note">
-            Khởi động hai container <code>ml-monitor</code> thật, mỗi container đọc cửa sổ dự đoán và dữ liệu tham
-            chiếu. Báo cáo chưa có ngay khi lệnh trả về; bấm "Tải lại" sau ít phút để xem kết quả.
-          </p>
-          <p className="hint-note">
-            Nếu không có dự đoán mới nào trong cửa sổ, run vẫn báo thành công nhưng <b>không sinh báo cáo</b> —
-            monitor trả <code>insufficient_data</code> và cố ý không ghi verdict từ số liệu rỗng, nên màn hình này
-            sẽ không đổi. Muốn có báo cáo mới thì phải gửi traffic ở khối trên trước.
-          </p>
-        </ConfirmDialog>
-      )}
     </div>
   );
 }
