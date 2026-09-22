@@ -599,6 +599,26 @@ Nguồn: `GET /api/drift/history?...&limit=0` → 422.
 
 Vẽ bằng Chart.js. **Ba dải riêng** (feature, prediction, performance) — mỗi dải là **một biểu đồ riêng, màu riêng, xếp dọc** (sửa ngày 2026-09-22: bản đầu vẽ ba đường cùng màu xám trên một trục nên không phân biệt được đường nào là gì) — chạy theo thời gian `computed_at`, mỗi điểm tô đúng màu và hoa văn của trạng thái tại thời điểm đó; **không** một đường tổng hợp. Điểm `insufficient_data` vẽ là ô xám gạch chéo (một khoảng trống có nhãn, không phải điểm ở mức thấp). Tooltip: `run_id`, `n_predictions`, `n_ground_truth`, `window_hours`, và `current_metrics` nếu có. Các cửa sổ có độ dài khác nhau (từ 0,03 đến 1 giờ trong dữ liệu thật), nên tooltip phải cho thấy `n_predictions` để người xem không so sánh mù các điểm.
 
+**Sửa ngày 2026-09-22 — làm cho biểu đồ kết luận được.** Ba thay đổi, sau khi
+chủ dự án nhận xét "mấy cái mốc thời gian khó hiểu, nhìn graph không kết luận
+được gì":
+
+1. **Trục x chỉ còn giờ:phút**, ngày chuyển thành **vạch đứt dọc** ở đúng chỗ
+   sang ngày mới (plugin `dayDividers` viết tại chỗ, không thêm thư viện). Lý
+   do: các điểm cách đều nhau vì mỗi điểm là *một lần đo*, không phải một mốc
+   thời gian — lặp lại "20/9/26" dưới hai mươi điểm chỉ che mất chuyện hai
+   trong số các khoảng cách đó rộng bằng mấy ngày.
+2. **Một dòng kết luận bằng chữ** phía trên (`DriftVerdictLine`): bao nhiêu
+   trong 5 lần đo gần nhất ở mức cao, mức nào vừa đổi so với lần trước, và
+   cảnh báo khi lịch sử gồm nhiều `model_version` — hai model khác nhau nằm
+   trên cùng một đường thì thay đổi giữa chúng không phải là xu hướng. Toàn bộ
+   logic nằm ở `src/lib/driftReading.js` dạng hàm thuần, **không** tự đặt
+   ngưỡng nào: mức vẫn là mức API trả về.
+3. **Một dải số thật** (`MetricTrendChart`): `rmse` (regression) hoặc `auc`
+   (classification) theo từng lần đo, kèm đường nét đứt là chỉ số lúc train lấy
+   từ `reference_metrics` (xem addendum 2026-09-22 của spec Plan 4). Ba mức
+   phân loại không trả lời được "sai hơn bao nhiêu"; dải này trả lời được.
+
 #### InsufficientDataNotice
 
 Hiện khi `parts.performance` là `insufficient_data`. Nội dung ý: "Chưa đủ kết quả thật để đo performance drift (`n_ground_truth` = N). Kết quả thật đến trễ hơn dự đoán. Đây **không phải** là ổn: chưa ai kiểm tra." Đặt ngay dưới ô performance, cùng hoa văn gạch chéo.

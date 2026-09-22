@@ -264,6 +264,27 @@ trong `dashboard/src/lib/constants.js` là nơi duy nhất ánh xạ hai bộ t�
 này). Biểu đồ lịch sử là **ba dải riêng xếp dọc, mỗi dải một màu** — bản đầu vẽ
 ba đường cùng màu xám trên một trục nên không đọc được đường nào là gì.
 
+**Biểu đồ drift phải kết luận được, không chỉ tô màu (2026-09-22).** Trục x chỉ
+hiện giờ:phút, ngày thành vạch đứt dọc — mỗi điểm là *một lần đo*, không phải
+một mốc thời gian, nên khoảng cách trên trục không mang nghĩa. Trên biểu đồ có
+một dòng kết luận bằng chữ, và dưới ba dải mức có thêm **một dải số thật**
+(`rmse` cho regression, `auc` cho classification) kèm đường nét đứt là chỉ số
+lúc train. Mọi phán đoán "đang xấu đi" nằm ở `dashboard/src/lib/driftReading.js`
+dạng hàm thuần và **không tự đặt ngưỡng nào** — ngưỡng thuộc về stage `monitor`,
+chép sang frontend là chép một bản sẽ lệch.
+
+**`reference_metrics` là trường mới của bản tóm tắt drift.** Stage `monitor` nay
+ghi luôn chỉ số stage `train` đã log cho champion, nên dashboard mới biết "rmse
+203.809" là tốt hay tệ. Hai điều cần nhớ: (1) đó là chỉ số đo **trên chính dữ
+liệu train** nên lạc quan hơn thực tế — nhưng đúng là mẫu số mà
+`performance_severity` dùng, (2) **báo cáo viết trước 22/9/2026 không có trường
+này**, mọi nơi đọc phải chịu được việc nó vắng. Thay đổi này nằm trong
+`stages/monitor/` nên chỉ phải build lại `ml-monitor`, không đụng `common/`:
+
+```powershell
+docker build -f stages/monitor/Dockerfile -t ml-monitor:latest .
+```
+
 **Cả ba DAG đều để unpaused và đều `max_active_runs=1`.** `ml_pipeline` giữ
 `schedule=None`; `monitoring_dag` đổi từ `@hourly` + paused sang `schedule=None`
 + unpaused (xem mục 2.7 spec Plan 4); `traffic_agent` sinh ra đã unpaused. Lý do: run của một DAG paused nằm

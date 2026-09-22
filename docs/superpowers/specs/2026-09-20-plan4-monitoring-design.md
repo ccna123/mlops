@@ -281,6 +281,20 @@ MWAA thì bỏ cờ này.
 > drift chỉ tính được từ dự đoán mà `serving` đã ghi, nên trên máy dev không có
 > người dùng thật thì mọi verdict đều là `insufficient_data`.
 
+> **Thêm trường `reference_metrics` vào bản tóm tắt (2026-09-22).** Stage
+> `monitor` nay ghi luôn chỉ số mà stage `train` đã log cho champion
+> (`train_metrics_of`, bỏ tiền tố `train_`) vào summary, cạnh `current_metrics`.
+> Trước đó con số này chỉ tồn tại trong bộ nhớ đúng lúc chấm
+> `performance_severity` rồi biến mất, nên dashboard thấy "rmse 203.809" mà
+> không có cách nào biết thế là tốt hay tệ — ba mức `ok`/`warning`/`high` nói
+> được "tệ" nhưng không nói được "tệ bao nhiêu". `train_metrics_of` giờ được gọi
+> **mọi lần chạy**, kể cả khi không đủ ground truth để chấm, vì mốc so sánh vẫn
+> có ý nghĩa khi chưa đo được gì. Lưu ý khi đọc: đây là chỉ số đo **trên chính
+> dữ liệu train**, nên nó lạc quan hơn thực tế — nhưng đúng là con số
+> `performance_severity` vẫn luôn dùng làm mẫu số, nên vẽ nó lên là vẽ đúng thứ
+> quyết định verdict. Bản tóm tắt viết trước ngày này không có trường này; mọi
+> nơi đọc phải chịu được việc nó vắng mặt.
+
 ### 2.8. `/feedback` nhận cả lô, và ngày do agent cung cấp
 
 `POST /feedback/{task_type}` nhận **một danh sách** kết quả, không phải một.
