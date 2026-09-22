@@ -631,7 +631,38 @@ Hiện khi `parts.performance` là `insufficient_data`. Nội dung ý: "Chưa đ
 
 Plan 4 còn một race chưa sửa ở bước ghi bộ đệm (spec 5a mục 10): ngay sau khi có traffic mới, báo cáo drift có thể chưa gồm những dự đoán vừa gửi. Ngoài ra `monitoring_dag` chạy theo giờ và được tạo ở trạng thái **paused** (Plan 4 mục 2.7, và Task 12 thấy nó vẫn paused), nên báo cáo mới nhất có thể cũ hàng giờ. Thiết kế phải có một dòng ghi chú luôn hiện: "Báo cáo tính lúc `computed_at`. Traffic mới gửi có thể chưa được ghi và chưa có trong báo cáo này." kèm nút "Tải lại". Gợi ý: nếu `computed_at` cách hiện tại quá khoảng 2 giờ, gắn chip "báo cáo cũ". **Cập nhật 2026-09-22:** hai câu cuối không còn đúng. Dashboard có nút "Tính drift ngay" (`POST /drift/run`) và khối `TrafficSimulator` (`POST /simulate`), `monitoring_dag` đã unpaused, nên cả việc gửi traffic lẫn việc tính lại drift đều làm được từ màn này.
 
-#### EvidentlyReportFrame: chưa có endpoint
+**Sửa ngày 2026-09-22 (2) — bảng so sánh và báo cáo Evidently thật.**
+
+- **Ba ô `MetricTile` thay bằng `MetricComparison`**, một bảng ba cột: chỉ số |
+  trên tập test | trên traffic thật | chênh lệch (tô đỏ khi tệ hơn, xanh khi
+  tốt hơn, theo `LOWER_IS_BETTER` / `HIGHER_IS_BETTER`). Trước đó hai con số
+  này nằm ở hai màn khác nhau nên muốn so phải đổi tab và nhớ số; chưa kể một
+  người khác nhìn vào "RMSE 203.809" không có cách nào biết thế là tốt hay tệ.
+  Chỉ so khi bản tóm tắt có `reference_source: "test_metrics"`.
+- **Ô giữ chỗ Evidently thay bằng khung thật** (`EvidentlyReport`), tức là mục
+  "chưa có endpoint" bên dưới **đã được giải**. Xem chi tiết ở đó.
+
+#### EvidentlyReportFrame: đã có endpoint (2026-09-22)
+
+> Mục này mô tả trạng thái cũ. `GET /api/drift/report?model_name=&run_id=` nay
+> trả chính file HTML mà stage `monitor` ghi, đọc qua `Storage.read_bytes`
+> (hàm mới của `storage.py`, nên lần thêm nó phải build lại cả năm tầng).
+> Trình duyệt **vẫn không** nói chuyện với MinIO: iframe trỏ vào API, đúng
+> nguyên tắc mục 8.2 của tài liệu thiết kế. Khung dùng
+> `sandbox="allow-scripts"` — báo cáo cần JavaScript để vẽ nhưng nằm ở origin
+> mờ, không đụng được vào trang chứa nó — và chỉ mount khi người dùng bấm
+> "Xem báo cáo", vì mỗi báo cáo nặng khoảng 5 MB (đo thật: 5.136.562 byte).
+>
+> Điều **không** làm được: Evidently chỉ biết feature drift của **một** lần đo,
+> không có lịch sử và không có performance, nên nó **không thay thế** ba dải
+> lịch sử mà là phần chi tiết đứng cạnh. Và nó kết luận theo luật tỉ lệ cột
+> (ngưỡng 0,5) nên có thể ghi "Dataset Drift is NOT detected" trong khi badge
+> Data drift báo `warning` — đo thật ngày 2026-09-22: 2/21 cột lệch = 0,0952,
+> Evidently nói không, luật độ lớn của Plan 4 (Finding B) nói cảnh báo. Khung
+> báo cáo có sẵn một dòng giải thích đúng chuyện này, vì hai kết luận mâu
+> thuẫn mà không ai giải thích là cách nhanh nhất để người dùng mất tin cả hai.
+
+#### EvidentlyReportFrame: trạng thái ban đầu
 
 Không có endpoint nào trả nội dung file Evidently, và dashboard **không được** trỏ iframe tới MinIO (vi phạm nguyên tắc chỉ nói chuyện với API). Cho tới khi Plan 5b (hoặc chủ dự án) quyết định cách phục vụ file này, thiết kế `EvidentlyReportFrame` thành một **ô giữ chỗ**: hiện `report_key` dạng văn bản có nút sao chép và dòng "Báo cáo Evidently đầy đủ chưa xem được từ dashboard". Đây là một điểm hở đã được đánh dấu, không phải một component bị bỏ quên.
 

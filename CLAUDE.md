@@ -192,10 +192,10 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
-| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 18 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 19 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
 | 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-22: 689 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-22: 696 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
@@ -263,6 +263,23 @@ khoá của API vẫn là `feature` / `prediction` / `performance` (`DRIFT_FACTO
 trong `dashboard/src/lib/constants.js` là nơi duy nhất ánh xạ hai bộ từ vựng
 này). Biểu đồ lịch sử là **ba dải riêng xếp dọc, mỗi dải một màu** — bản đầu vẽ
 ba đường cùng màu xám trên một trục nên không đọc được đường nào là gì.
+
+**Màn Drift so trực tiếp test vs traffic thật, và nhúng luôn Evidently
+(2026-09-22).** Ba ô metric đổi thành bảng bốn cột (chỉ số · trên tập test ·
+trên traffic thật · chênh lệch), lấy `reference_metrics` ngay trong bản tóm tắt
+nên không phải đổi sang tab Models để so. Ô giữ chỗ Evidently đổi thành khung
+thật: `GET /api/drift/report?model_name=&run_id=` trả file HTML stage `monitor`
+đã ghi, đọc qua `Storage.read_bytes` — **hàm mới của `common/ml_common/storage.py`,
+nên lần thêm nó đã phải build lại đủ năm tầng**. Trình duyệt vẫn không chạm vào
+MinIO; iframe trỏ vào API, dùng `sandbox="allow-scripts"` và chỉ mount khi bấm
+xem vì mỗi báo cáo khoảng 5 MB.
+
+Nhớ giới hạn của nó: Evidently chỉ có feature drift của **một** lần đo, không
+lịch sử, không performance — nó là phần chi tiết đứng cạnh ba dải lịch sử chứ
+không thay được. Và nó chấm theo luật tỉ lệ cột (ngưỡng 0,5) nên hay ghi
+"Dataset Drift is NOT detected" trong khi badge Data drift báo `warning`: mức
+của ta còn tính luật độ lớn (Plan 4, Finding B). Khung báo cáo có sẵn dòng giải
+thích chuyện này.
 
 **Biểu đồ drift phải kết luận được, không chỉ tô màu (2026-09-22).** Trục x chỉ
 hiện giờ:phút, ngày thành vạch đứt dọc — mỗi điểm là *một lần đo*, không phải
