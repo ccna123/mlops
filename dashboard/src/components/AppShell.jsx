@@ -1,12 +1,12 @@
-import { LayoutDashboard, Database, Boxes, Activity, FlaskConical } from "lucide-react";
+import { LayoutDashboard, Database, Activity, FlaskConical, Brain, TrendingUpDownIcon } from "lucide-react";
 import HealthPill from "./HealthPill";
 import { useDemoMode } from "../lib/DemoModeContext";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Tổng quan", Icon: LayoutDashboard },
   { id: "data", label: "Dữ liệu", Icon: Database },
-  { id: "models", label: "Models", Icon: Boxes },
-  { id: "drift", label: "Drift", Icon: Activity },
+  { id: "models", label: "Models", Icon: Brain },
+  { id: "drift", label: "Drift", Icon: TrendingUpDownIcon },
 ];
 
 /**
