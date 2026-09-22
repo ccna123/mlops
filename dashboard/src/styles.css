@@ -605,3 +605,24 @@ tbody tr[onclick],
 .severity-cell-hint {
   @apply px-4 text-center text-xs text-slate-500;
 }
+
+/* ---------- Drift verdict line ---------- */
+
+.verdict-line {
+  @apply mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3;
+}
+.verdict-headline {
+  @apply text-sm font-semibold text-slate-700;
+}
+.verdict-detail {
+  @apply mt-1 text-sm text-slate-600;
+}
+.verdict-worse {
+  @apply font-semibold text-red-700;
+}
+.verdict-better {
+  @apply font-semibold text-emerald-700;
+}
+.verdict-warn {
+  @apply mt-2 text-xs text-amber-700;
+}

@@ -14,7 +14,8 @@ import MetricTile from "../components/MetricTile";
 import RelativeTime from "../components/RelativeTime";
 import TrafficSimulator from "../components/TrafficSimulator";
 import { DRIFT_FACTORS, STATUS_META } from "../lib/constants";
-import { formatAbsoluteTime } from "../lib/format";
+import { formatAbsoluteTime, formatNumber } from "../lib/format";
+import { axisTime, dayBoundaries, primaryMetric, readHistory, RECENT_WINDOW } from "../lib/driftReading";
 
 const LEVEL = { ok: 0, warning: 1, high: 2 };
 const POINT_STYLE = { ok: "circle", warning: "triangle", high: "rectRot" };
@@ -24,6 +25,52 @@ const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 function levelLabel(value) {
   return { 0: "ổn", 1: "cảnh báo", 2: "cao" }[value] ?? "";
 }
+
+// Draws a vertical rule wherever the calendar day changes, and (on the strip
+// that carries the axis) writes the day above it. The x axis itself only
+// shows the time, because repeating "20/9/26" under twenty points hides the
+// one thing worth seeing: that two of the gaps are days wide and the rest
+// are minutes. Registered per chart rather than globally so no other screen
+// inherits it.
+const dayDividers = {
+  id: "dayDividers",
+  afterDatasetsDraw(chart, _args, options) {
+    const { boundaries = [], dayLabels = {}, showLabels = false } = options ?? {};
+    const scale = chart.scales.x;
+    const { top, bottom } = chart.chartArea;
+    const context = chart.ctx;
+
+    context.save();
+    context.strokeStyle = "#CBD5E1";
+    context.setLineDash([3, 3]);
+    context.lineWidth = 1;
+    boundaries.forEach((index) => {
+      // Halfway between the two measurements the day changed across: the
+      // boundary is a gap, not a point.
+      const x = (scale.getPixelForValue(index - 1) + scale.getPixelForValue(index)) / 2;
+      context.beginPath();
+      context.moveTo(x, top);
+      context.lineTo(x, bottom);
+      context.stroke();
+      if (showLabels) {
+        context.setLineDash([]);
+        context.fillStyle = "#64748B";
+        context.font = "11px sans-serif";
+        context.textAlign = "left";
+        context.fillText(dayLabels[index] ?? "", x + 4, top + 11);
+        context.setLineDash([3, 3]);
+      }
+    });
+    if (showLabels && dayLabels[0]) {
+      context.setLineDash([]);
+      context.fillStyle = "#64748B";
+      context.font = "11px sans-serif";
+      context.textAlign = "left";
+      context.fillText(dayLabels[0], scale.getPixelForValue(0), top + 11);
+    }
+    context.restore();
+  },
+};
 
 /**
  * Draws one drift factor's history as its own strip.
@@ -36,13 +83,14 @@ function levelLabel(value) {
  *   factor: An entry of DRIFT_FACTORS — its key, label, hint and colour.
  *   chronological: Drift summaries oldest first.
  *   labels: Formatted timestamps, one per summary.
+ *   dividers: Where the day changes, from dayBoundaries().
  *   showAxis: Whether to draw the x axis labels. Only the bottom strip does;
  *     the strips share one timeline, so repeating it three times is noise.
  *
  * Returns:
  *   A JSX element.
  */
-function DriftFactorStrip({ factor, chronological, labels, showAxis }) {
+function DriftFactorStrip({ factor, chronological, labels, dividers, showAxis }) {
   // A summary with no verdict for this factor (insufficient_data, or the
   // empty `parts` the monitor writes when there was no traffic at all) is a
   // real gap — plotting it at "ổn" would claim somebody checked and found
@@ -98,6 +146,7 @@ function DriftFactorStrip({ factor, chronological, labels, showAxis }) {
     },
     plugins: {
       legend: { display: false },
+      dayDividers: { ...dividers, showLabels: showAxis },
       tooltip: {
         callbacks: {
           title: (items) => chronological[items[0].dataIndex].run_id,
@@ -133,36 +182,242 @@ function DriftFactorStrip({ factor, chronological, labels, showAxis }) {
         </div>
       </div>
       <div className={`drift-strip-canvas ${showAxis ? "drift-strip-canvas-axis" : ""}`}>
-        <Line data={{ labels, datasets: [dataset] }} options={options} />
+        <Line data={{ labels, datasets: [dataset] }} options={options} plugins={[dayDividers]} />
       </div>
     </div>
   );
 }
 
-function DriftHistoryChart({ history }) {
-  const chronological = [...history].reverse();
-  const labels = chronological.map((summary) =>
-    new Date(summary.computed_at).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" })
+/**
+ * Says in words what the three strips show, so the chart does not have to be
+ * decoded before it can be acted on.
+ *
+ * Args:
+ *   reading: What readHistory() returned, or null.
+ *
+ * Returns:
+ *   A JSX element, or null when there is no history to read.
+ */
+function DriftVerdictLine({ reading }) {
+  if (reading === null) return null;
+  const { changes, comparable, recentHigh, recentCount, versions } = reading;
+
+  return (
+    <div className="verdict-line">
+      <p className="verdict-headline">
+        {recentHigh === 0
+          ? `Không lần đo nào trong ${recentCount} lần gần nhất ở mức cao.`
+          : `${recentHigh}/${recentCount} lần đo gần nhất ở mức cao.`}
+      </p>
+
+      {changes.length === 0 ? (
+        <p className="verdict-detail">Lần đo mới nhất giữ nguyên cả ba mức so với lần trước.</p>
+      ) : (
+        <p className="verdict-detail">
+          So với lần đo trước:{" "}
+          {changes.map((change, index) => (
+            <span key={change.key}>
+              {index > 0 && ", "}
+              <b>{change.label}</b>{" "}
+              <span
+                className={
+                  change.worse === true
+                    ? "verdict-worse"
+                    : change.worse === false
+                      ? "verdict-better"
+                      : ""
+                }
+              >
+                {STATUS_META[change.from]?.label ?? change.from} →{" "}
+                {STATUS_META[change.to]?.label ?? change.to}
+              </span>
+            </span>
+          ))}
+          .
+        </p>
+      )}
+
+      {!comparable && (
+        <p className="verdict-warn">
+          Hai lần đo cuối thuộc <b>hai model version khác nhau</b> (v{reading.previous.model_version} rồi v
+          {reading.latest.model_version}), nên thay đổi ở trên không phải là xu hướng của cùng một model.
+        </p>
+      )}
+      {comparable && versions.length > 1 && (
+        <p className="verdict-warn">
+          Biểu đồ gồm {versions.length} model version ({versions.map((version) => `v${version}`).join(", ")}) — các
+          điểm trước lần đổi version không so trực tiếp với các điểm sau được.
+        </p>
+      )}
+    </div>
   );
+}
+
+/**
+ * Plots the metric the performance verdict is made from, with the value the
+ * train stage measured as the baseline.
+ *
+ * Three severity levels cannot say "how much worse"; this can. The baseline
+ * is drawn per point rather than as one flat line because it belongs to the
+ * champion of that measurement, and the champion changes.
+ *
+ * Args:
+ *   chronological: Summaries oldest first.
+ *   labels: The x labels, shared with the strips.
+ *   dividers: Day boundaries, shared with the strips.
+ *   taskType: Decides which metric is plotted.
+ *
+ * Returns:
+ *   A JSX element, or null when no measurement carries the metric.
+ */
+function MetricTrendChart({ chronological, labels, dividers, taskType }) {
+  const metric = primaryMetric(taskType);
+  if (metric === null) return null;
+
+  const current = chronological.map((summary) => summary.current_metrics?.[metric] ?? null);
+  // reference_metrics was added to the monitor stage on 2026-09-22; every
+  // summary written before that lacks it, so the baseline is simply absent
+  // for those points instead of being back-filled with a guess.
+  const reference = chronological.map((summary) => summary.reference_metrics?.[metric] ?? null);
+  if (current.every((value) => value === null)) return null;
+
+  const measuredCount = current.filter((value) => value !== null).length;
+  const referenceCount = reference.filter((value) => value !== null).length;
+
+  const data = {
+    labels,
+    datasets: [
+      {
+        label: `${metric} đo được`,
+        data: current,
+        borderColor: "#DB2777",
+        backgroundColor: "#DB277722",
+        pointRadius: 4,
+        borderWidth: 2,
+        spanGaps: false,
+        fill: false,
+      },
+      {
+        label: `${metric} lúc train`,
+        data: reference,
+        borderColor: "#94A3B8",
+        borderDash: [5, 4],
+        // Not 0: reference_metrics only exists from 2026-09-22 on, so early
+        // in a history there is a single value and a line through one point
+        // draws nothing at all.
+        pointRadius: 3,
+        pointBackgroundColor: "#94A3B8",
+        borderWidth: 2,
+        spanGaps: true,
+        fill: false,
+      },
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        ticks: { callback: (value) => formatNumber(value), font: { size: 11 } },
+        grid: { color: "#F1F5F9" },
+      },
+      x: {
+        ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 10 } },
+        grid: { display: false },
+      },
+    },
+    plugins: {
+      legend: { position: "top", labels: { boxWidth: 12, font: { size: 11 } } },
+      dayDividers: { ...dividers, showLabels: true },
+      tooltip: {
+        callbacks: {
+          title: (items) => chronological[items[0].dataIndex].run_id,
+          label: (item) => {
+            const summary = chronological[item.dataIndex];
+            const measured = summary.current_metrics?.[metric];
+            const trained = summary.reference_metrics?.[metric];
+            if (item.datasetIndex === 1) return `${metric} lúc train: ${formatNumber(trained)}`;
+            const ratio =
+              measured !== undefined && trained
+                ? ` (gấp ${(measured / trained).toFixed(2)} lần lúc train)`
+                : "";
+            return [
+              `${metric} đo được: ${formatNumber(measured)}${ratio}`,
+              `trên ${summary.n_ground_truth} kết quả thật`,
+            ];
+          },
+        },
+      },
+    },
+  };
+
+  return (
+    <div className="drift-strip">
+      <div className="drift-strip-head">
+        <span className="drift-strip-dot" style={{ background: "#DB2777" }} />
+        <div>
+          <p className="drift-strip-label">{metric.toUpperCase()} thật sự đo được</p>
+          <p className="drift-strip-hint">
+            Đường nét đứt là {metric} stage train ghi lại — đo trên <b>chính dữ liệu train</b>, nên nó lạc quan hơn
+            thực tế. Đây cũng đúng là con số mà mức Performance drift ở trên được chấm dựa vào.
+          </p>
+        </div>
+      </div>
+      <div className="drift-strip-canvas drift-strip-canvas-axis">
+        <Line data={data} options={options} plugins={[dayDividers]} />
+      </div>
+      {referenceCount < measuredCount && (
+        <p className="chart-gap-note">
+          Mốc &ldquo;lúc train&rdquo; chỉ có ở {referenceCount}/{measuredCount} lần đo — báo cáo viết trước ngày
+          22/9/2026 không lưu chỉ số này, nên không có gì để vẽ ở những điểm cũ.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DriftHistoryChart({ history, taskType }) {
+  const chronological = [...history].reverse();
+  const labels = chronological.map((summary) => axisTime(summary.computed_at));
+  const dividers = dayBoundaries(chronological);
   const gaps = chronological.filter((summary) => summary.parts?.performance === "insufficient_data");
+  const reading = readHistory(history);
 
   return (
     <div>
+      <DriftVerdictLine reading={reading} />
+
       {DRIFT_FACTORS.map((factor, index) => (
         <DriftFactorStrip
           key={factor.key}
           factor={factor}
           chronological={chronological}
           labels={labels}
+          dividers={dividers}
           showAxis={index === DRIFT_FACTORS.length - 1}
         />
       ))}
-      {gaps.length > 0 && (
-        <p className="chart-gap-note">
-          Khoảng trống trên dải Performance drift = chưa đủ dữ liệu (không phải mức thấp hơn &ldquo;ổn&rdquo;), tại:{" "}
-          {gaps.map((summary) => formatAbsoluteTime(summary.computed_at)).join(", ")}.
-        </p>
-      )}
+
+      <MetricTrendChart
+        chronological={chronological}
+        labels={labels}
+        dividers={dividers}
+        taskType={taskType}
+      />
+
+      <p className="chart-gap-note">
+        Mỗi điểm là <b>một lần đo</b>, không phải một mốc thời gian — các điểm cách đều nhau kể cả khi hai lần đo cách
+        nhau vài phút hay vài ngày. Vạch đứng dọc là chỗ sang ngày mới. Kết luận ở trên tính trên {RECENT_WINDOW} lần
+        đo gần nhất.
+        {gaps.length > 0 && (
+          <>
+            {" "}
+            Khoảng trống trên dải Performance drift = chưa đủ dữ liệu (không phải mức thấp hơn &ldquo;ổn&rdquo;), tại:{" "}
+            {gaps.map((summary) => formatAbsoluteTime(summary.computed_at)).join(", ")}.
+          </>
+        )}
+      </p>
     </div>
   );
 }
@@ -362,7 +617,7 @@ export default function Drift({ onRetrain }) {
 
             {history.length > 0 && (
               <div className="chart-wrap">
-                <DriftHistoryChart history={history} />
+                <DriftHistoryChart history={history} taskType={latestState.summary.task_type} />
               </div>
             )}
 
