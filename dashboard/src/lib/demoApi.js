@@ -112,10 +112,11 @@ export const demoApi = {
 
   driftLatest: async (modelName) => {
     await delay(200);
-    if (modelName !== "house_price_regressor") {
+    const fixture = fx.driftFixturesByModel[modelName];
+    if (!fixture) {
       throw new ApiError("notfound", 404, `no drift report yet for ${modelName}`);
     }
-    return fx.driftLatest;
+    return fixture.latest;
   },
 
   // Demo mode has no object storage, so there is no report to point at and
@@ -124,9 +125,7 @@ export const demoApi = {
 
   driftHistory: async (modelName) => {
     await delay(200);
-    if (modelName !== "house_price_regressor") {
-      return { history: [] };
-    }
-    return fx.driftHistory;
+    const fixture = fx.driftFixturesByModel[modelName];
+    return fixture ? fixture.history : { history: [] };
   },
 };

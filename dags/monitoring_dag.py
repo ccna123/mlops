@@ -59,7 +59,7 @@ BASE_ENV = {
 
 # Kept in sync with ml_common.stageio.RESULT_PREFIX by a test in common/tests.
 # The DAG runs in the Airflow image, which has no ml_common installed.
-RESULT_PREFIX = "XCOM_RESULT "
+RESULT_PREFIX = "Data drift "
 
 
 def stage_result(lines: list[str]) -> dict:

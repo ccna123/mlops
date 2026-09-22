@@ -313,3 +313,77 @@ export const driftHistory = {
     },
   ],
 };
+
+// Not captured API output (the brief only ever exercised the regressor) —
+// synthesized so demo mode has a classification example too. Without this,
+// switching the Drift screen's model dropdown to
+// house_needs_renovation_classifier showed a 404 empty state and nobody
+// could see what a classification report looks like without the real stack
+// up. Metric names come from ml_common.metrics.compute_metrics
+// ("classification" branch): f1, accuracy, auc — never rmse/mae/r2.
+export const driftLatestClassification = {
+  model_name: "house_needs_renovation_classifier",
+  model_version: "1",
+  task_type: "classification",
+  run_id: "20260922T091500",
+  computed_at: "2026-09-22T09:15:00.000000+00:00",
+  window_hours: 1.0,
+  severity: "warning",
+  parts: { feature: "warning", prediction: "ok", performance: "warning" },
+  n_predictions: 420,
+  n_ground_truth: 300,
+  current_metrics: { f1: 0.0812, accuracy: 0.7024, auc: 0.6012 },
+  // The champion's own test scores, copied from the `models` fixture above
+  // (version "1") so the comparison table has a real-shaped baseline.
+  reference_metrics: { f1: 0.1046831955922865, accuracy: 0.756128064032016, auc: 0.6468311259876465 },
+  reference_source: "test_metrics",
+  report_key: "reports/house_needs_renovation_classifier/20260922T091500/evidently.html",
+};
+
+export const driftHistoryClassification = {
+  history: [
+    driftLatestClassification,
+    {
+      model_name: "house_needs_renovation_classifier",
+      model_version: "1",
+      task_type: "classification",
+      run_id: "20260922T081500",
+      computed_at: "2026-09-22T08:15:00.000000+00:00",
+      window_hours: 1.0,
+      severity: "ok",
+      parts: { feature: "ok", prediction: "ok", performance: "ok" },
+      n_predictions: 300,
+      n_ground_truth: 280,
+      current_metrics: { f1: 0.1012, accuracy: 0.7488, auc: 0.6390 },
+      reference_metrics: { f1: 0.1046831955922865, accuracy: 0.756128064032016, auc: 0.6468311259876465 },
+      reference_source: "test_metrics",
+      report_key: "reports/house_needs_renovation_classifier/20260922T081500/evidently.html",
+    },
+    {
+      model_name: "house_needs_renovation_classifier",
+      model_version: "1",
+      task_type: "classification",
+      run_id: "20260922T071500",
+      computed_at: "2026-09-22T07:15:00.000000+00:00",
+      window_hours: 0.05,
+      severity: "warning",
+      parts: { feature: "warning", prediction: "ok", performance: "insufficient_data" },
+      n_predictions: 60,
+      n_ground_truth: 0,
+      current_metrics: {},
+      report_key: "reports/house_needs_renovation_classifier/20260922T071500/evidently.html",
+    },
+  ],
+};
+
+// Keyed lookup so demoApi can serve the right fixture for whichever model
+// the dropdown has selected, instead of hard-coding the one regressor —
+// that hard-coding is exactly what made every other model a 404 in demo
+// mode, classification included.
+export const driftFixturesByModel = {
+  house_price_regressor: { latest: driftLatest, history: driftHistory },
+  house_needs_renovation_classifier: {
+    latest: driftLatestClassification,
+    history: driftHistoryClassification,
+  },
+};
