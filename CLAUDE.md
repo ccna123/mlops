@@ -195,7 +195,7 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 19 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
 | 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-22: 696 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-22: 698 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
@@ -236,11 +236,20 @@ thì model train bằng xgboost sẽ load không nổi — đúng loại trainin
 skew mà ràng buộc kiến trúc mục 3 dựng lên để tránh. Đã verify: train bằng
 xgboost → `serving` `/predict/regression` trả về dự đoán thật.
 
-**Mô phỏng traffic để có gì mà đo drift (2026-09-22).** Màn Drift có khối
-"Mô phỏng model được dùng thật": chọn một trong năm kịch bản của agent, số
+**Mô phỏng traffic để có gì mà đo drift (2026-09-22).** Màn Drift có **đúng một
+nút** "Mô phỏng & tính drift": chọn một trong năm kịch bản của agent, số
 request, bấm là `POST /api/simulate` trigger DAG **`traffic_agent`**
-(`dags/traffic_agent_dag.py`) chạy image `ml-agent:latest` bằng
-`DockerOperator`. Tên kịch bản lấy từ `GET /api/scenarios`, đọc thẳng
+(`dags/traffic_agent_dag.py`). DAG có hai task — `send_traffic` chạy image
+`ml-agent:latest` bằng `DockerOperator`, rồi `compute_drift` dùng
+`TriggerDagRunOperator(wait_for_completion=True)` gọi `monitoring_dag` và chờ
+nó xong. **Nối ở DAG chứ không nối ở dashboard**, để đóng trình duyệt giữa
+chừng thì drift vẫn được tính.
+
+`GET /api/simulate/status` trả kèm `tasks` của run, nên dashboard vẽ được dải
+tiến trình hai chặng giống màn Tổng quan và tự tải lại báo cáo khi run kết
+thúc. Trước đó phải mở Airflow xem traffic chạy xong chưa rồi mới bấm nút thứ
+hai — đó là lý do gộp lại. Đo ngày 2026-09-22: cả chuỗi 40 giây (18,5s gửi
+traffic + 20,6s tính drift). Tên kịch bản lấy từ `GET /api/scenarios`, đọc thẳng
 `services.agent.scenarios.SCENARIOS`, nên frontend không chép danh sách nào.
 Không sửa gì trong `services/agent/` — tham số vẫn đi vào bằng command line,
 y như khi chạy tay.

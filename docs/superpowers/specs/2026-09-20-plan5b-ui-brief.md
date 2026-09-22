@@ -518,6 +518,21 @@ Nguồn: `.../house_price_regressor/abc/promote` → 422 (version không phải 
 
 **Component:** `SeverityOverview` (**tách ba loại**) · `DriftHistoryChart` · `EvidentlyReportFrame` · `RetrainCTA` · `InsufficientDataNotice`, cộng `MetricTile`, `StatusBadge` và các component dùng chung.
 
+**Sửa ngày 2026-09-22 (3) — một nút, và tiến trình nhìn thấy được.** Màn này
+từng có hai nút: gửi traffic, rồi tự canh lúc nào traffic xong để bấm "Tính
+drift ngay". Canh bằng cách mở Airflow xem, tức là dashboard bắt người dùng đi
+hỏi chỗ khác — hỏng đúng mục đích của nó. Nay:
+
+- `traffic_agent` có thêm task `compute_drift`
+  (`TriggerDagRunOperator(wait_for_completion=True)`) gọi `monitoring_dag`.
+  Nối ở DAG chứ không nối bằng hai lời gọi liên tiếp từ trình duyệt, để đóng
+  tab giữa chừng thì drift vẫn được tính.
+- `GET /simulate/status` trả kèm `tasks`, và khối mô phỏng vẽ chúng bằng đúng
+  `stage-node` / `stage-row` của màn Tổng quan (mục 4.1), hai chặng: gửi
+  traffic → tính lại drift.
+- Khi run kết thúc, trang **tự tải lại** báo cáo. Nút "Tính drift ngay" bị bỏ;
+  chỉ còn "Tải lại" cho việc đọc lại thủ công.
+
 **Bổ sung 2026-09-22 — `TrafficSimulator`.** Một khối riêng nằm **trên** khối
 Drift: dropdown năm kịch bản (tên lấy từ `GET /scenarios`, nhãn tiếng Việt ở
 `SCENARIO_META`), ô số request (1–5000, đúng trần của API), nút "Gửi traffic",
