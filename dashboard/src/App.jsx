@@ -1,7 +1,6 @@
 import { useState } from "react";
 import AppShell from "./components/AppShell";
 import Overview from "./pages/Overview";
-import StagesLogs from "./pages/StagesLogs";
 import DataPage from "./pages/DataPage";
 import Models from "./pages/Models";
 import Drift from "./pages/Drift";
@@ -25,8 +24,6 @@ function Router({ page, setPage, prefillTaskType, setPrefillTaskType }) {
   switch (page) {
     case "overview":
       return <Overview prefillTaskType={prefillTaskType} onConsumePrefill={() => setPrefillTaskType(null)} />;
-    case "logs":
-      return <StagesLogs />;
     case "data":
       return <DataPage />;
     case "models":

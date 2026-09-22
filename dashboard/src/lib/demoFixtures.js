@@ -125,54 +125,6 @@ export const runDetails = {
   "manual__2026-09-18T00:00:00+00:00": failedDetail,
 };
 
-// Literal `GET /pipeline/runs/{run_id}/logs?stage=extract` (10 of 24 real
-// lines, per the brief's own note that it trimmed the middle 14).
-const extractLog = {
-  lines: [
-    "e59fd8ef0e61",
-    "*** Found local files:",
-    "***   * /opt/airflow/logs/dag_id=ml_pipeline/run_id=manual__2026-09-21T03:53:17.127926+00:00/task_id=extract/attempt=1.log",
-    "[2026-09-21T03:53:17.910+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs",
-    "[2026-09-21T03:53:17.931+0000] {taskinstance.py:2613} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: ml_pipeline.extract manual__2026-09-21T03:53:17.127926+00:00 [queued]>",
-    "[2026-09-21T03:53:17.942+0000] {taskinstance.py:2866} INFO - Starting attempt 1 of 1",
-    "[2026-09-21T03:53:17.955+0000] {taskinstance.py:2889} INFO - Executing <Task(DockerOperator): extract> on 2026-09-21 03:53:17.127926+00:00",
-    "[2026-09-21T03:53:17.963+0000] {logging_mixin.py:190} WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/task/task_runner/standard_task_runner.py:70 DeprecationWarning: This process (pid=944) is multi-threaded, use of fork() may lead to deadlocks in the child.",
-    "[2026-09-21T03:53:17.963+0000] {standard_task_runner.py:104} INFO - Running: ['airflow', 'tasks', 'run', 'ml_pipeline', 'extract', 'manual__2026-09-21T03:53:17.127926+00:00', '--job-id', '52', '--raw', '--subdir', 'DAGS_FOLDER/ml_pipeline_dag.py', '--cfg-path', '/tmp/tmpxkf365fr']",
-    '[2026-09-21T03:53:19.138+0000] {docker.py:438} INFO - XCOM_RESULT {"fingerprint": "3b318b364660175f", "row_count": 1000}',
-  ],
-  truncated: false,
-};
-
-// Literal `stage=validate` log for the skipped task — banner and Airflow
-// runner lines only, no stage output (brief §4.2).
-const validateLog = {
-  lines: [
-    "",
-    "*** Found local files:",
-    "***   * /opt/airflow/logs/dag_id=ml_pipeline/run_id=manual__2026-09-21T03:53:17.127926+00:00/task_id=validate/attempt=1.log",
-    "[2026-09-21T03:53:19.834+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs",
-    "[2026-09-21T03:53:19.847+0000] {taskinstance.py:2603} INFO - Dependencies not met for <TaskInstance: ml_pipeline.validate manual__2026-09-21T03:53:17.127926+00:00 [skipped]>, dependency 'Task Instance State' FAILED: Task is in the 'skipped' state.",
-    "[2026-09-21T03:53:19.855+0000] {local_task_job_runner.py:166} INFO - Task is not able to be run",
-  ],
-  truncated: false,
-};
-
-// The brief flags every other stage's log as "never observed" — kept
-// genuinely empty here rather than invented, matching that caution.
-const unobservedLog = { lines: [], truncated: false };
-
-export const logsByStage = {
-  extract: extractLog,
-  validate: validateLog,
-  prepare_dataset_for_train: unobservedLog,
-  train: unobservedLog,
-  evaluate: unobservedLog,
-  branch_on_gates: unobservedLog,
-  register: unobservedLog,
-  deploy: unobservedLog,
-  stop_no_deploy: unobservedLog,
-};
-
 // Literal `GET /data/v1/preview?rows=2` response.
 export const preview = {
   total_rows: 2012000,

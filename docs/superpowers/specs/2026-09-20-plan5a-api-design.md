@@ -162,7 +162,6 @@ FastAPI.
 | `POST` | `/pipeline/run` | `{task_type, force_reprocess, sample_rows, dataset_version}` | `{run_id, dag_id, state}` |
 | `GET` | `/pipeline/runs` | `?limit=20` | danh sách `{run_id, state, task_type, started_at, ended_at}` |
 | `GET` | `/pipeline/runs/{run_id}` | — | `{run_id, state, tasks: [{task_id, state, try_number, duration}]}` |
-| `GET` | `/pipeline/runs/{run_id}/logs` | `?stage=&level=&q=` | `{lines: [...], truncated: bool}` |
 
 `sample_rows` là `int | None`; `None` nghĩa là dùng toàn bộ dòng. Giá trị âm
 hoặc 0 trả `422`.
@@ -252,7 +251,7 @@ là đầu vào cho Claude design.
 
 **Tổng quan** — `TaskTypeSelector` · `RunTriggerForm` (task_type, force_reprocess, **sample_rows**, dataset_version) · `PipelineStageStrip` (7 stage theo trạng thái) · `RecentRunsTable`
 
-**Stages & Logs** — `StageTabs` · `LogFilterBar` (stage / level / từ khoá) · `LogViewer` (mono, tô theo level, báo khi `truncated`)
+**Stages & Logs** (bỏ ngày 2026-09-22 cùng endpoint log) — `StageTabs` · `LogFilterBar` (stage / level / từ khoá) · `LogViewer` (mono, tô theo level, báo khi `truncated`)
 
 **Dữ liệu** — `DatasetUploader` (drag-drop, tiến độ, báo lỗi khi vượt trần) · `DataPreviewTable` · `ColumnStatsTable` (missing %, out-of-bounds) · `RowLimitPicker`
 

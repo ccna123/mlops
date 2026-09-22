@@ -103,10 +103,11 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_monitoring.ps1
 powershell -ExecutionPolicy Bypass -File scripts\verify_api.ps1
 ```
 
-`verify_api.ps1` gọi service thật, nên cần: **cả stack đang chạy** (kể cả `api`),
-object `raw/v1/data.parquet` đã có trong MinIO (thiếu thì bước 9 **fail**, không
-skip), và Airflow đã có ít nhất một run của `ml_pipeline` (chưa có thì bước 7
-chỉ **SKIP** và script in ra là chưa verify đủ). Chi tiết ở đầu file script.
+`verify_api.ps1` gọi service thật, nên cần: **cả stack đang chạy** (kể cả `api`)
+và object `raw/v1/data.parquet` đã có trong MinIO (thiếu thì bước 8 **fail**,
+không skip). Script có 8 bước; bước duy nhất còn **SKIP** là bước 5 khi một
+model chưa có version nào, và script in ra là chưa verify đủ. Chi tiết ở đầu
+file script.
 
 Khi `common/` thay đổi, phải build lại **cả năm tầng, theo đúng thứ tự này**:
 
@@ -192,10 +193,10 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
-| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 19 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
-| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 18 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 4 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-22: 698 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-22: 656 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.

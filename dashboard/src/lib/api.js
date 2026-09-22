@@ -98,14 +98,6 @@ export const api = {
 
   getRun: (runId) => request(`/pipeline/runs/${encodeURIComponent(runId)}`),
 
-  getLogs: (runId, { stage, level, q, tryNumber }) => {
-    const params = new URLSearchParams({ stage });
-    if (level) params.set("level", level);
-    if (q) params.set("q", q);
-    if (tryNumber !== undefined && tryNumber !== null) params.set("try_number", String(tryNumber));
-    return request(`/pipeline/runs/${encodeURIComponent(runId)}/logs?${params.toString()}`);
-  },
-
   // fetch() cannot report upload progress, so this uses XMLHttpRequest
   // directly instead of going through request() (brief §4.3).
   uploadDataset: (file, datasetVersion, onProgress) =>

@@ -20,7 +20,7 @@ DEFAULT_TIMEOUT = 30.0
 
 
 class AirflowNotFoundError(Exception):
-    """Airflow does not know the run (or the task log) that was asked for.
+    """Airflow does not know the run that was asked for.
 
     The one failure the run routes turn into a 404. Anything else Airflow or
     the network does (unreachable, 401, 5xx) is not "not found" and must not
@@ -252,49 +252,3 @@ class AirflowClient:
                 for task in instances.get("task_instances", [])
             ],
         }
-
-    def get_logs(self, dag_id: str, run_id: str, task_id: str, try_number: int) -> str:
-        """Fetches the log of one task attempt.
-
-        Asks for `text/plain` and reads the body as text. Airflow 2.10 answers
-        a default `Accept: */*` with text/plain anyway, so parsing that as JSON
-        raises; and `Accept: application/json` gives a JSON envelope whose
-        `content` is the Python repr of a list of (host, text) tuples, which is
-        no use as a log. Plain text is the one form that arrives as real lines.
-
-        Args:
-            dag_id: the DAG the run belongs to.
-            run_id: the run identifier.
-            task_id: which task's log to read.
-            try_number: which attempt; Airflow numbers them from 1.
-
-        Returns:
-            The log as one block of text, the first line being the worker host
-            and the rest the task's own lines. Splitting and filtering happen
-            in the route, so this stays a transport concern.
-
-        Raises:
-            AirflowNotFoundError: when Airflow answers 404, which live it does
-                for an unknown run and for an unknown task_id in an existing
-                run, and without asking Airflow when `run_id` or `task_id` is
-                "." or ".." (see `_segment`). It does NOT for a `try_number`
-                that has no log: Airflow answers 200 and puts its own error
-                text ("*** Could not read served logs: 403 ...") in the body,
-                so that text comes back here as if it were the log. Callers
-                must pass the try_number the run detail reports for the task.
-            Exception: any other failure (Airflow unreachable, 401, 5xx) is
-                left to propagate.
-
-        Example:
-            get_logs("ml_pipeline", "manual__...", "extract", 1)
-            # -> line 1 is the worker host ("e59fd8ef0e61"), then the
-            #    "*** Found local files:" banner, then the task's own lines:
-            #    "[2026-09-20T10:00:01.000+0000] {docker.py:438} INFO - raw=raw/v1/..."
-        """
-        missing = f"no log for task {task_id!r}, attempt {try_number}, of run {run_id!r}"
-        path = (
-            f"/dags/{_segment(dag_id, missing)}/dagRuns/{_segment(run_id, missing)}"
-            f"/taskInstances/{_segment(task_id, missing)}/logs/{try_number}"
-        )
-        response = self._send("GET", path, missing, headers={"Accept": "text/plain"})
-        return response.text

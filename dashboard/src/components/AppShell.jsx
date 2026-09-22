@@ -1,17 +1,16 @@
-import { LayoutDashboard, ListTree, Database, Boxes, Activity, FlaskConical } from "lucide-react";
+import { LayoutDashboard, Database, Boxes, Activity, FlaskConical } from "lucide-react";
 import HealthPill from "./HealthPill";
 import { useDemoMode } from "../lib/DemoModeContext";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Tổng quan", Icon: LayoutDashboard },
-  { id: "logs", label: "Stages & Logs", Icon: ListTree },
   { id: "data", label: "Dữ liệu", Icon: Database },
   { id: "models", label: "Models", Icon: Boxes },
   { id: "drift", label: "Drift", Icon: Activity },
 ];
 
 /**
- * Renders the five-item sidebar, topbar, and HealthPill shared by every
+ * Renders the four-item sidebar, topbar, and HealthPill shared by every
  * screen (brief §3.1), plus a demo-mode toggle for reviewing the UI with
  * the brief's captured JSON fixtures instead of a live API.
  *

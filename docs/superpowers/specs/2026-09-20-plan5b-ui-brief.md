@@ -52,7 +52,7 @@ Quy tắc:
 
 ### 3.1. AppShell và HealthPill
 
-`AppShell`: sidebar năm mục (Tổng quan, Stages & Logs, Dữ liệu, Models, Drift), topbar có `HealthPill`. `HealthPill` đọc `GET /api/health`.
+`AppShell`: sidebar bốn mục (Tổng quan, Dữ liệu, Models, Drift) — mục `Stages & Logs` bỏ ngày 2026-09-22 — topbar có `HealthPill`. `HealthPill` đọc `GET /api/health`.
 
 Nguồn: `GET /api/health` → 200 (0,094 s), mọi dịch vụ đang ổn.
 
@@ -129,7 +129,6 @@ Mọi `GET` không cần xác nhận.
 | --- | --- |
 | `GET /health` | Mỗi ≥10 giây, một request một lúc (mục 3.1) |
 | `GET /pipeline/runs` và `.../runs/{run_id}` | Lúc mở màn; poll khoảng 5 giây **chỉ khi** run đang xem là `queued` hoặc `running`, dừng khi `success` hoặc `failed` (gợi ý, không phải ràng buộc của API) |
-| `GET /pipeline/runs/{run_id}/logs` | **Khi người dùng bấm.** Không stream, không tự làm mới. |
 | `GET /data/{version}/preview` | **Chỉ khi người dùng mở màn Dữ liệu / bấm xem.** Không poll. Mỗi lần gọi tốn 1,4–2 giây và làm process API đạt đỉnh khoảng 0,9–1,3 GB RAM (đo ở Task 12). |
 | `GET /models` | Lúc mở màn, và **sau mỗi lần promote** |
 | `GET /drift/latest`, `/drift/history` | Lúc mở màn hoặc khi đổi model; nút làm mới thủ công. Không cần poll. |
@@ -140,9 +139,8 @@ Mọi `GET` không cần xác nhận.
 | --- | --- |
 | `GET /health` | AppShell (mọi màn) |
 | `POST /pipeline/run` | Tổng quan (4.1), nút retrain ở Drift (4.5) |
-| `GET /pipeline/runs` | Tổng quan (4.1), chọn run ở Stages & Logs (4.2) |
-| `GET /pipeline/runs/{run_id}` | Tổng quan (4.1), Stages & Logs (4.2) |
-| `GET /pipeline/runs/{run_id}/logs` | Stages & Logs (4.2) |
+| `GET /pipeline/runs` | Tổng quan (4.1) |
+| `GET /pipeline/runs/{run_id}` | Tổng quan (4.1) |
 | `POST /data/upload` | Dữ liệu (4.3) |
 | `GET /data/{dataset_version}/preview` | Dữ liệu (4.3) |
 | `GET /models` | Models (4.4), chọn model ở Drift (4.5) |
@@ -265,7 +263,13 @@ Nguồn: `GET /api/pipeline/runs/does-not-exist-live1` → 404.
 
 ---
 
-### 4.2. Stages & Logs
+### 4.2. Stages & Logs (đã bỏ)
+
+> **Bỏ ngày 2026-09-22.** Chủ dự án bỏ hẳn tính năng xem log trên dashboard:
+> màn `Stages & Logs`, endpoint `GET /api/pipeline/runs/{run_id}/logs`,
+> `AirflowClient.get_logs` và bộ lọc log ở backend đều đã xoá. Log của một
+> task đọc thẳng trên Airflow UI (http://localhost:8080). Mục này giữ lại để
+> đọc hiểu các quyết định cũ, **không còn mô tả hệ thống hiện tại**.
 
 **Mục đích:** đọc log của một stage trong một lần chạy, lọc theo mức và từ khoá.
 

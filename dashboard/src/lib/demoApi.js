@@ -44,11 +44,6 @@ export const demoApi = {
     );
   },
 
-  getLogs: async (runId, { stage }) => {
-    await delay(250);
-    return fx.logsByStage[stage] ?? { lines: [], truncated: false };
-  },
-
   uploadDataset: async (file, datasetVersion, onProgress) => {
     for (let progress = 0.2; progress <= 1; progress += 0.2) {
       await delay(120);

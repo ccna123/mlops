@@ -1,4 +1,3 @@
-import json
 
 import pytest
 
@@ -165,103 +164,6 @@ def test_get_run_returns_task_states():
     ]
 
 
-# Copied from the log Airflow 2.10.3 really served for the extract task of
-# run manual__2026-09-21T03:53:17.127926+00:00 (Task 12 live measurement). The
-# first line is the worker host, then the "Found local files" banner.
-REAL_LOG_LINES = [
-    "e59fd8ef0e61",
-    "*** Found local files:",
-    "***   * /opt/airflow/logs/dag_id=ml_pipeline/run_id=manual__2026-09-21T03:53:17.127926"
-    "+00:00/task_id=extract/attempt=1.log",
-    "[2026-09-21T03:53:17.963+0000] {logging_mixin.py:190} WARNING - "
-    "/home/airflow/.local/lib/python3.12/site-packages/airflow/task/task_runner/"
-    "standard_task_runner.py:70 DeprecationWarning: This process (pid=944) is "
-    "multi-threaded, use of fork() may lead to deadlocks in the child.",
-    "[2026-09-21T03:53:18.210+0000] {docker.py:367} INFO - "
-    "Starting docker container from image ml-extract:latest",
-    "[2026-09-21T03:53:19.106+0000] {docker.py:438} INFO - "
-    "raw=raw/v1/data.parquet etag=9cfee4e676617612895d6162545fade1-28 sample_rows=1000",
-    "[2026-09-21T03:53:19.137+0000] {docker.py:438} INFO - "
-    "reusing existing extracted/3b318b364660175f/data.parquet",
-    "[2026-09-21T03:53:19.138+0000] {docker.py:438} INFO - XCOM_RESULT "
-    '{"fingerprint": "3b318b364660175f", "row_count": 1000}',
-]
-REAL_LOG_TEXT = "\n".join(REAL_LOG_LINES) + "\n"
-
-
-class FakeTextResponse:
-    """A response shaped like Airflow's log endpoint, JSON parsing included.
-
-    `.json()` really parses the body, as httpx does, so a client that calls it
-    on Airflow's text/plain log fails here for the same reason it fails live.
-    """
-
-    def __init__(self, text, content_type, status_code=200):
-        self.text = text
-        self.headers = {"content-type": content_type}
-        self.status_code = status_code
-
-    def json(self):
-        return json.loads(self.text)
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-
-class FakeLogHttp:
-    """Answers a log request the way Airflow 2.10 does, depending on `Accept`.
-
-    Accept: application/json gives a JSON envelope whose `content` is the
-    repr of a list of (host, text) tuples - useless as a log. Anything else
-    (text/plain, or httpx's default */*) gives the plain text body.
-    """
-
-    def __init__(self):
-        self.calls = []
-
-    def request(self, method, url, **kwargs):
-        self.calls.append((method, url, kwargs))
-        accept = kwargs.get("headers", {}).get("Accept", "*/*")
-        if accept == "application/json":
-            content = repr([("e59fd8ef0e61", REAL_LOG_TEXT)])
-            envelope = {"content": content, "continuation_token": None}
-            return FakeTextResponse(json.dumps(envelope), "application/json")
-        return FakeTextResponse(REAL_LOG_TEXT, "text/plain")
-
-
-def test_get_logs_returns_the_text_plain_body_as_is():
-    http = FakeLogHttp()
-    client = AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
-
-    text = client.get_logs("ml_pipeline", "r1", "extract", 1)
-
-    assert text == REAL_LOG_TEXT
-    assert "taskInstances/extract/logs/1" in http.calls[0][1]
-
-
-def test_get_logs_asks_airflow_for_text_plain():
-    # Without this header Airflow's answer depends on what the client happens
-    # to send by default; with application/json the log arrives as a repr.
-    http = FakeLogHttp()
-    client = AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
-
-    client.get_logs("ml_pipeline", "r1", "extract", 1)
-
-    assert http.calls[0][2]["headers"]["Accept"] == "text/plain"
-
-
-def test_other_calls_still_expect_json():
-    # The Accept header is for the log call only; the JSON endpoints keep the
-    # default, so a stray text/plain there would break them.
-    http = FakeHttp([FakeResponse({"dag_runs": []})])
-    client = AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
-
-    client.list_runs("ml_pipeline", limit=1)
-
-    assert "Accept" not in http.calls[0][2].get("headers", {})
-
-
 def test_an_http_error_propagates_rather_than_being_swallowed():
     http = FakeHttp([FakeResponse({"detail": "boom"}, status_code=500)])
     client = AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
@@ -292,21 +194,13 @@ def test_get_run_not_found_on_the_task_instances_call_is_also_not_found():
         client.get_run("ml_pipeline", "r1")
 
 
-def test_get_logs_for_a_run_airflow_does_not_know_raises_not_found():
-    http = FakeHttp([FakeTextResponse("not found", "text/plain", status_code=404)])
-    client = AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
-
-    with pytest.raises(AirflowNotFoundError, match="does-not-exist"):
-        client.get_logs("ml_pipeline", "does-not-exist", "extract", 1)
-
-
 @pytest.mark.parametrize("status_code", [401, 500, 503])
-def test_get_logs_failing_for_another_reason_is_not_not_found(status_code):
-    http = FakeHttp([FakeTextResponse("nope", "text/plain", status_code=status_code)])
+def test_a_call_failing_for_another_reason_is_not_not_found(status_code):
+    http = FakeHttp([FakeResponse({"detail": "nope"}, status_code=status_code)])
     client = AirflowClient("http://airflow:8080/api/v1", "admin", "admin", http=http)
 
     with pytest.raises(RuntimeError) as raised:
-        client.get_logs("ml_pipeline", "r1", "extract", 1)
+        client.get_run("ml_pipeline", "r1")
 
     assert not isinstance(raised.value, AirflowNotFoundError)
 
@@ -345,42 +239,25 @@ def _recording_httpx(seen):
 
     def handler(request):
         seen.append(request.url)
-        return httpx.Response(200, text="log text", headers={"content-type": "text/plain"})
+        # get_run makes two calls; one payload carrying both shapes answers both.
+        return httpx.Response(
+            200, json={"dag_run_id": "r", "state": "success", "task_instances": []}
+        )
 
     return httpx.Client(transport=httpx.MockTransport(handler))
-
-
-def test_get_logs_encodes_every_path_component():
-    http = FakeHttp([FakeTextResponse("log", "text/plain")])
-    client = AirflowClient(BASE, "admin", "admin", http=http)
-
-    client.get_logs("dag/x", "x?y", "../v", 1)
-
-    assert http.calls[0][1] == f"{BASE}/dags/dag%2Fx/dagRuns/x%3Fy/taskInstances/..%2Fv/logs/1"
 
 
 def test_a_hostile_component_cannot_leave_the_dag_run_path_as_httpx_sends_it():
     seen = []
     client = AirflowClient(BASE, "admin", "admin", http=_recording_httpx(seen))
 
-    client.get_logs("ml_pipeline", "x?y", "../../../../../variables?", 1)
+    client.get_run("ml_pipeline", "../../../../../variables?x=1")
 
-    (url,) = seen
+    url = seen[0]
     assert url.query == b""
     assert url.raw_path == (
-        b"/api/v1/dags/ml_pipeline/dagRuns/x%3Fy/taskInstances/"
-        b"..%2F..%2F..%2F..%2F..%2Fvariables%3F/logs/1"
-    )
-
-
-def test_a_real_run_id_is_percent_encoded_in_the_outbound_url():
-    http = FakeHttp([FakeTextResponse("log", "text/plain")])
-    client = AirflowClient(BASE, "admin", "admin", http=http)
-
-    client.get_logs("ml_pipeline", REAL_RUN_ID, "extract", 2)
-
-    assert http.calls[0][1] == (
-        f"{BASE}/dags/ml_pipeline/dagRuns/{REAL_RUN_ID_ENCODED}/taskInstances/extract/logs/2"
+        b"/api/v1/dags/ml_pipeline/dagRuns/"
+        b"..%2F..%2F..%2F..%2F..%2Fvariables%3Fx%3D1"
     )
 
 
@@ -423,18 +300,5 @@ def test_a_run_id_of_only_dots_is_not_found_and_sends_nothing(dots):
 
     with pytest.raises(AirflowNotFoundError, match="no run"):
         client.get_run("ml_pipeline", dots)
-    with pytest.raises(AirflowNotFoundError):
-        client.get_logs("ml_pipeline", dots, "extract", 1)
-
-    assert http.calls == []
-
-
-@pytest.mark.parametrize("dots", [".", ".."])
-def test_a_task_id_of_only_dots_is_not_found_and_sends_nothing(dots):
-    http = FakeHttp([])
-    client = AirflowClient(BASE, "admin", "admin", http=http)
-
-    with pytest.raises(AirflowNotFoundError):
-        client.get_logs("ml_pipeline", "r1", dots, 1)
 
     assert http.calls == []

@@ -1,28 +1,29 @@
 # Verifies Plan 5a (the API layer).
 #
 # Preconditions: run from the repo root, with the WHOLE stack up (postgres, minio,
-# mlflow, airflow, serving and the api service) - steps 3 to 9 call the live
+# mlflow, airflow, serving and the api service) - steps 3 to 8 call the live
 # services. A dependency that is down is a failure here, not a skip.
 #
-# Step 9 also needs the raw dataset `raw/v1/data.parquet` to be in object storage
+# Step 8 also needs the raw dataset `raw/v1/data.parquet` to be in object storage
 # (upload it through POST /api/data/upload or the ingest step of the pipeline). A
-# stack without raw v1 FAILS step 9: the preview is 404 there, and this script
+# stack without raw v1 FAILS step 8: the preview is 404 there, and this script
 # cannot tell "not uploaded yet" from "the route is broken".
 #
 # Every step must be able to fail: a curl that cannot connect, an empty body or
 # a wrong value throws. The only thing that is not a failure is a check that has
 # nothing to look at (a model with an empty versions list, an Airflow that has
-# never run the pipeline); it is printed as SKIP and counted separately in the
+# no version yet); it is printed as SKIP and counted separately in the
 # last lines, never as a pass. A payload that is malformed - a model with no
-# `versions` key at all - is a failure, not a skip.
+# `versions` key at all - is a failure, not a skip. Since the log step went
+# (2026-09-22), the only skip left is a model with no versions.
 #
-# Steps 7 to 9 each guard a bug that unit tests with mocks let through and the
-# live stack exposed (Task 12): the logs route answered 500 on Airflow's real
-# text/plain log, an unknown run answered 500 instead of 404, and the preview
-# reported every column as 0% missing.
+# Steps 7 and 8 each guard a bug that unit tests with mocks let through and the
+# live stack exposed (Task 12): an unknown run answered 500 instead of 404, and
+# the preview reported every column as 0% missing. A third such step covered the
+# log route, which was removed with the feature on 2026-09-22.
 $ErrorActionPreference = "Stop"
 $api = "http://localhost:8001/api"
-$totalSteps = 9
+$totalSteps = 8
 $stepsPassed = 0
 $modelsChecked = 0
 $skipped = 0
@@ -52,17 +53,17 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     throw "run this script from the repo root: .venv\Scripts\python.exe not found"
 }
 
-Write-Host "== 1/9 Tests on the dev machine ==" -ForegroundColor Cyan
+Write-Host "== 1/8 Tests on the dev machine ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m pytest common/ services/ -q
 if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 $stepsPassed++
 
-Write-Host "== 2/9 Ruff ==" -ForegroundColor Cyan
+Write-Host "== 2/8 Ruff ==" -ForegroundColor Cyan
 .venv\Scripts\python.exe -m ruff check .
 if ($LASTEXITCODE -ne 0) { throw "ruff failed" }
 $stepsPassed++
 
-Write-Host "== 3/9 Airflow REST accepts basic auth ==" -ForegroundColor Cyan
+Write-Host "== 3/8 Airflow REST accepts basic auth ==" -ForegroundColor Cyan
 $code = Get-HttpCode "http://localhost:8080/api/v1/dags" @("-u", "admin:admin")
 if ($code -ne "200") {
     throw "Airflow REST returned HTTP $code - check AIRFLOW__API__AUTH_BACKENDS includes basic_auth"
@@ -70,7 +71,7 @@ if ($code -ne "200") {
 Write-Host "   HTTP 200"
 $stepsPassed++
 
-Write-Host "== 4/9 /api/health reports exactly the five dependencies ==" -ForegroundColor Cyan
+Write-Host "== 4/8 /api/health reports exactly the five dependencies ==" -ForegroundColor Cyan
 $health = Get-Json "$api/health"
 if (-not $health.services) { throw "/api/health has no services object" }
 $expected = @("airflow", "minio", "mlflow", "postgres", "serving")
@@ -88,7 +89,7 @@ foreach ($name in @("airflow", "mlflow", "minio")) {
 }
 $stepsPassed++
 
-Write-Host "== 5/9 /api/models returns metrics that fit each model's task type ==" -ForegroundColor Cyan
+Write-Host "== 5/8 /api/models returns metrics that fit each model's task type ==" -ForegroundColor Cyan
 $models = Get-Json "$api/models"
 if ($models.PSObject.Properties.Name -notcontains "models") { throw "/api/models has no models list" }
 foreach ($m in @($models.models)) {
@@ -122,44 +123,13 @@ if ($modelsChecked -eq 0) {
     $stepsPassed++
 }
 
-Write-Host "== 6/9 /api/drift/latest ==" -ForegroundColor Cyan
+Write-Host "== 6/8 /api/drift/latest ==" -ForegroundColor Cyan
 $code = Get-HttpCode "$api/drift/latest?model_name=house_price_regressor"
 if ($code -ne "200" -and $code -ne "404") { throw "/api/drift/latest returned HTTP $code, expected 200 or 404" }
 Write-Host "   HTTP $code (404 is valid before monitoring has ever run)"
 $stepsPassed++
 
-Write-Host "== 7/9 the newest run's extract log comes back as lines ==" -ForegroundColor Cyan
-$runList = Get-Json "$api/pipeline/runs"
-if ($runList.PSObject.Properties.Name -notcontains "runs") { throw "/api/pipeline/runs has no runs list" }
-if ($null -eq $runList.runs -or @($runList.runs).Count -eq 0) {
-    # Nothing to read a log from. Not a failure, but not a pass either.
-    Write-Host "   SKIP: Airflow has no pipeline run yet, so there is no log to fetch" -ForegroundColor Yellow
-    $skipped++
-} else {
-    # The API lists runs newest first. Run ids contain ':' and '+' (for example
-    # manual__2026-09-21T03:53:17.127926+00:00), so the id is URL-encoded.
-    $newestRunId = @($runList.runs)[0].run_id
-    if ([string]::IsNullOrWhiteSpace("$newestRunId")) { throw "the newest run in /api/pipeline/runs has no run_id" }
-    $encodedRunId = [uri]::EscapeDataString("$newestRunId")
-    Write-Host "   newest run: $newestRunId"
-    $logs = Get-Json "$api/pipeline/runs/$encodedRunId/logs?stage=extract"
-    if ($logs.PSObject.Properties.Name -notcontains "lines") { throw "the logs response has no lines field" }
-    if ($null -eq $logs.lines -or @($logs.lines).Count -eq 0) {
-        throw "the extract log of run $newestRunId came back with no lines"
-    }
-    # Airflow's banner alone (the worker host, "*** Found local files:" and the
-    # log path) is already three non-empty lines. A real task log also has lines
-    # such as "[2026-09-21T03:53:19.138+0000] {docker.py:438} INFO - ...", so
-    # require at least one, or a log that lost the task's own output would pass.
-    $infoLines = @(@($logs.lines) | Where-Object { "$_" -match " INFO - " })
-    if ($infoLines.Count -eq 0) {
-        throw "the extract log of run $newestRunId has $(@($logs.lines).Count) lines but none contains ' INFO - ': only Airflow's banner came back, not the task's own output"
-    }
-    Write-Host "   extract log: $(@($logs.lines).Count) lines ($($infoLines.Count) INFO), truncated = $($logs.truncated)"
-    $stepsPassed++
-}
-
-Write-Host "== 8/9 an unknown run is a 404, not a 500 ==" -ForegroundColor Cyan
+Write-Host "== 7/8 an unknown run is a 404, not a 500 ==" -ForegroundColor Cyan
 $unknownRunId = "does-not-exist-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 # Any 404 is not enough: FastAPI also answers {"detail":"Not Found"} for a path
 # that no route matches. The run route's own 404 names the id it looked for
@@ -188,7 +158,7 @@ if (-not $unknownRunDetail.Contains($unknownRunId)) {
 Write-Host "   HTTP 404 for $($unknownRunId): $unknownRunDetail"
 $stepsPassed++
 
-Write-Host "== 9/9 the data preview counts blank cells as missing ==" -ForegroundColor Cyan
+Write-Host "== 8/8 the data preview counts blank cells as missing ==" -ForegroundColor Cyan
 # The raw copy stores a missing cell as an empty string. When the preview counted
 # only nulls, every column of the real dataset read 0% missing. One request only:
 # the preview downloads the whole raw object from MinIO every time.
