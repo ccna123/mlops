@@ -642,6 +642,33 @@ class Storage:
             Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
         )
 
+    def read_bytes(self, key: str) -> bytes:
+        """Reads one whole object back as raw bytes.
+
+        The counterpart of `write_bytes`, added so the API can serve
+        Evidently's HTML report to the dashboard without the browser ever
+        talking to MinIO. Nothing is decoded: the report is UTF-8 HTML with
+        embedded JavaScript, and re-encoding it on the way through would
+        corrupt it.
+
+        Args:
+            key: the key to read, built by one of the *_key() functions.
+
+        Returns:
+            The object's bytes.
+
+        Raises:
+            FileNotFoundError: when the key does not exist. Every other S3
+                error propagates, so a missing report and an unreachable
+                MinIO stay distinguishable - the route answers 404 for the
+                first and 500 for the second.
+
+        Example:
+            html = storage.read_bytes(report_key(model_name, run_id, "html"))
+            # -> b"<html>..."
+        """
+        return self._get_object_bytes(key)
+
     def upload_file(self, local_path: str, key: str) -> None:
         """Uploads a file from disk without reading it into memory first.
 

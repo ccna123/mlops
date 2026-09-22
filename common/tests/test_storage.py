@@ -322,3 +322,26 @@ class TestCheckReachable:
         store.check_reachable()
 
         assert calls == ["head_bucket"]
+
+
+class TestReadBytes:
+    def test_returns_exactly_what_write_bytes_stored(self, store):
+        html = b"<html><body>evidently</body></html>"
+        key = storage.report_key("house_price_regressor", "run1", "html")
+        store.write_bytes(html, key, "text/html")
+
+        assert store.read_bytes(key) == html
+
+    def test_a_missing_key_raises_file_not_found(self, store):
+        # The API turns this into a 404; any other error must stay a 500, so a
+        # missing report can never be confused with an unreachable MinIO.
+        with pytest.raises(FileNotFoundError):
+            store.read_bytes(storage.report_key("house_price_regressor", "nope", "html"))
+
+    def test_does_not_decode_or_alter_the_bytes(self, store):
+        # Evidently reports are UTF-8 HTML with embedded JS; anything that
+        # re-encodes them on the way through would corrupt the report.
+        raw = "<p>giá nhà · 20% ↑</p>".encode()
+        store.write_bytes(raw, "reports/m/r/evidently.html", "text/html")
+
+        assert store.read_bytes("reports/m/r/evidently.html") == raw
