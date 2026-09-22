@@ -158,7 +158,20 @@ Mọi `GET` không cần xác nhận.
 
 **Mục đích:** chọn loại model, khởi động một lần chạy pipeline và thấy lần chạy gần nhất đang ở stage nào.
 
-**Component:** `TaskTypeSelector` · `RunTriggerForm` (`task_type`, `force_reprocess`, `sample_rows`, `dataset_version`) · `PipelineStageStrip` · `RecentRunsTable`, cộng các component dùng chung.
+**Component:** `TaskTypeSelector` · `RunTriggerForm` (`task_type`, `estimator_name`, `force_reprocess`, `sample_rows`, `dataset_version`) · `PipelineStageStrip` · `RecentRunsTable`, cộng các component dùng chung.
+
+> **Thêm ngày 2026-09-22: `estimator_name`.** DAG vốn đã nhận tham số này (mặc
+> định `ridge` / `logistic`), nhưng `RunRequest` của API thì chưa, nên dashboard
+> không có đường gửi. Nay có: dropdown "Thuật toán", danh sách lấy từ
+> **`GET /api/estimators`** — endpoint đọc thẳng `ml_common.estimators`, để
+> dropdown không thể lệch khỏi thứ stage `train` thật sự chấp nhận. Bỏ trống ô
+> này thì không gửi `estimator_name` và DAG tự chọn mặc định, nhờ vậy mặc định
+> chỉ nằm ở một chỗ duy nhất. Hai estimator `hist_gradient_boosting_weak` và
+> `dummy` sinh ra để test cổng promote chứ không phải để thắng, nên endpoint
+> đánh dấu chúng ở khoá `diagnostic` và dropdown xếp riêng vào nhóm "Chỉ để
+> test cổng promote". API trả **422** nếu estimator không thuộc `task_type` đã
+> chọn (ví dụ `random_forest` cho regression), thay vì để stage `train` chết
+> sau vài phút.
 
 **Endpoint:** `POST /pipeline/run`, `GET /pipeline/runs`, `GET /pipeline/runs/{run_id}`.
 
@@ -173,7 +186,7 @@ Mọi `GET` không cần xác nhận.
 
 **Đừng để `sample_rows` (số dòng của lần train) trông giống `rows` của màn Dữ liệu (số dòng xem trước, tối đa 200).** Khác nhãn, khác vị trí, khác màn hình. Xem 4.3.
 
-**`ConfirmDialog` bắt buộc** trước khi gọi `POST /pipeline/run`, vì nó khởi động một lần train thật. Dialog nêu đủ bốn tham số sẽ gửi (đặc biệt `sample_rows`: "toàn bộ dòng" hay "N dòng"), và nút xác nhận đặt tên rõ ("Bắt đầu train"), không phải "OK".
+**`ConfirmDialog` bắt buộc** trước khi gọi `POST /pipeline/run`, vì nó khởi động một lần train thật. Dialog nêu đủ **năm** tham số sẽ gửi — gồm `estimator_name` (hoặc "mặc định của pipeline") và đặc biệt `sample_rows`: "toàn bộ dòng" hay "N dòng" — và nút xác nhận đặt tên rõ ("Bắt đầu train"), không phải "OK".
 
 Nguồn: `POST /api/pipeline/run`, body `{"task_type":"regression","sample_rows":1000}` → 200. Run mới chỉ ở trạng thái `queued`: chưa chạy xong; thời gian chạy phụ thuộc số dòng.
 

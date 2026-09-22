@@ -192,10 +192,10 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
-| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 14 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
-| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công | chưa có script; verify bằng trình duyệt |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 15 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-21 (sau Plan 5b): 666 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-22: 679 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
@@ -216,6 +216,25 @@ cd dashboard; npm install; npm run dev    # http://localhost:5173
 Sidebar có nút **"Chế độ minh hoạ"**: bật lên thì mọi màn dùng fixture JSON
 chép từ brief (`src/lib/demoFixtures.js`) thay vì gọi API, để xem giao diện khi
 stack chưa chạy.
+
+**Chọn thuật toán train (2026-09-22).** Form train có dropdown "Thuật toán",
+danh sách lấy từ `GET /api/estimators` — endpoint đọc thẳng
+`ml_common.estimators.ESTIMATOR_NAMES`, nên không có danh sách nào bị chép lại
+ở frontend. Bỏ trống thì DAG tự chọn mặc định (`ridge` / `logistic`), nhờ đó
+mặc định chỉ tồn tại ở một chỗ. `hist_gradient_boosting_weak` và `dummy` nằm
+trong nhóm riêng "Chỉ để test cổng promote" (khoá `diagnostic` của endpoint).
+
+| task_type | Estimator |
+| --- | --- |
+| regression | `ridge`, `xgboost`, `hist_gradient_boosting`, `hist_gradient_boosting_weak`, `dummy` |
+| classification | `logistic`, `xgboost`, `random_forest`, `hist_gradient_boosting`, `hist_gradient_boosting_weak`, `dummy` |
+
+**`xgboost` là dependency mới của `common/`** (`pyproject.toml`), nên lần thêm
+nó đã phải build lại **đủ cả 5 tầng**. Đây không phải thủ tục thừa: `serving`
+unpickle nguyên `Pipeline` từ MLflow, nên nếu image `ml-serving` thiếu xgboost
+thì model train bằng xgboost sẽ load không nổi — đúng loại training/serving
+skew mà ràng buộc kiến trúc mục 3 dựng lên để tránh. Đã verify: train bằng
+xgboost → `serving` `/predict/regression` trả về dự đoán thật.
 
 **Hai DAG đều để unpaused và đều `max_active_runs=1`.** `ml_pipeline` giữ
 `schedule=None`; `monitoring_dag` đổi từ `@hourly` + paused sang `schedule=None`
