@@ -278,7 +278,13 @@ function MetricTrendChart({ chronological, labels, dividers, taskType }) {
   // reference_metrics was added to the monitor stage on 2026-09-22; every
   // summary written before that lacks it, so the baseline is simply absent
   // for those points instead of being back-filled with a guess.
-  const reference = chronological.map((summary) => summary.reference_metrics?.[metric] ?? null);
+  // Only baselines that say which standard they were measured under. For a
+  // few hours on 2026-09-22 this field held the training metrics instead, and
+  // those are a different number of a different kind — drawing them on the
+  // same dashed line would show a jump that never happened to the model.
+  const reference = chronological.map((summary) =>
+    summary.reference_source === "test_metrics" ? (summary.reference_metrics?.[metric] ?? null) : null
+  );
   if (current.every((value) => value === null)) return null;
 
   const measuredCount = current.filter((value) => value !== null).length;
@@ -298,7 +304,7 @@ function MetricTrendChart({ chronological, labels, dividers, taskType }) {
         fill: false,
       },
       {
-        label: `${metric} lúc train`,
+        label: `${metric} trên tập test`,
         data: reference,
         borderColor: "#94A3B8",
         borderDash: [5, 4],
@@ -337,10 +343,10 @@ function MetricTrendChart({ chronological, labels, dividers, taskType }) {
             const summary = chronological[item.dataIndex];
             const measured = summary.current_metrics?.[metric];
             const trained = summary.reference_metrics?.[metric];
-            if (item.datasetIndex === 1) return `${metric} lúc train: ${formatNumber(trained)}`;
+            if (item.datasetIndex === 1) return `${metric} trên tập test: ${formatNumber(trained)}`;
             const ratio =
               measured !== undefined && trained
-                ? ` (gấp ${(measured / trained).toFixed(2)} lần lúc train)`
+                ? ` (gấp ${(measured / trained).toFixed(2)} lần so với tập test)`
                 : "";
             return [
               `${metric} đo được: ${formatNumber(measured)}${ratio}`,
@@ -359,8 +365,8 @@ function MetricTrendChart({ chronological, labels, dividers, taskType }) {
         <div>
           <p className="drift-strip-label">{metric.toUpperCase()} thật sự đo được</p>
           <p className="drift-strip-hint">
-            Đường nét đứt là {metric} stage train ghi lại — đo trên <b>chính dữ liệu train</b>, nên nó lạc quan hơn
-            thực tế. Đây cũng đúng là con số mà mức Performance drift ở trên được chấm dựa vào.
+            Đường nét đứt là {metric} <b>trên tập test</b> — đúng con số ở tab Models, và đúng mốc mà mức Performance
+            drift ở trên được chấm dựa vào.
           </p>
         </div>
       </div>
@@ -369,7 +375,7 @@ function MetricTrendChart({ chronological, labels, dividers, taskType }) {
       </div>
       {referenceCount < measuredCount && (
         <p className="chart-gap-note">
-          Mốc &ldquo;lúc train&rdquo; chỉ có ở {referenceCount}/{measuredCount} lần đo — báo cáo viết trước ngày
+          Mốc &ldquo;tập test&rdquo; chỉ có ở {referenceCount}/{measuredCount} lần đo — báo cáo viết trước ngày
           22/9/2026 không lưu chỉ số này, nên không có gì để vẽ ở những điểm cũ.
         </p>
       )}
