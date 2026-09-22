@@ -114,14 +114,24 @@ def status(request: Request) -> dict:
         request: the FastAPI request.
 
     Returns:
-        `run` with `run_id`, `state`, `started_at` and `ended_at`, or None
-        when traffic has never been sent. None is a normal first-time state,
-        not an error, so it is a 200 rather than a 404.
+        `run` with `run_id`, `state`, `started_at`, `ended_at` and `tasks` -
+        one entry per task of the run, so the dashboard can show which half of
+        the chain is going (traffic, then drift) instead of sending the user
+        to Airflow to find out. None when traffic has never been sent, which
+        is a normal first-time state and so a 200 rather than a 404.
 
     Example:
         # GET /api/simulate/status
         # {"run": {"run_id": "manual__2026-09-22T10:00:00+00:00",
-        #          "state": "success", "started_at": "...", "ended_at": "..."}}
+        #          "state": "running", "started_at": "...", "ended_at": None,
+        #          "tasks": [{"task_id": "send_traffic", "state": "success", ...},
+        #                    {"task_id": "compute_drift", "state": "running", ...}]}}
     """
-    runs = request.app.state.airflow.list_runs(DAG_ID, 1)
-    return {"run": runs[0] if runs else None}
+    airflow = request.app.state.airflow
+    runs = airflow.list_runs(DAG_ID, 1)
+    if not runs:
+        return {"run": None}
+    # Two calls, because listing gives the newest run's id and timings while
+    # only the per-run endpoint carries its tasks.
+    detail = airflow.get_run(DAG_ID, runs[0]["run_id"])
+    return {"run": {**runs[0], "tasks": detail["tasks"]}}

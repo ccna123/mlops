@@ -23,6 +23,7 @@ import os
 
 import pendulum
 from airflow import DAG
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 
 DOCKER_URL = "unix://var/run/docker.sock"
@@ -58,7 +59,7 @@ with DAG(
         "count": 300,
     },
 ) as dag:
-    DockerOperator(
+    send_traffic = DockerOperator(
         task_id="send_traffic",
         image="ml-agent:latest",
         docker_url=DOCKER_URL,
@@ -86,3 +87,24 @@ with DAG(
         do_xcom_push=True,
         xcom_all=True,
     )
+
+    # Traffic that nobody measures answers nothing, and until 2026-09-22 the
+    # measuring was a second button the user had to press at the right moment -
+    # which meant opening Airflow to find out when the traffic had landed.
+    # Chained here rather than in the dashboard so the drift still gets
+    # computed if the browser is closed halfway through.
+    compute_drift = TriggerDagRunOperator(
+        task_id="compute_drift",
+        trigger_dag_id="monitoring_dag",
+        # Waits, so this run's own state answers "is the whole thing done?".
+        # It holds a worker slot for the minute or so monitoring takes; that is
+        # the price of having one run to poll instead of two to correlate.
+        wait_for_completion=True,
+        poke_interval=10,
+        # A monitoring run that fails must fail this task too. Left at the
+        # defaults, a failed monitoring run would wait forever.
+        allowed_states=["success"],
+        failed_states=["failed"],
+    )
+
+    send_traffic >> compute_drift

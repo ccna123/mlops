@@ -9,10 +9,12 @@ TRAFFIC_DAG = "traffic_agent"
 class FakeAirflow:
     """Stands in for AirflowClient, recording what the route asked it to do."""
 
-    def __init__(self, runs=None):
+    def __init__(self, runs=None, tasks=None):
         self.triggered = []
         self.runs = runs if runs is not None else []
         self.listed = []
+        self.fetched = []
+        self.tasks = tasks if tasks is not None else []
 
     def trigger_run(self, dag_id, conf):
         self.triggered.append((dag_id, conf))
@@ -21,6 +23,10 @@ class FakeAirflow:
     def list_runs(self, dag_id, limit):
         self.listed.append((dag_id, limit))
         return self.runs[:limit]
+
+    def get_run(self, dag_id, run_id):
+        self.fetched.append((dag_id, run_id))
+        return {"run_id": run_id, "state": "running", "tasks": self.tasks}
 
 
 def _client(airflow=None):
@@ -126,6 +132,32 @@ def test_status_reports_the_newest_traffic_run():
     assert body["run"]["run_id"] == "manual__2026"
     assert body["run"]["state"] == "running"
     assert airflow.listed == [(TRAFFIC_DAG, 1)]
+
+
+def test_status_carries_the_state_of_every_task_in_the_run():
+    # The dashboard draws these as a progress strip, so the user never has to
+    # open Airflow to find out which half of the chain is running.
+    run = {"run_id": "manual__2026", "state": "running", "task_type": None,
+           "started_at": None, "ended_at": None}
+    tasks = [
+        {"task_id": "send_traffic", "state": "success", "try_number": 1, "duration": 29.0},
+        {"task_id": "compute_drift", "state": "running", "try_number": 1, "duration": None},
+    ]
+    airflow = FakeAirflow(runs=[run], tasks=tasks)
+
+    body = _client(airflow).get("/api/simulate/status").json()
+
+    assert [task["task_id"] for task in body["run"]["tasks"]] == ["send_traffic", "compute_drift"]
+    assert body["run"]["tasks"][1]["state"] == "running"
+    assert airflow.fetched == [(TRAFFIC_DAG, "manual__2026")]
+
+
+def test_status_asks_airflow_for_no_tasks_when_no_run_exists():
+    airflow = FakeAirflow(runs=[])
+
+    _client(airflow).get("/api/simulate/status")
+
+    assert airflow.fetched == []
 
 
 def test_status_before_any_traffic_was_ever_sent_is_not_an_error():
