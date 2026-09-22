@@ -344,3 +344,76 @@ def test_drift_run_monitors_every_model_so_it_takes_no_model_name():
 
     assert response.status_code == 200
     assert airflow.triggered == [("monitoring_dag", {})]
+
+
+# --- serving the Evidently report itself ------------------------------------
+
+
+class ReportStorage:
+    """Storage holding raw report bytes, or raising when asked for one."""
+
+    def __init__(self, objects=None, error=None):
+        self._objects = objects or {}
+        self.error = error
+        self.reads = []
+
+    def read_bytes(self, key):
+        self.reads.append(key)
+        if self.error is not None:
+            raise self.error
+        if key not in self._objects:
+            raise FileNotFoundError(f"Key not found: {key}")
+        return self._objects[key]
+
+    def read_json(self, key):
+        raise FileNotFoundError(key)
+
+    def list_keys(self, prefix):
+        return []
+
+
+def _report_client(storage, **kwargs):
+    return TestClient(create_app(reports=ReportsClient(storage)), **kwargs)
+
+
+RUN = "20260920T075645"
+
+
+def test_report_returns_the_html_evidently_wrote():
+    html = b"<html><body>drift by column</body></html>"
+    storage = ReportStorage({report_key(REGRESSOR, RUN, "html"): html})
+
+    response = _report_client(storage).get(f"/api/drift/report?model_name={REGRESSOR}&run_id={RUN}")
+
+    assert response.status_code == 200
+    assert response.content == html
+    assert response.headers["content-type"].startswith("text/html")
+    assert storage.reads == [report_key(REGRESSOR, RUN, "html")]
+
+
+def test_report_for_a_run_that_never_wrote_one_is_404():
+    response = _report_client(ReportStorage()).get(
+        f"/api/drift/report?model_name={REGRESSOR}&run_id={RUN}"
+    )
+    assert response.status_code == 404
+
+
+def test_report_when_storage_is_unreachable_is_a_500_not_a_404():
+    storage = ReportStorage(error=EndpointConnectionError(endpoint_url="http://minio:9000"))
+
+    response = _report_client(storage, raise_server_exceptions=False).get(
+        f"/api/drift/report?model_name={REGRESSOR}&run_id={RUN}"
+    )
+
+    assert response.status_code == 500
+
+
+def test_report_reads_only_the_evidently_object_of_that_run():
+    # run_id reaches the key from the browser, so prove no other kind of
+    # object is reachable through it: the key always ends in evidently.html.
+    storage = ReportStorage()
+
+    _report_client(storage).get(f"/api/drift/report?model_name={REGRESSOR}&run_id=../../raw/v1")
+
+    assert storage.reads == [report_key(REGRESSOR, "../../raw/v1", "html")]
+    assert storage.reads[0].endswith("/evidently.html")

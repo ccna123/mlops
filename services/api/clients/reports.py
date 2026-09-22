@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from ml_common.storage import drift_latest_key, drift_prefix, is_drift_summary_key
+from ml_common.storage import drift_latest_key, drift_prefix, is_drift_summary_key, report_key
 
 
 class ReportsClient:
@@ -65,6 +65,32 @@ class ReportsClient:
         """
         try:
             return self._storage.read_json(drift_latest_key(model_name))
+        except FileNotFoundError:
+            return None
+
+    def html(self, model_name: str, run_id: str) -> bytes | None:
+        """Reads the Evidently HTML report one monitoring run wrote.
+
+        Args:
+            model_name: the registered model.
+            run_id: the monitoring run whose report is wanted.
+
+        Returns:
+            The report's bytes, or None when that run wrote none. None is
+            ordinary: a run with no traffic in its window stops before
+            Evidently and records `report_key: null`.
+
+        Raises:
+            Exception: anything the storage raises other than
+                `FileNotFoundError`, so a MinIO outage stays a 500 and never
+                reads as "this run has no report".
+
+        Example:
+            html("house_price_regressor", "20260920T075645")
+            # -> b"<html>..."
+        """
+        try:
+            return self._storage.read_bytes(report_key(model_name, run_id, "html"))
         except FileNotFoundError:
             return None
 

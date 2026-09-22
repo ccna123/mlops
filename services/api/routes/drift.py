@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from ..deps import require_auth
 
@@ -74,6 +75,51 @@ def latest(request: Request, model_name: str) -> dict:
     if summary is None:
         raise HTTPException(status_code=404, detail=f"no drift report yet for {model_name}")
     return summary
+
+
+@router.get("/drift/report", dependencies=[Depends(require_auth)], response_class=HTMLResponse)
+def report(request: Request, model_name: str, run_id: str) -> HTMLResponse:
+    """Serves the Evidently HTML report of one monitoring run.
+
+    The dashboard renders this in a sandboxed iframe. It exists so the browser
+    never talks to MinIO directly: doing that would put storage credentials in
+    the page and break the rule that the frontend speaks only to this API
+    (design doc section 8.2).
+
+    What it contains is Evidently's own per-column view of FEATURE drift for
+    that one run - not the three verdicts, not performance, and nothing about
+    any other run. It is the detail behind one point of the history, not a
+    replacement for it.
+
+    Args:
+        request: the FastAPI request.
+        model_name: the registered model.
+        run_id: which monitoring run's report to serve.
+
+    Returns:
+        The report as `text/html`, exactly as the monitor stage wrote it.
+
+    Raises:
+        HTTPException: 404 when that run wrote no report - normal for a run
+            whose window held no traffic, since the monitor stops before
+            Evidently and records `report_key: null`. Storage being
+            unreachable is not a 404: it escapes as a 500.
+
+    Example:
+        # GET /api/drift/report?model_name=house_price_regressor&run_id=20260920T075645
+        # -> 200 text/html
+
+    Note:
+        `run_id` reaches the key from the browser, but `report_key` always
+        appends "/evidently.html", so no other kind of object in the bucket
+        can be addressed through it.
+    """
+    html = request.app.state.reports.html(model_name, run_id)
+    if html is None:
+        raise HTTPException(
+            status_code=404, detail=f"no Evidently report for run {run_id} of {model_name}"
+        )
+    return HTMLResponse(content=html)
 
 
 @router.get("/drift/history", dependencies=[Depends(require_auth)])
