@@ -518,7 +518,23 @@ Nguồn: `.../house_price_regressor/abc/promote` → 422 (version không phải 
 
 **Component:** `SeverityOverview` (**tách ba loại**) · `DriftHistoryChart` · `EvidentlyReportFrame` · `RetrainCTA` · `InsufficientDataNotice`, cộng `MetricTile`, `StatusBadge` và các component dùng chung.
 
-**Endpoint:** `GET /drift/latest`, `GET /drift/history` (và `GET /models` để có danh sách `model_name`).
+**Bổ sung 2026-09-22 — `TrafficSimulator`.** Một khối riêng nằm **trên** khối
+Drift: dropdown năm kịch bản (tên lấy từ `GET /scenarios`, nhãn tiếng Việt ở
+`SCENARIO_META`), ô số request (1–5000, đúng trần của API), nút "Gửi traffic",
+và một badge trạng thái tự poll `GET /simulate/status` mỗi 5 giây trong lúc run
+còn `queued`/`running`. Lý do có badge: nếu chỉ báo "queued" thì người dùng
+không biết lúc nào traffic đã thật sự nằm trong inference log để bấm tính drift
+— đúng kiểu mơ hồ mà mục này vốn đã phải chống. `task_type` **không** là một ô
+chọn riêng: nó lấy từ model đang chọn ở khối Drift, nên traffic luôn đi tới
+đúng model đang xem.
+
+**Ba loại drift đổi tên trên giao diện (2026-09-22).** Khoá của API giữ nguyên
+(`feature` / `prediction` / `performance`), nhưng nhãn hiển thị là **Data
+drift** / **Model drift** / **Performance drift**, mỗi nhãn kèm một dòng nói nó
+so sánh cái gì (`DRIFT_FACTORS` trong `constants.js`). Tên cũ là từ vựng của
+stage `monitor`, không phải từ vựng của người đọc màn hình.
+
+**Endpoint:** `GET /drift/latest`, `GET /drift/history` (và `GET /models` để có danh sách `model_name`), cùng `POST /drift/run`, `GET /scenarios`, `POST /simulate`, `GET /simulate/status` (bổ sung 2026-09-21 và 2026-09-22).
 
 Mọi request drift bắt buộc có `model_name` (thiếu là 422). Ô chọn model lấy từ `GET /models`.
 
@@ -581,7 +597,7 @@ Nguồn: `GET /api/drift/history?...&limit=0` → 422.
 
 #### DriftHistoryChart
 
-Vẽ bằng Chart.js. **Ba dải riêng** (feature, prediction, performance) chạy theo thời gian `computed_at`, mỗi điểm tô đúng màu và hoa văn của trạng thái tại thời điểm đó; **không** một đường tổng hợp. Điểm `insufficient_data` vẽ là ô xám gạch chéo (một khoảng trống có nhãn, không phải điểm ở mức thấp). Tooltip: `run_id`, `n_predictions`, `n_ground_truth`, `window_hours`, và `current_metrics` nếu có. Các cửa sổ có độ dài khác nhau (từ 0,03 đến 1 giờ trong dữ liệu thật), nên tooltip phải cho thấy `n_predictions` để người xem không so sánh mù các điểm.
+Vẽ bằng Chart.js. **Ba dải riêng** (feature, prediction, performance) — mỗi dải là **một biểu đồ riêng, màu riêng, xếp dọc** (sửa ngày 2026-09-22: bản đầu vẽ ba đường cùng màu xám trên một trục nên không phân biệt được đường nào là gì) — chạy theo thời gian `computed_at`, mỗi điểm tô đúng màu và hoa văn của trạng thái tại thời điểm đó; **không** một đường tổng hợp. Điểm `insufficient_data` vẽ là ô xám gạch chéo (một khoảng trống có nhãn, không phải điểm ở mức thấp). Tooltip: `run_id`, `n_predictions`, `n_ground_truth`, `window_hours`, và `current_metrics` nếu có. Các cửa sổ có độ dài khác nhau (từ 0,03 đến 1 giờ trong dữ liệu thật), nên tooltip phải cho thấy `n_predictions` để người xem không so sánh mù các điểm.
 
 #### InsufficientDataNotice
 
@@ -589,7 +605,7 @@ Hiện khi `parts.performance` là `insufficient_data`. Nội dung ý: "Chưa đ
 
 #### Báo cáo có thể chưa cập nhật (Plan 4 còn nợ một race)
 
-Plan 4 còn một race chưa sửa ở bước ghi bộ đệm (spec 5a mục 10): ngay sau khi có traffic mới, báo cáo drift có thể chưa gồm những dự đoán vừa gửi. Ngoài ra `monitoring_dag` chạy theo giờ và được tạo ở trạng thái **paused** (Plan 4 mục 2.7, và Task 12 thấy nó vẫn paused), nên báo cáo mới nhất có thể cũ hàng giờ. Thiết kế phải có một dòng ghi chú luôn hiện: "Báo cáo tính lúc `computed_at`. Traffic mới gửi có thể chưa được ghi và chưa có trong báo cáo này." kèm nút "Tải lại". Gợi ý: nếu `computed_at` cách hiện tại quá khoảng 2 giờ, gắn chip "báo cáo cũ". Dashboard không có cách nào bật `monitoring_dag` hay gửi traffic; đó là việc ngoài API.
+Plan 4 còn một race chưa sửa ở bước ghi bộ đệm (spec 5a mục 10): ngay sau khi có traffic mới, báo cáo drift có thể chưa gồm những dự đoán vừa gửi. Ngoài ra `monitoring_dag` chạy theo giờ và được tạo ở trạng thái **paused** (Plan 4 mục 2.7, và Task 12 thấy nó vẫn paused), nên báo cáo mới nhất có thể cũ hàng giờ. Thiết kế phải có một dòng ghi chú luôn hiện: "Báo cáo tính lúc `computed_at`. Traffic mới gửi có thể chưa được ghi và chưa có trong báo cáo này." kèm nút "Tải lại". Gợi ý: nếu `computed_at` cách hiện tại quá khoảng 2 giờ, gắn chip "báo cáo cũ". **Cập nhật 2026-09-22:** hai câu cuối không còn đúng. Dashboard có nút "Tính drift ngay" (`POST /drift/run`) và khối `TrafficSimulator` (`POST /simulate`), `monitoring_dag` đã unpaused, nên cả việc gửi traffic lẫn việc tính lại drift đều làm được từ màn này.
 
 #### EvidentlyReportFrame: chưa có endpoint
 

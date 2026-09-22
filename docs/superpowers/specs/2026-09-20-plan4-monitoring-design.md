@@ -269,6 +269,18 @@ MWAA thì bỏ cờ này.
 > `ml_pipeline` ngày 2026-09-21. Khi migrate lên MWAA thì trả lại
 > `schedule="@hourly"`, nơi chi phí mỗi giờ không thành vấn đề.
 
+> **Thay đổi ngày 2026-09-22 (Plan 5b).** Agent của mục 7.7 không còn chỉ chạy
+> được bằng CLI hay bằng compose profile `agent`: DAG mới `traffic_agent`
+> (`dags/traffic_agent_dag.py`) chạy chính image `ml-agent:latest` bằng một
+> `DockerOperator`, nhận `scenario` / `task_type` / `count` qua `conf`, và
+> dashboard gọi nó qua `POST /api/simulate`. Không có dòng code nào trong
+> `services/agent/` biết tới DAG này — tham số vẫn đi vào bằng command line.
+> DAG đặt `is_paused_upon_creation=False` (ghi đè
+> `AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION`) vì một nút bấm trigger DAG
+> paused là đúng cái bẫy "queued vĩnh viễn" nói ở trên. Lý do phải có nút này:
+> drift chỉ tính được từ dự đoán mà `serving` đã ghi, nên trên máy dev không có
+> người dùng thật thì mọi verdict đều là `insufficient_data`.
+
 ### 2.8. `/feedback` nhận cả lô, và ngày do agent cung cấp
 
 `POST /feedback/{task_type}` nhận **một danh sách** kết quả, không phải một.

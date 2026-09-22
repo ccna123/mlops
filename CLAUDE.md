@@ -192,10 +192,10 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 2/5 | Batch pipeline — 6 stage + DAG `ml_pipeline`, hai cổng promote | `scripts\verify_pipeline.ps1` |
 | 3/5 | Serving — `/predict` nhận record thô, `/reload`, inference log theo lô | `scripts\verify_serving.ps1` |
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
-| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 15 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
-| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train | chưa có script; verify bằng trình duyệt |
+| 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 18 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
+| 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 5 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-22: 679 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-22: 689 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
@@ -236,9 +236,37 @@ thì model train bằng xgboost sẽ load không nổi — đúng loại trainin
 skew mà ràng buộc kiến trúc mục 3 dựng lên để tránh. Đã verify: train bằng
 xgboost → `serving` `/predict/regression` trả về dự đoán thật.
 
-**Hai DAG đều để unpaused và đều `max_active_runs=1`.** `ml_pipeline` giữ
+**Mô phỏng traffic để có gì mà đo drift (2026-09-22).** Màn Drift có khối
+"Mô phỏng model được dùng thật": chọn một trong năm kịch bản của agent, số
+request, bấm là `POST /api/simulate` trigger DAG **`traffic_agent`**
+(`dags/traffic_agent_dag.py`) chạy image `ml-agent:latest` bằng
+`DockerOperator`. Tên kịch bản lấy từ `GET /api/scenarios`, đọc thẳng
+`services.agent.scenarios.SCENARIOS`, nên frontend không chép danh sách nào.
+Không sửa gì trong `services/agent/` — tham số vẫn đi vào bằng command line,
+y như khi chạy tay.
+
+Lý do phải có nút này: drift chỉ tính được từ dự đoán mà `serving` đã ghi. Trên
+máy dev không có người dùng thật nên mọi verdict đều là `insufficient_data`, và
+màn Drift nhìn như đang hỏng. Đo ngày 2026-09-22: 300 request kịch bản
+`market_shift` mất 29 giây cả vòng (kể cả khởi động container), rồi
+`monitoring_dag` cho `feature=warning`, `prediction=high`, `performance=high`
+với `n_ground_truth=300`.
+
+`traffic_agent` đặt **`is_paused_upon_creation=False`** ngay trong DAG, ghi đè
+`AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"` của compose. Hai DAG kia
+không có cờ này nên **trên một máy mới chúng sẽ lại sinh ra ở trạng thái
+paused** và rơi đúng vào bẫy "run nằm `queued` mãi mà không có tín hiệu nào báo
+lý do" — nhớ unpause tay sau khi dựng lại từ đầu.
+
+**Ba loại drift trên dashboard gọi là Data / Model / Performance drift**, còn
+khoá của API vẫn là `feature` / `prediction` / `performance` (`DRIFT_FACTORS`
+trong `dashboard/src/lib/constants.js` là nơi duy nhất ánh xạ hai bộ từ vựng
+này). Biểu đồ lịch sử là **ba dải riêng xếp dọc, mỗi dải một màu** — bản đầu vẽ
+ba đường cùng màu xám trên một trục nên không đọc được đường nào là gì.
+
+**Cả ba DAG đều để unpaused và đều `max_active_runs=1`.** `ml_pipeline` giữ
 `schedule=None`; `monitoring_dag` đổi từ `@hourly` + paused sang `schedule=None`
-+ unpaused (xem mục 2.7 spec Plan 4). Lý do: run của một DAG paused nằm
++ unpaused (xem mục 2.7 spec Plan 4); `traffic_agent` sinh ra đã unpaused. Lý do: run của một DAG paused nằm
 `queued` vĩnh viễn và **không tín hiệu nào trên API hay dashboard cho biết vì
 sao** — đúng sự cố mất nửa buổi ngày 2026-09-21. Hệ quả cần nhớ: lưới an toàn
 cũ không còn, bấm Trigger từ Airflow UI mà quên `conf` sẽ chạy toàn bộ 2 triệu
@@ -268,6 +296,7 @@ dòng. Dashboard thì luôn gửi `sample_rows` nên an toàn.
   khoảng ba bản (body của framework, CSV, parquet). Đường 413 chưa được chạy
   thật trên hệ thống sống.
 - **Chưa có auth**: `require_auth` rỗng, nên `promote`, `upload`, `pipeline/run`,
+  `POST /simulate` (gửi traffic thật vào inference log),
   và (từ Plan 5b) `DELETE /models/{name}/{version}`, `DELETE /models/{name}` lẫn
   `POST /drift/run` mở cho bất kỳ ai tới được cổng 8001. Xoá là thao tác **không
   hoàn tác được** duy nhất trong API. `DELETE /models/{name}` xoá sạch mọi
