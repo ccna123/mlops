@@ -94,6 +94,8 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
   const [runDetailError, setRunDetailError] = useState(null);
 
   const [taskType, setTaskType] = useState("");
+  const [estimators, setEstimators] = useState(null);
+  const [estimatorName, setEstimatorName] = useState("");
   const [datasetVersion, setDatasetVersion] = useState("v1");
   const [useAllRows, setUseAllRows] = useState(false);
   const [sampleRows, setSampleRows] = useState("1000");
@@ -105,10 +107,25 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
 
   useEffect(() => {
     if (prefillTaskType) {
-      setTaskType(prefillTaskType);
+      chooseTaskType(prefillTaskType);
       onConsumePrefill?.();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillTaskType, onConsumePrefill]);
+
+  useEffect(() => {
+    client
+      .listEstimators()
+      .then(setEstimators)
+      .catch(() => setEstimators(null));
+  }, [client]);
+
+  // The two task types offer different estimators, so a name chosen for one
+  // is usually invalid for the other — the API would answer 422.
+  function chooseTaskType(next) {
+    setTaskType(next);
+    setEstimatorName("");
+  }
 
   async function loadRuns() {
     setRunsState({ status: "loading" });
@@ -185,6 +202,9 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
     setTriggering(true);
     const payload = { task_type: taskType, force_reprocess: forceReprocess, dataset_version: datasetVersion };
     if (!useAllRows) payload.sample_rows = Number(sampleRows);
+    // "" means let the DAG pick its own default, so the default lives in one
+    // place instead of being copied here.
+    if (estimatorName) payload.estimator_name = estimatorName;
     try {
       const result = await client.triggerRun(payload);
       pushToast({ type: "success", text: `Đã tạo run ${result.run_id}` });
@@ -226,19 +246,51 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
             <button
               type="button"
               className={taskType === "regression" ? "segmented-active" : ""}
-              onClick={() => setTaskType("regression")}
+              onClick={() => chooseTaskType("regression")}
             >
               Hồi quy giá nhà
             </button>
             <button
               type="button"
               className={taskType === "classification" ? "segmented-active" : ""}
-              onClick={() => setTaskType("classification")}
+              onClick={() => chooseTaskType("classification")}
             >
               Phân loại cần cải tạo
             </button>
           </div>
         </div>
+
+        <label className="field">
+          <span>Thuật toán</span>
+          <select
+            value={estimatorName}
+            disabled={!taskType || !estimators}
+            onChange={(event) => setEstimatorName(event.target.value)}
+          >
+            <option value="">Mặc định của pipeline</option>
+            {taskType && estimators && (
+              <>
+                {estimators[taskType]
+                  .filter((name) => !estimators.diagnostic.includes(name))
+                  .map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                <optgroup label="Chỉ để test cổng promote">
+                  {estimators[taskType]
+                    .filter((name) => estimators.diagnostic.includes(name))
+                    .map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                </optgroup>
+              </>
+            )}
+          </select>
+        </label>
+        {!taskType && <p className="hint-note">Chọn loại model trước để thấy thuật toán tương ứng.</p>}
 
         <div className="field-row">
           <label className="field">
@@ -377,6 +429,9 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
         >
           <p>
             Model: <b>{taskType === "regression" ? "Hồi quy giá nhà" : "Phân loại cần cải tạo"}</b>
+          </p>
+          <p>
+            Thuật toán: <b>{estimatorName || "mặc định của pipeline"}</b>
           </p>
           <p>
             Phiên bản dữ liệu: <b>{datasetVersion}</b>

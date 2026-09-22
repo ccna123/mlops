@@ -23,6 +23,11 @@ export const demoApi = {
     };
   },
 
+  listEstimators: async () => {
+    await delay(120);
+    return fx.estimators;
+  },
+
   listRuns: async () => {
     await delay(200);
     return fx.runs;

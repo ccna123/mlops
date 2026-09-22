@@ -92,6 +92,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  listEstimators: () => request("/estimators"),
+
   listRuns: (limit = 3) => request(`/pipeline/runs?limit=${limit}`),
 
   getRun: (runId) => request(`/pipeline/runs/${encodeURIComponent(runId)}`),

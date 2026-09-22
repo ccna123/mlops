@@ -9,6 +9,20 @@ export const health = {
   services: { airflow: "ok", mlflow: "ok", minio: "ok", serving: "ok", postgres: "ok" },
 };
 
+// Mirrors GET /api/estimators, which reads ml_common.estimators directly.
+export const estimators = {
+  regression: ["ridge", "xgboost", "hist_gradient_boosting", "hist_gradient_boosting_weak", "dummy"],
+  classification: [
+    "logistic",
+    "xgboost",
+    "random_forest",
+    "hist_gradient_boosting",
+    "hist_gradient_boosting_weak",
+    "dummy",
+  ],
+  diagnostic: ["dummy", "hist_gradient_boosting_weak"],
+};
+
 // The brief's literal `GET /pipeline/runs?limit=3` response, plus one
 // synthetic "running" run in front so the demo has something live to show —
 // that 4th entry is NOT captured API output, only the other three are.
