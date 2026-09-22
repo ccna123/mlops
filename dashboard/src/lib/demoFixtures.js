@@ -9,6 +9,11 @@ export const health = {
   services: { airflow: "ok", mlflow: "ok", minio: "ok", serving: "ok", postgres: "ok" },
 };
 
+// Mirrors GET /api/scenarios, which reads services.agent.scenarios directly.
+export const scenarios = {
+  scenarios: ["none", "price_inflation", "market_rally", "market_shift", "new_segment"],
+};
+
 // Mirrors GET /api/estimators, which reads ml_common.estimators directly.
 export const estimators = {
   regression: ["ridge", "xgboost", "hist_gradient_boosting", "hist_gradient_boosting_weak", "dummy"],

@@ -85,6 +85,31 @@ export const demoApi = {
     return { name, deleted: true };
   },
 
+  listScenarios: async () => {
+    await delay(120);
+    return fx.scenarios;
+  },
+
+  // Demo mode has no Airflow, so the traffic run is faked as one that already
+  // finished: the screen must still be able to show the "done" state.
+  simulate: async () => {
+    await delay(300);
+    return { run_id: `manual__${new Date().toISOString()}`, dag_id: "traffic_agent", state: "queued" };
+  },
+
+  simulateStatus: async () => {
+    await delay(150);
+    return {
+      run: {
+        run_id: "manual__2026-09-22T10:00:00+00:00",
+        state: "success",
+        task_type: "regression",
+        started_at: "2026-09-22T10:00:00+00:00",
+        ended_at: "2026-09-22T10:01:12+00:00",
+      },
+    };
+  },
+
   triggerDriftRun: async () => {
     await delay(300);
     return { run_id: `manual__${new Date().toISOString()}`, dag_id: "monitoring_dag", state: "queued" };

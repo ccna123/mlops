@@ -12,44 +12,68 @@ import LoadingSkeleton from "../components/LoadingSkeleton";
 import StatusBadge from "../components/StatusBadge";
 import MetricTile from "../components/MetricTile";
 import RelativeTime from "../components/RelativeTime";
-import { STATUS_META } from "../lib/constants";
+import TrafficSimulator from "../components/TrafficSimulator";
+import { DRIFT_FACTORS, STATUS_META } from "../lib/constants";
 import { formatAbsoluteTime } from "../lib/format";
 
-const PARTS = ["feature", "prediction", "performance"];
-const PART_LABELS = { feature: "Feature", prediction: "Prediction", performance: "Performance" };
 const LEVEL = { ok: 0, warning: 1, high: 2 };
 const POINT_STYLE = { ok: "circle", warning: "triangle", high: "rectRot" };
 const POINT_COLOR = { ok: "#059669", warning: "#F59E0B", high: "#DC2626" };
 const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 
-// A history point with an insufficient_data part is plotted as a genuine
-// gap (null, spanGaps: false) rather than a low value — plotting it as "0"
-// would say the same thing principle 1 forbids: that it is fine (brief §1,
-// §4.5). The gaps are called out separately below the chart instead.
-function buildChartData(history) {
-  const chronological = [...history].reverse();
-  const labels = chronological.map((summary) =>
-    new Date(summary.computed_at).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" })
-  );
-  const datasets = PARTS.map((part) => ({
-    label: PART_LABELS[part],
-    data: chronological.map((summary) => LEVEL[summary.parts[part]] ?? null),
-    pointStyle: chronological.map((summary) => POINT_STYLE[summary.parts[part]] ?? "circle"),
-    pointBackgroundColor: chronological.map((summary) => POINT_COLOR[summary.parts[part]] ?? "#94A3B8"),
-    pointRadius: 6,
-    borderColor: "#CBD5E1",
-    spanGaps: false,
-    tension: 0,
-  }));
-  return { chronological, labels, datasets };
+function levelLabel(value) {
+  return { 0: "ổn", 1: "cảnh báo", 2: "cao" }[value] ?? "";
 }
 
-function DriftHistoryChart({ history }) {
-  const { chronological, labels, datasets } = buildChartData(history);
-  const insufficientPoints = chronological.filter((summary) => summary.parts.performance === "insufficient_data");
+/**
+ * Draws one drift factor's history as its own strip.
+ *
+ * One strip per factor rather than three lines on one axis: three series
+ * sharing three y values overlap almost everywhere, and the earlier version
+ * drew all three in the same grey, so no line could be told from another.
+ *
+ * Args:
+ *   factor: An entry of DRIFT_FACTORS — its key, label, hint and colour.
+ *   chronological: Drift summaries oldest first.
+ *   labels: Formatted timestamps, one per summary.
+ *   showAxis: Whether to draw the x axis labels. Only the bottom strip does;
+ *     the strips share one timeline, so repeating it three times is noise.
+ *
+ * Returns:
+ *   A JSX element.
+ */
+function DriftFactorStrip({ factor, chronological, labels, showAxis }) {
+  // A summary with no verdict for this factor (insufficient_data, or the
+  // empty `parts` the monitor writes when there was no traffic at all) is a
+  // real gap — plotting it at "ổn" would claim somebody checked and found
+  // nothing wrong.
+  const data = chronological.map((summary) => LEVEL[summary.parts?.[factor.key]] ?? null);
+
+  const dataset = {
+    label: factor.label,
+    data,
+    borderColor: factor.color,
+    backgroundColor: `${factor.color}1A`,
+    pointStyle: chronological.map((summary) => POINT_STYLE[summary.parts?.[factor.key]] ?? "circle"),
+    pointBackgroundColor: chronological.map(
+      (summary) => POINT_COLOR[summary.parts?.[factor.key]] ?? "#94A3B8"
+    ),
+    pointBorderColor: chronological.map(
+      (summary) => POINT_COLOR[summary.parts?.[factor.key]] ?? "#94A3B8"
+    ),
+    pointRadius: 5,
+    borderWidth: 2,
+    // Stepped, because a verdict holds until the next run measures a new one.
+    // A sloped line would suggest the severity passed through values nobody
+    // ever measured.
+    stepped: "before",
+    spanGaps: false,
+    fill: true,
+  };
 
   const options = {
     responsive: true,
+    maintainAspectRatio: false,
     scales: {
       y: {
         // min/max must land exactly on integer ticks (Chart.js generates
@@ -58,26 +82,34 @@ function DriftHistoryChart({ history }) {
         // with no text at all.
         min: -1,
         max: 3,
+        ticks: { stepSize: 1, callback: levelLabel, font: { size: 11 } },
+        grid: { color: "#F1F5F9" },
+      },
+      x: {
         ticks: {
-          stepSize: 1,
-          callback: (value) => ({ 0: "ổn", 1: "cảnh báo", 2: "cao" })[value] ?? "",
+          display: showAxis,
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 6,
+          font: { size: 10 },
         },
+        grid: { display: false },
       },
     },
     plugins: {
-      legend: { position: "top" },
+      legend: { display: false },
       tooltip: {
         callbacks: {
           title: (items) => chronological[items[0].dataIndex].run_id,
           label: (item) => {
             const summary = chronological[item.dataIndex];
-            const part = PARTS[item.datasetIndex];
+            const verdict = summary.parts?.[factor.key];
             const lines = [
-              `${PART_LABELS[part]}: ${STATUS_META[summary.parts[part]]?.label ?? summary.parts[part]}`,
+              `${factor.label}: ${STATUS_META[verdict]?.label ?? verdict ?? "chưa đo"}`,
               `n_predictions: ${summary.n_predictions} · n_ground_truth: ${summary.n_ground_truth}`,
               `window_hours: ${summary.window_hours}`,
             ];
-            if (Object.keys(summary.current_metrics).length > 0) {
+            if (Object.keys(summary.current_metrics ?? {}).length > 0) {
               lines.push(
                 Object.entries(summary.current_metrics)
                   .map(([key, value]) => `${key}=${Number(value).toFixed(3)}`)
@@ -92,12 +124,43 @@ function DriftHistoryChart({ history }) {
   };
 
   return (
+    <div className="drift-strip">
+      <div className="drift-strip-head">
+        <span className="drift-strip-dot" style={{ background: factor.color }} />
+        <div>
+          <p className="drift-strip-label">{factor.label}</p>
+          <p className="drift-strip-hint">{factor.hint}</p>
+        </div>
+      </div>
+      <div className={`drift-strip-canvas ${showAxis ? "drift-strip-canvas-axis" : ""}`}>
+        <Line data={{ labels, datasets: [dataset] }} options={options} />
+      </div>
+    </div>
+  );
+}
+
+function DriftHistoryChart({ history }) {
+  const chronological = [...history].reverse();
+  const labels = chronological.map((summary) =>
+    new Date(summary.computed_at).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" })
+  );
+  const gaps = chronological.filter((summary) => summary.parts?.performance === "insufficient_data");
+
+  return (
     <div>
-      <Line data={{ labels, datasets }} options={options} />
-      {insufficientPoints.length > 0 && (
+      {DRIFT_FACTORS.map((factor, index) => (
+        <DriftFactorStrip
+          key={factor.key}
+          factor={factor}
+          chronological={chronological}
+          labels={labels}
+          showAxis={index === DRIFT_FACTORS.length - 1}
+        />
+      ))}
+      {gaps.length > 0 && (
         <p className="chart-gap-note">
-          Khoảng trống trên dải Performance = chưa đủ dữ liệu (không phải mức thấp hơn "ổn"), tại:{" "}
-          {insufficientPoints.map((summary) => formatAbsoluteTime(summary.computed_at)).join(", ")}.
+          Khoảng trống trên dải Performance drift = chưa đủ dữ liệu (không phải mức thấp hơn &ldquo;ổn&rdquo;), tại:{" "}
+          {gaps.map((summary) => formatAbsoluteTime(summary.computed_at)).join(", ")}.
         </p>
       )}
     </div>
@@ -105,9 +168,10 @@ function DriftHistoryChart({ history }) {
 }
 
 /**
- * Renders the Drift screen: three separate severity parts (never merged
- * into one badge, brief §1 principle 2), history chart, and a placeholder
- * for the Evidently report until a serving decision exists for it (§4.5).
+ * Renders the Drift screen: a traffic simulator that makes the model get
+ * used, then the three separate severity parts (never merged into one badge,
+ * brief §1 principle 2), one history strip per part, and a placeholder for
+ * the Evidently report until a serving decision exists for it (§4.5).
  *
  * Args:
  *   onRetrain: Called with a task_type string when the user clicks the
@@ -192,15 +256,23 @@ export default function Drift({ onRetrain }) {
   }
 
   const isStale =
-    latestState.status === "data" && Date.now() - new Date(latestState.summary.computed_at).getTime() > STALE_THRESHOLD_MS;
+    latestState.status === "data" &&
+    Date.now() - new Date(latestState.summary.computed_at).getTime() > STALE_THRESHOLD_MS;
+  const selectedModel = models.find((model) => model.name === modelName);
 
   return (
     <div className="page-grid-single">
+      {selectedModel && (
+        <TrafficSimulator modelName={selectedModel.name} taskType={selectedModel.task_type} />
+      )}
+
       <section className="card">
         <div className="section-head">
           <div>
             <h2>Drift</h2>
-            <p className="section-sub">Ba phép đo tách biệt: feature, prediction, performance.</p>
+            <p className="section-sub">
+              Ba phép đo tách biệt, không gộp thành một điểm số: data, model, performance.
+            </p>
           </div>
           <div className="filters">
             <select value={modelName} onChange={(event) => setModelName(event.target.value)}>
@@ -243,7 +315,7 @@ export default function Drift({ onRetrain }) {
         {latestState.status === "empty" && (
           <EmptyState
             title="Chưa có báo cáo drift cho model này."
-            description="monitoring_dag chưa chạy lần nào (mặc định nó ở trạng thái paused; bật trong Airflow)."
+            description="Chưa có run nào của monitoring_dag. Gửi traffic ở khối trên, rồi bấm Tính drift ngay."
           />
         )}
         {latestState.status === "data" && (
@@ -259,10 +331,13 @@ export default function Drift({ onRetrain }) {
             </div>
 
             <div className="severity-overview">
-              {PARTS.map((part) => (
-                <div className="severity-cell" key={part}>
-                  <p className="severity-cell-label">{PART_LABELS[part]}</p>
-                  <StatusBadge value={latestState.summary.parts[part]} />
+              {DRIFT_FACTORS.map((factor) => (
+                <div className="severity-cell" key={factor.key}>
+                  <p className="severity-cell-label" style={{ color: factor.color }}>
+                    {factor.label}
+                  </p>
+                  <StatusBadge value={latestState.summary.parts[factor.key]} />
+                  <p className="severity-cell-hint">{factor.hint}</p>
                 </div>
               ))}
             </div>
@@ -295,7 +370,11 @@ export default function Drift({ onRetrain }) {
               <p>Báo cáo Evidently đầy đủ chưa xem được từ dashboard.</p>
               <div className="report-key-row">
                 <code>{latestState.summary.report_key}</code>
-                <button className="icon-btn" onClick={() => copyReportKey(latestState.summary.report_key)} aria-label="Sao chép">
+                <button
+                  className="icon-btn"
+                  onClick={() => copyReportKey(latestState.summary.report_key)}
+                  aria-label="Sao chép"
+                >
                   <Copy size={14} />
                 </button>
               </div>
@@ -329,7 +408,7 @@ export default function Drift({ onRetrain }) {
           <p className="hint-note">
             Nếu không có dự đoán mới nào trong cửa sổ, run vẫn báo thành công nhưng <b>không sinh báo cáo</b> —
             monitor trả <code>insufficient_data</code> và cố ý không ghi verdict từ số liệu rỗng, nên màn hình này
-            sẽ không đổi. Muốn có báo cáo mới thì phải có traffic đi qua <code>serving</code> trước.
+            sẽ không đổi. Muốn có báo cáo mới thì phải gửi traffic ở khối trên trước.
           </p>
         </ConfirmDialog>
       )}

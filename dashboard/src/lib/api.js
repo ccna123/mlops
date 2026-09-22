@@ -151,6 +151,17 @@ export const api = {
 
   triggerDriftRun: () => request("/drift/run", { method: "POST" }),
 
+  listScenarios: () => request("/scenarios"),
+
+  simulate: (payload) =>
+    request("/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+
+  simulateStatus: () => request("/simulate/status", { timeout: 6000 }),
+
   driftLatest: (modelName) => request(`/drift/latest?model_name=${encodeURIComponent(modelName)}`),
 
   driftHistory: (modelName, limit = 20) =>

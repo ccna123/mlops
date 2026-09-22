@@ -71,3 +71,58 @@ export const HIGHER_IS_BETTER = new Set(["r2", "accuracy", "auc", "f1"]);
 export const MAX_UPLOAD_BYTES = 524_288_000; // 500 MiB, matches the API's undocumented cap
 
 export const DATASET_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+// The three drift measurements, in the order the Drift screen shows them.
+// The API speaks the monitor stage's vocabulary (feature / prediction /
+// performance); these are the words a person reading the screen needs, plus
+// the one line that says what each measurement actually compares. Keys stay
+// the API's — nothing is renamed on the way in.
+export const DRIFT_FACTORS = [
+  {
+    key: "feature",
+    label: "Data drift",
+    hint: "Dữ liệu đi vào model lệch so với dữ liệu lúc train.",
+    color: "#2563EB",
+  },
+  {
+    key: "prediction",
+    label: "Model drift",
+    hint: "Phân bố dự đoán của model lệch so với lúc train, dù dữ liệu vào có lệch hay không.",
+    color: "#7C3AED",
+  },
+  {
+    key: "performance",
+    label: "Performance drift",
+    hint: "Model dự đoán sai nhiều hơn trước. Chỉ đo được khi đã có kết quả thật gửi về.",
+    color: "#DB2777",
+  },
+];
+
+// What each agent scenario does, in words. The NAMES come from
+// GET /api/scenarios — this map only labels them, so a scenario the backend
+// drops simply stops being offered instead of rendering a dead option.
+export const SCENARIO_META = {
+  none: {
+    label: "Traffic bình thường",
+    hint: "Dữ liệu thật, không bóp méo. Chứng minh đường đi hoạt động; drift sẽ là “ổn”.",
+  },
+  price_inflation: {
+    label: "Giá rao tăng 20%",
+    hint: "list_price bị loại vì leakage nên model không hề nhìn thấy — cố ý không sinh drift.",
+  },
+  market_rally: {
+    label: "Thị trường tăng thật 20%",
+    hint: "Giá bán thật tăng còn model thì không biết → performance drift, data drift vẫn “ổn”.",
+  },
+  market_shift: {
+    label: "Traffic dồn về Phoenix",
+    hint: "city là feature thật → data drift, thường kéo theo model drift.",
+  },
+  new_segment: {
+    label: "Loại bất động sản chưa từng thấy",
+    hint: "property_type = “floating home”, chưa từng có lúc train → data drift.",
+  },
+};
+
+// Airflow run states that mean the traffic batch is still going.
+export const ACTIVE_TRAFFIC_STATES = new Set(["queued", "running"]);

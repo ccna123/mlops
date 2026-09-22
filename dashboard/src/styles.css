@@ -550,3 +550,58 @@ tbody tr[onclick],
 .chart-gap-note {
   @apply mt-2 text-xs text-slate-500;
 }
+
+/* ---------- Traffic simulator ---------- */
+
+.simulator-controls {
+  @apply flex flex-wrap items-end gap-3;
+}
+.simulator-controls label {
+  @apply flex flex-col gap-1;
+}
+.simulator-controls label > span {
+  @apply text-xs font-semibold uppercase tracking-wide text-slate-400;
+}
+.simulator-controls select,
+.simulator-controls input {
+  @apply rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100;
+}
+.simulator-controls input {
+  @apply w-28;
+}
+.scenario-hint {
+  @apply mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600;
+}
+.traffic-status {
+  @apply mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600;
+}
+.traffic-status-live {
+  @apply text-emerald-700;
+}
+
+/* ---------- Drift strips ---------- */
+
+.drift-strip {
+  @apply border-b border-slate-100 pb-3 pt-3 first:pt-0 last:border-0 last:pb-0;
+}
+.drift-strip-head {
+  @apply mb-1 flex items-start gap-2;
+}
+.drift-strip-dot {
+  @apply mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full;
+}
+.drift-strip-label {
+  @apply text-sm font-semibold text-slate-700;
+}
+.drift-strip-hint {
+  @apply text-xs text-slate-500;
+}
+.drift-strip-canvas {
+  @apply h-24;
+}
+.drift-strip-canvas-axis {
+  @apply h-32;
+}
+.severity-cell-hint {
+  @apply px-4 text-center text-xs text-slate-500;
+}
