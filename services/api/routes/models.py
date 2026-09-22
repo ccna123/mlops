@@ -27,7 +27,10 @@ def list_models(request: Request) -> dict:
     Returns:
         `models`. Each version's `metrics` holds whichever keys that model
         logged - regression and classification differ, and the UI must read
-        the keys rather than assume a fixed set.
+        the keys rather than assume a fixed set. `estimator` is the algorithm
+        name the train stage logged (e.g. "ridge", "xgboost"), or `null` for
+        a version registered outside the pipeline or trained before this
+        param existed.
 
     Example:
         # GET /api/models
@@ -35,6 +38,7 @@ def list_models(request: Request) -> dict:
         #              "task_type": "regression",
         #              "versions": [{"version": "3",
         #                            "metrics": {"rmse": 41203.7, ...},
+        #                            "estimator": "xgboost",
         #                            "is_champion": true}]}]}
     """
     return {"models": request.app.state.registry.list_models()}

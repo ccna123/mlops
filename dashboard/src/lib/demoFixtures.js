@@ -211,7 +211,11 @@ export const preview = {
   ],
 };
 
-// Literal `GET /models` response.
+// Literal `GET /models` response, with one field added on top: `estimator`
+// (added to the real API 2026-09-22) predates this capture, so its values
+// below are NOT captured output — they are the algorithm each demo version
+// would plausibly have been trained with, picked from
+// ml_common.estimators.ESTIMATOR_NAMES for that task_type.
 export const models = {
   models: [
     {
@@ -221,6 +225,7 @@ export const models = {
         {
           version: "1",
           metrics: { f1: 0.1046831955922865, accuracy: 0.756128064032016, auc: 0.6468311259876465 },
+          estimator: "logistic",
           is_champion: true,
           created_at: "2026-09-19T10:49:51.116000+00:00",
         },
@@ -233,18 +238,21 @@ export const models = {
         {
           version: "3",
           metrics: { rmse: 98175.10328533906, mae: 64040.68658593348, r2: 0.9475422335571709 },
+          estimator: "xgboost",
           is_champion: true,
           created_at: "2026-09-19T09:12:56.485000+00:00",
         },
         {
           version: "2",
           metrics: { rmse: 98175.10328533906, mae: 64040.68658593348, r2: 0.9475422335571709 },
+          estimator: "xgboost",
           is_champion: false,
           created_at: "2026-09-19T08:55:40.454000+00:00",
         },
         {
           version: "1",
           metrics: { rmse: 204970.66113894654, mae: 147923.18956396583, r2: 0.7713398598310879 },
+          estimator: "ridge",
           is_champion: false,
           created_at: "2026-09-19T08:55:05.143000+00:00",
         },

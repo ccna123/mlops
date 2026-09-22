@@ -29,6 +29,7 @@ class FakeMlflowClient:
         self,
         versions=None,
         runs=None,
+        params=None,
         champion=None,
         alias_error=None,
         set_alias_error=None,
@@ -37,6 +38,7 @@ class FakeMlflowClient:
     ):
         self.versions = versions if versions is not None else []
         self.runs = runs if runs is not None else {}
+        self.params = params if params is not None else {}
         self.champion = champion
         self.alias_error = alias_error
         self.set_alias_error = set_alias_error
@@ -67,7 +69,11 @@ class FakeMlflowClient:
 
     def get_run(self, run_id):
         self.calls.append(("get_run", {"run_id": run_id}))
-        return SimpleNamespace(data=SimpleNamespace(metrics=self.runs.get(run_id, {})))
+        return SimpleNamespace(
+            data=SimpleNamespace(
+                metrics=self.runs.get(run_id, {}), params=self.params.get(run_id, {})
+            )
+        )
 
     def set_registered_model_alias(self, name, alias, version):
         if self.set_alias_error:
@@ -119,6 +125,25 @@ def test_test_prefix_is_stripped_and_other_metrics_are_excluded():
     metrics = _only_model(fake)["versions"][0]["metrics"]
 
     assert metrics == {"rmse": 41203.7, "r2": 0.947}
+
+
+def test_estimator_comes_from_the_run_params():
+    fake = FakeMlflowClient(versions=[_version(1)], params={"run1": {"estimator": "xgboost"}})
+
+    version = _only_model(fake)["versions"][0]
+
+    assert version["estimator"] == "xgboost"
+
+
+def test_estimator_is_none_for_a_run_logged_before_the_param_existed():
+    # A model registered outside the pipeline, or trained before this param
+    # was added, has no `estimator` param at all - reported as unknown rather
+    # than guessed at.
+    fake = FakeMlflowClient(versions=[_version(1)], params={})
+
+    version = _only_model(fake)["versions"][0]
+
+    assert version["estimator"] is None
 
 
 def test_task_type_comes_from_the_model_name():

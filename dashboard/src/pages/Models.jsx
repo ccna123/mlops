@@ -124,7 +124,10 @@ export default function Models({ onNavigateToOverview }) {
               <div className="section-head">
                 <div>
                   <h2>{model.name}</h2>
-                  <p className="section-sub">{model.task_type}</p>
+                  <p className="section-sub">
+                    {model.task_type}
+                    {champion?.estimator && <> · {champion.estimator}</>}
+                  </p>
                 </div>
                 <button
                   className="btn-danger-ghost"
@@ -151,6 +154,7 @@ export default function Models({ onNavigateToOverview }) {
                     <tr>
                       <th>VERSION</th>
                       <th>CHAMPION</th>
+                      <th>THUẬT TOÁN</th>
                       {metricKeys.map((key) => (
                         <th key={key}>{key.toUpperCase()}</th>
                       ))}
@@ -169,6 +173,7 @@ export default function Models({ onNavigateToOverview }) {
                             </span>
                           )}
                         </td>
+                        <td>{version.estimator ?? "—"}</td>
                         {metricKeys.map((key) => (
                           <td key={key}>{key in version.metrics ? formatNumber(version.metrics[key]) : "—"}</td>
                         ))}

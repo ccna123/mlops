@@ -77,7 +77,8 @@ class RegistryClient:
         client.list_models()
         # -> [{"name": "house_price_regressor", "task_type": "regression",
         #      "versions": [{"version": "3", "metrics": {"rmse": ...},
-        #                    "is_champion": True, "created_at": "..."}]}]
+        #                    "estimator": "xgboost", "is_champion": True,
+        #                    "created_at": "..."}]}]
     """
 
     def __init__(self, client=None):
@@ -105,10 +106,14 @@ class RegistryClient:
 
         Returns:
             One entry per model with `name`, `task_type` and `versions`. Each
-            version carries `version`, `metrics`, `is_champion` and
-            `created_at`. `metrics` holds the keys that run actually logged,
-            with the `test_` prefix the evaluate stage adds stripped off - so
-            regression and classification legitimately differ.
+            version carries `version`, `metrics`, `estimator`, `is_champion`
+            and `created_at`. `metrics` holds the keys that run actually
+            logged, with the `test_` prefix the evaluate stage adds stripped
+            off - so regression and classification legitimately differ.
+            `estimator` is the algorithm name the train stage logged as a run
+            param (e.g. "ridge", "xgboost"), or `None` for a run that has no
+            such param - a model registered outside the pipeline, or trained
+            before this param existed.
 
         Raises:
             MlflowException: when MLflow fails for any reason other than a
@@ -117,8 +122,9 @@ class RegistryClient:
 
         Example:
             list_models()
-            # -> regression versions carry rmse/mae/r2,
-            #    classification versions carry auc/f1/accuracy
+            # -> regression versions carry rmse/mae/r2 and estimator "ridge",
+            #    classification versions carry auc/f1/accuracy and estimator
+            #    "logistic"
         """
         result: list[dict] = []
         for registered in self._client.search_registered_models():
@@ -126,10 +132,10 @@ class RegistryClient:
 
             versions = []
             for version in self._client.search_model_versions(f"name='{registered.name}'"):
-                logged = self._client.get_run(version.run_id).data.metrics
+                run_data = self._client.get_run(version.run_id).data
                 metrics = {
                     name[len("test_") :]: value
-                    for name, value in logged.items()
+                    for name, value in run_data.metrics.items()
                     if name.startswith("test_")
                 }
                 created_at = datetime.fromtimestamp(
@@ -139,6 +145,7 @@ class RegistryClient:
                     {
                         "version": str(version.version),
                         "metrics": metrics,
+                        "estimator": run_data.params.get("estimator"),
                         "is_champion": str(version.version) == str(champion_version),
                         "created_at": created_at,
                     }
