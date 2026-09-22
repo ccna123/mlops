@@ -80,26 +80,45 @@ def load_champion_context(model_name: str) -> tuple[object, str, str, str]:
     return model, str(version.version), version.run_id, fingerprint
 
 
-def train_metrics_of(run_id: str, task_type: str) -> dict:
-    """Reads the metrics the train stage logged for this model version.
+def test_metrics_of(run_id: str, task_type: str) -> dict:
+    """Reads what this model version scored on the held-out test split.
+
+    The `test_` metrics, not the `train_` ones, and the difference decides
+    whether a drift alarm means anything. Until 2026-09-22 this read
+    `train_`, which is measured on the very rows the model was fitted on, so
+    an overfit model brought its own tiny denominator: the xgboost champion
+    scored train rmse 14321 against test rmse 152620, and live traffic at rmse
+    203809 came out as 14.2x - "high" - when against the test score it is
+    1.33x, a warning. The more a model overfits, the louder and less
+    informative its performance drift becomes. The test split is the only
+    baseline measured on data the model had not seen, which is exactly what
+    live traffic is.
+
+    These are the same numbers the Models screen shows, so the dashboard now
+    compares against a figure the user can see rather than one kept private
+    to this stage.
 
     Args:
         run_id: the MLflow run that produced the champion.
         task_type: "regression" or "classification".
 
     Returns:
-        The metrics under their plain names, with the `train_` prefix the
-        train stage added stripped back off, e.g. {"rmse": 41203.7, ...}.
+        The metrics under their plain names, with the `test_` prefix the
+        evaluate stage added stripped back off, e.g. {"rmse": 152620.4, ...}.
+        Empty when the run has none - a model registered outside the pipeline
+        never went through evaluate. `champion_test_*`, logged on the same run
+        for the model this one was compared against, is NOT picked up: it does
+        not start with `test_`.
 
     Example:
-        train_metrics_of("a1b2c3", "regression")
-        # -> {"rmse": 41203.7, "mae": 28104.2, "r2": 0.947}
+        test_metrics_of("a1b2c3", "regression")
+        # -> {"rmse": 152620.2, "mae": 86713.0, "r2": 0.8577}
     """
     logged = MlflowClient().get_run(run_id).data.metrics
     return {
-        name[len("train_") :]: value
+        name[len("test_") :]: value
         for name, value in logged.items()
-        if name.startswith("train_")
+        if name.startswith("test_")
     }
 
 
@@ -408,17 +427,28 @@ def main() -> int:
     )
     prediction_part = drift.prediction_severity(_drifted_share(prediction_report.dict()) > 0)
 
-    # Read what training measured BEFORE deciding whether performance can be
-    # graded. It is the yardstick the verdict is made against, and a dashboard
-    # showing "rmse 286k" without it cannot say whether that is bad - so it
-    # goes into the summary either way, including when there is not enough
-    # ground truth to grade anything.
-    reference_metrics = train_metrics_of(champion_run_id, task_type)
+    # Read the baseline BEFORE deciding whether performance can be graded. It
+    # is the yardstick the verdict is made against, and a dashboard showing
+    # "rmse 286k" without it cannot say whether that is bad - so it goes into
+    # the summary either way, including when there is not enough ground truth
+    # to grade anything.
+    reference_metrics = test_metrics_of(champion_run_id, task_type)
 
     # Performance drift, when there is anything to measure it on.
     outcomes = drift.load_outcomes(storage, model_name, now, window_hours)
     joined = drift.join_outcomes(predictions, outcomes)
-    if len(joined) >= drift.MIN_GROUND_TRUTH:
+    if not reference_metrics:
+        # No baseline, no ratio. Reported as unmeasured rather than as a crash
+        # or - far worse - as "ok": a champion registered outside the pipeline
+        # never went through evaluate, and grading it against nothing would be
+        # inventing a verdict.
+        print(
+            f"no test_ metrics on run {champion_run_id}, performance cannot be graded",
+            file=sys.stderr,
+        )
+        current_metrics = {}
+        performance_part = drift.INSUFFICIENT
+    elif len(joined) >= drift.MIN_GROUND_TRUTH:
         # Classification is scored on AUC, so it needs the probability serving
         # logged alongside the label. Regression has no probability at all.
         y_proba = None
@@ -462,10 +492,18 @@ def main() -> int:
         "n_predictions": int(len(predictions)),
         "n_ground_truth": int(len(joined)),
         "current_metrics": current_metrics,
-        # What the train stage measured for this champion. Added 2026-09-22 so
-        # the dashboard can plot the baseline; summaries written before that
-        # date do not have it, and every reader must cope with it missing.
+        # What this champion scored on the held-out test split. Added
+        # 2026-09-22 so the dashboard can plot the baseline; summaries written
+        # before that date do not have it, and every reader must cope with it
+        # missing.
         "reference_metrics": reference_metrics,
+        # Which baseline the two fields above were compared against. It exists
+        # because the answer already changed once - for a few hours on
+        # 2026-09-22 `reference_metrics` held the TRAIN metrics - and a reader
+        # cannot otherwise tell one generation of summary from the other. A
+        # summary without this key was graded some other way; do not plot its
+        # baseline next to these.
+        "reference_source": "test_metrics",
         "report_key": html_key,
     }
     storage.write_json(summary, drift_summary_key(model_name, run_id))
