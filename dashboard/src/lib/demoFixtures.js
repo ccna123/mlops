@@ -316,6 +316,12 @@ export const driftLatest = {
   n_predictions: 500,
   n_ground_truth: 500,
   current_metrics: { rmse: 305791.86789740255, mae: 184188.3288157089, r2: 0.5677294118532599 },
+  // NOT captured output: the real response predates these two fields (added
+  // to the monitor stage on 2026-09-22). The values are this version's actual
+  // test scores from the brief's own /models response, so the comparison
+  // table has something real-shaped to show in demo mode.
+  reference_metrics: { rmse: 98175.10328533906, mae: 64040.68658593348, r2: 0.9475422335571709 },
+  reference_source: "test_metrics",
   report_key: "reports/house_price_regressor/20260920T075645/evidently.html",
 };
 

@@ -263,6 +263,7 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
         <label className="field">
           <span>Thuật toán</span>
           <select
+          className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm"
             value={estimatorName}
             disabled={!taskType || !estimators}
             onChange={(event) => setEstimatorName(event.target.value)}

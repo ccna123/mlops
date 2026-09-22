@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Line } from "react-chartjs-2";
-import { Copy, Play, RefreshCw, TriangleAlert } from "lucide-react";
+import { Play, RefreshCw, TriangleAlert } from "lucide-react";
 import "../lib/chartSetup";
 import { useClient } from "../lib/DemoModeContext";
 import { useToast } from "../components/Toast";
@@ -10,7 +10,8 @@ import EmptyState from "../components/EmptyState";
 import ErrorState from "../components/ErrorState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import StatusBadge from "../components/StatusBadge";
-import MetricTile from "../components/MetricTile";
+import MetricComparison from "../components/MetricComparison";
+import EvidentlyReport from "../components/EvidentlyReport";
 import RelativeTime from "../components/RelativeTime";
 import TrafficSimulator from "../components/TrafficSimulator";
 import { DRIFT_FACTORS, STATUS_META } from "../lib/constants";
@@ -613,13 +614,17 @@ export default function Drift({ onRetrain }) {
               </div>
             )}
 
-            {Object.keys(latestState.summary.current_metrics).length > 0 && (
-              <div className="metric-row">
-                {Object.entries(latestState.summary.current_metrics).map(([key, value]) => (
-                  <MetricTile key={key} name={key} value={value} />
-                ))}
-              </div>
-            )}
+            <MetricComparison
+              current={latestState.summary.current_metrics}
+              // Only a baseline that declares which standard it was measured
+              // under; see MetricTrendChart for why the older ones are not
+              // comparable.
+              reference={
+                latestState.summary.reference_source === "test_metrics"
+                  ? latestState.summary.reference_metrics
+                  : null
+              }
+            />
 
             {history.length > 0 && (
               <div className="chart-wrap">
@@ -627,19 +632,11 @@ export default function Drift({ onRetrain }) {
               </div>
             )}
 
-            <div className="evidently-placeholder">
-              <p>Báo cáo Evidently đầy đủ chưa xem được từ dashboard.</p>
-              <div className="report-key-row">
-                <code>{latestState.summary.report_key}</code>
-                <button
-                  className="icon-btn"
-                  onClick={() => copyReportKey(latestState.summary.report_key)}
-                  aria-label="Sao chép"
-                >
-                  <Copy size={14} />
-                </button>
-              </div>
-            </div>
+            <EvidentlyReport
+              url={client.driftReportUrl?.(modelName, latestState.summary.run_id) ?? null}
+              reportKey={latestState.summary.report_key}
+              onCopyKey={copyReportKey}
+            />
 
             {latestState.summary.severity === "high" && (
               <button className="btn-primary" onClick={() => onRetrain?.(latestState.summary.task_type)}>

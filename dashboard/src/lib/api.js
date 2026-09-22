@@ -166,4 +166,10 @@ export const api = {
 
   driftHistory: (modelName, limit = 20) =>
     request(`/drift/history?model_name=${encodeURIComponent(modelName)}&limit=${limit}`),
+
+  // A URL rather than a fetch: the Evidently report is megabytes of HTML that
+  // an iframe loads itself, so pulling it through request() would only put it
+  // in memory twice.
+  driftReportUrl: (modelName, runId) =>
+    `${API_BASE}/drift/report?model_name=${encodeURIComponent(modelName)}&run_id=${encodeURIComponent(runId)}`,
 };

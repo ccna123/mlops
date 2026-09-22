@@ -123,6 +123,10 @@ export const demoApi = {
     return fx.driftLatest;
   },
 
+  // Demo mode has no object storage, so there is no report to point at and
+  // the component says so instead of showing a broken frame.
+  driftReportUrl: () => null,
+
   driftHistory: async (modelName) => {
     await delay(200);
     if (modelName !== "house_price_regressor") {
