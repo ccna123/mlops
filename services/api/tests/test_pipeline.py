@@ -58,6 +58,76 @@ def test_run_rejects_an_unknown_task_type():
     assert response.status_code == 422
 
 
+def test_run_passes_the_chosen_estimator_through():
+    airflow = FakeAirflow()
+
+    response = _client(airflow).post(
+        "/api/pipeline/run", json={"task_type": "regression", "estimator_name": "xgboost"}
+    )
+
+    assert response.status_code == 200
+    _, conf = airflow.triggered[0]
+    assert conf["estimator_name"] == "xgboost"
+
+
+def test_run_without_an_estimator_leaves_the_dag_to_pick_its_default():
+    airflow = FakeAirflow()
+
+    _client(airflow).post("/api/pipeline/run", json={"task_type": "regression"})
+
+    _, conf = airflow.triggered[0]
+    assert conf["estimator_name"] is None
+
+
+def test_run_rejects_an_estimator_that_belongs_to_the_other_task_type():
+    # "random_forest" is offered for classification only. Letting it through
+    # would fail deep inside the train container instead of at the request.
+    airflow = FakeAirflow()
+
+    response = _client(airflow).post(
+        "/api/pipeline/run", json={"task_type": "regression", "estimator_name": "random_forest"}
+    )
+
+    assert response.status_code == 422
+    assert airflow.triggered == []
+
+
+def test_run_rejects_an_estimator_nobody_offers():
+    airflow = FakeAirflow()
+
+    response = _client(airflow).post(
+        "/api/pipeline/run", json={"task_type": "regression", "estimator_name": "catboost"}
+    )
+
+    assert response.status_code == 422
+    assert airflow.triggered == []
+
+
+def test_estimators_lists_the_names_each_task_type_offers():
+    body = _client(FakeAirflow()).get("/api/estimators").json()
+
+    assert "xgboost" in body["regression"]
+    assert "random_forest" in body["classification"]
+    assert "random_forest" not in body["regression"]
+
+
+def test_estimators_marks_the_diagnostic_ones_so_the_ui_can_group_them():
+    # The weak and dummy estimators exist to exercise the promotion gates, not
+    # to win. The UI needs to tell them apart without hardcoding their names.
+    body = _client(FakeAirflow()).get("/api/estimators").json()
+
+    assert set(body["diagnostic"]) == {"hist_gradient_boosting_weak", "dummy"}
+
+
+def test_estimators_agrees_with_what_the_trainer_actually_accepts():
+    from ml_common.estimators import ESTIMATOR_NAMES
+
+    body = _client(FakeAirflow()).get("/api/estimators").json()
+
+    assert body["regression"] == list(ESTIMATOR_NAMES["regression"])
+    assert body["classification"] == list(ESTIMATOR_NAMES["classification"])
+
+
 def test_run_rejects_a_zero_or_negative_sample_rows():
     client = _client(FakeAirflow())
     for bad in (0, -1):

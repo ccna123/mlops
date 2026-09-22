@@ -10,7 +10,9 @@ import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from ml_common.estimators import DIAGNOSTIC_ESTIMATORS, ESTIMATOR_NAMES
 
 from ..clients.airflow import AirflowNotFoundError
 from ..deps import require_auth
@@ -34,6 +36,28 @@ class RunRequest(BaseModel):
     force_reprocess: bool = False
     sample_rows: int | None = Field(default=None, gt=0)
     dataset_version: str = "v1"
+    estimator_name: str | None = None
+
+    @model_validator(mode="after")
+    def _estimator_belongs_to_the_task_type(self) -> RunRequest:
+        """Refuses an estimator the chosen task type does not offer.
+
+        Returns:
+            The validated request.
+
+        Raises:
+            ValueError: when `estimator_name` is not one of the names
+                `ml_common.estimators` accepts for this `task_type`. FastAPI
+                turns it into a 422. Checked here rather than left to the
+                train container, where it would surface minutes later as a
+                failed stage.
+        """
+        if self.estimator_name is None:
+            return self
+        allowed = ESTIMATOR_NAMES[self.task_type]
+        if self.estimator_name not in allowed:
+            raise ValueError(f"estimator for {self.task_type} must be one of {allowed}")
+        return self
 
 
 @router.post("/pipeline/run", dependencies=[Depends(require_auth)])
@@ -60,8 +84,38 @@ def trigger_run(request: Request, body: RunRequest) -> dict:
         "force_reprocess": body.force_reprocess,
         "sample_rows": body.sample_rows,
         "dataset_version": body.dataset_version,
+        "estimator_name": body.estimator_name,
     }
     return request.app.state.airflow.trigger_run(DAG_ID, conf)
+
+
+@router.get("/estimators", dependencies=[Depends(require_auth)])
+def list_estimators() -> dict:
+    """Lists the estimators each task type offers.
+
+    Read straight from `ml_common.estimators`, the same table the train stage
+    validates against, so the dropdown cannot drift from what a run will
+    actually accept.
+
+    Args:
+        None.
+
+    Returns:
+        One key per task type holding its estimator names in the order they
+        are declared, plus `diagnostic`: the names that exist to exercise the
+        promotion gates rather than to produce a good model, so the UI can
+        group them apart without hardcoding which ones they are.
+
+    Example:
+        # GET /api/estimators
+        # {"regression": ["ridge", "xgboost", ...],
+        #  "classification": ["logistic", "xgboost", "random_forest", ...],
+        #  "diagnostic": ["dummy", "hist_gradient_boosting_weak"]}
+    """
+    return {
+        **{task_type: list(names) for task_type, names in ESTIMATOR_NAMES.items()},
+        "diagnostic": sorted(DIAGNOSTIC_ESTIMATORS),
+    }
 
 
 @router.get("/pipeline/runs", dependencies=[Depends(require_auth)])
