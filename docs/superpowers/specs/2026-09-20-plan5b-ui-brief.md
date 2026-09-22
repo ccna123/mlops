@@ -615,9 +615,13 @@ chủ dự án nhận xét "mấy cái mốc thời gian khó hiểu, nhìn grap
    logic nằm ở `src/lib/driftReading.js` dạng hàm thuần, **không** tự đặt
    ngưỡng nào: mức vẫn là mức API trả về.
 3. **Một dải số thật** (`MetricTrendChart`): `rmse` (regression) hoặc `auc`
-   (classification) theo từng lần đo, kèm đường nét đứt là chỉ số lúc train lấy
-   từ `reference_metrics` (xem addendum 2026-09-22 của spec Plan 4). Ba mức
-   phân loại không trả lời được "sai hơn bao nhiêu"; dải này trả lời được.
+   (classification) theo từng lần đo, kèm đường nét đứt là chỉ số **trên tập
+   test** lấy từ `reference_metrics` — cùng con số màn Models hiện, và đúng mốc
+   mà mức Performance drift được chấm dựa vào (xem addendum 2026-09-22 của spec
+   Plan 4). Ba mức phân loại không trả lời được "sai hơn bao nhiêu"; dải này trả
+   lời được. Chỉ vẽ mốc của bản tóm tắt có `reference_source: "test_metrics"`:
+   bản cũ hơn chấm theo chuẩn khác, vẽ chung một nét đứt sẽ tạo ra một cú nhảy
+   chưa từng xảy ra với model.
 
 #### InsufficientDataNotice
 

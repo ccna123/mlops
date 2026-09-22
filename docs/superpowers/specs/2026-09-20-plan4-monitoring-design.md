@@ -281,19 +281,41 @@ MWAA thì bỏ cờ này.
 > drift chỉ tính được từ dự đoán mà `serving` đã ghi, nên trên máy dev không có
 > người dùng thật thì mọi verdict đều là `insufficient_data`.
 
-> **Thêm trường `reference_metrics` vào bản tóm tắt (2026-09-22).** Stage
-> `monitor` nay ghi luôn chỉ số mà stage `train` đã log cho champion
-> (`train_metrics_of`, bỏ tiền tố `train_`) vào summary, cạnh `current_metrics`.
-> Trước đó con số này chỉ tồn tại trong bộ nhớ đúng lúc chấm
+> **Thêm `reference_metrics` vào bản tóm tắt, và đổi mốc chấm performance
+> drift (2026-09-22).** Hai việc, làm trong cùng một ngày, việc thứ hai là hệ
+> quả của việc thứ nhất.
+>
+> Trước đây mốc so sánh chỉ tồn tại trong bộ nhớ đúng lúc chấm
 > `performance_severity` rồi biến mất, nên dashboard thấy "rmse 203.809" mà
-> không có cách nào biết thế là tốt hay tệ — ba mức `ok`/`warning`/`high` nói
-> được "tệ" nhưng không nói được "tệ bao nhiêu". `train_metrics_of` giờ được gọi
-> **mọi lần chạy**, kể cả khi không đủ ground truth để chấm, vì mốc so sánh vẫn
-> có ý nghĩa khi chưa đo được gì. Lưu ý khi đọc: đây là chỉ số đo **trên chính
-> dữ liệu train**, nên nó lạc quan hơn thực tế — nhưng đúng là con số
-> `performance_severity` vẫn luôn dùng làm mẫu số, nên vẽ nó lên là vẽ đúng thứ
-> quyết định verdict. Bản tóm tắt viết trước ngày này không có trường này; mọi
-> nơi đọc phải chịu được việc nó vắng mặt.
+> không có cách nào biết thế là tốt hay tệ. Giờ nó được ghi vào summary cạnh
+> `current_metrics`, và được đọc **mọi lần chạy** kể cả khi không đủ ground
+> truth để chấm, vì mốc vẫn có nghĩa khi chưa đo được gì.
+>
+> Vừa vẽ nó lên dashboard thì lộ ra mốc cũ sai: `train_metrics_of` đọc chỉ số
+> `train_*`, tức đo **trên chính những dòng model được fit**. Champion xgboost
+> có train rmse 14.321 còn test rmse 152.620 (overfit, train r² = 0,9989 so với
+> test r² = 0,8577). Traffic thật ở rmse 203.809 chia cho 14.321 ra **14,2 lần**
+> → `high`; chia cho 152.620 ra **1,33 lần** → `warning`. Tức là model càng
+> overfit thì mẫu số càng nhỏ và performance drift càng luôn báo đỏ bất kể có
+> drift hay không — cảnh báo mất tác dụng. Hàm đổi thành `test_metrics_of`, đọc
+> `test_*` do stage `evaluate` ghi: tập test là mốc duy nhất đo trên dữ liệu
+> model chưa từng thấy, đúng bản chất của traffic thật. Đây cũng chính là con số
+> màn Models hiển thị, nên dashboard so với thứ người dùng nhìn thấy được.
+> (`champion_test_*` nằm cùng run **không** bị gom vào: nó không bắt đầu bằng
+> `test_`.)
+>
+> Không tài liệu nào của dự án từng quy định lấy mốc nào, nên đây là lựa chọn
+> lúc code Plan 4 chứ không phải code lệch spec — mục này chính là chỗ ghi lại
+> quyết định.
+>
+> Hai chi tiết về khả năng chịu lỗi: champion không có `test_*` (được đăng ký
+> ngoài pipeline, chưa qua `evaluate`) làm performance thành `insufficient_data`
+> kèm một dòng stderr, **không** crash và tuyệt đối không thành `ok`. Và summary
+> mang thêm `reference_source: "test_metrics"` để phân biệt thế hệ: trong vài
+> giờ ngày 2026-09-22 trường `reference_metrics` từng chứa chỉ số train, nên bản
+> nào thiếu khoá này là bản chấm theo chuẩn khác và dashboard không vẽ mốc của
+> nó. Bản viết trước 2026-09-22 không có cả hai trường; mọi nơi đọc phải chịu
+> được việc chúng vắng mặt.
 
 ### 2.8. `/feedback` nhận cả lô, và ngày do agent cung cấp
 

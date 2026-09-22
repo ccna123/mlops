@@ -273,13 +273,22 @@ lúc train. Mọi phán đoán "đang xấu đi" nằm ở `dashboard/src/lib/dr
 dạng hàm thuần và **không tự đặt ngưỡng nào** — ngưỡng thuộc về stage `monitor`,
 chép sang frontend là chép một bản sẽ lệch.
 
-**`reference_metrics` là trường mới của bản tóm tắt drift.** Stage `monitor` nay
-ghi luôn chỉ số stage `train` đã log cho champion, nên dashboard mới biết "rmse
-203.809" là tốt hay tệ. Hai điều cần nhớ: (1) đó là chỉ số đo **trên chính dữ
-liệu train** nên lạc quan hơn thực tế — nhưng đúng là mẫu số mà
-`performance_severity` dùng, (2) **báo cáo viết trước 22/9/2026 không có trường
-này**, mọi nơi đọc phải chịu được việc nó vắng. Thay đổi này nằm trong
-`stages/monitor/` nên chỉ phải build lại `ml-monitor`, không đụng `common/`:
+**Performance drift chấm theo chỉ số tập test, không phải chỉ số lúc train.**
+Bản tóm tắt drift có hai trường mới: `reference_metrics` (chỉ số `test_*` của
+champion, do stage `evaluate` ghi — **đúng con số màn Models hiển thị**) và
+`reference_source`. Trước 22/9/2026 mốc là `train_*`, đo trên chính dòng dữ liệu
+model được fit, và điều đó làm cảnh báo vô dụng khi model overfit: champion
+xgboost có train rmse 14.321 còn test rmse 152.620, nên traffic thật ở 203.809
+ra tỉ lệ 14,2 lần (`cao`) thay vì 1,33 lần (`cảnh báo`). Model càng overfit thì
+performance drift càng luôn đỏ bất kể có drift hay không.
+
+Ba điều cần nhớ khi đọc code này: (1) champion không có `test_*` (đăng ký ngoài
+pipeline) làm performance thành `insufficient_data`, không crash và không bao
+giờ thành `ok`; (2) `reference_source: "test_metrics"` tồn tại để phân biệt thế
+hệ — bản tóm tắt thiếu khoá đó được chấm theo chuẩn cũ và dashboard không vẽ mốc
+của nó; (3) **báo cáo viết trước 22/9/2026 không có cả hai trường**, mọi nơi đọc
+phải chịu được việc chúng vắng. Thay đổi nằm trong `stages/monitor/` nên chỉ
+phải build lại `ml-monitor`, không đụng `common/`:
 
 ```powershell
 docker build -f stages/monitor/Dockerfile -t ml-monitor:latest .
