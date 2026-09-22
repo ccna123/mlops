@@ -12,20 +12,39 @@ scored 0.947 either way, so the wrapper bought nothing and broke one estimator.
 from __future__ import annotations
 
 from sklearn.dummy import DummyClassifier, DummyRegressor
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    RandomForestClassifier,
+)
 from sklearn.linear_model import LogisticRegression, Ridge
+from xgboost import XGBClassifier, XGBRegressor
 
 from . import schema
 
 ESTIMATOR_NAMES: dict[str, tuple[str, ...]] = {
-    "regression": ("ridge", "hist_gradient_boosting", "hist_gradient_boosting_weak", "dummy"),
+    "regression": (
+        "ridge",
+        "xgboost",
+        "hist_gradient_boosting",
+        "hist_gradient_boosting_weak",
+        "dummy",
+    ),
     "classification": (
         "logistic",
+        "xgboost",
+        "random_forest",
         "hist_gradient_boosting",
         "hist_gradient_boosting_weak",
         "dummy",
     ),
 }
+
+# The two names that exist to exercise the pipeline rather than to win: the
+# weak variant is tuned to land between the promotion gates, and dummy is
+# there to fail them. The dashboard groups these apart so nobody trains one
+# by accident.
+DIAGNOSTIC_ESTIMATORS: frozenset[str] = frozenset({"hist_gradient_boosting_weak", "dummy"})
 
 RANDOM_STATE = 42
 
@@ -47,12 +66,15 @@ def _regression_base(name: str):
         the caller is the one that must validate — `build_estimator` does.
 
     Example:
+        _regression_base("xgboost")                      # -> XGBRegressor
         _regression_base("hist_gradient_boosting")       # -> scores R2 0.947
         _regression_base("hist_gradient_boosting_weak")  # -> max_iter=10, R2 0.769
         _regression_base("anything else")                # -> DummyRegressor
     """
     if name == "ridge":
         return Ridge(alpha=1.0)
+    if name == "xgboost":
+        return XGBRegressor(random_state=RANDOM_STATE)
     if name == "hist_gradient_boosting":
         return HistGradientBoostingRegressor(random_state=RANDOM_STATE)
     if name == "hist_gradient_boosting_weak":
@@ -72,10 +94,16 @@ def _classification_base(name: str):
 
     Example:
         _classification_base("logistic")           # -> LogisticRegression(max_iter=1000)
+        _classification_base("xgboost")            # -> XGBClassifier
+        _classification_base("random_forest")      # -> RandomForestClassifier
         _classification_base("anything else")      # -> DummyClassifier(strategy="prior")
     """
     if name == "logistic":
         return LogisticRegression(max_iter=1000)
+    if name == "xgboost":
+        return XGBClassifier(random_state=RANDOM_STATE)
+    if name == "random_forest":
+        return RandomForestClassifier(random_state=RANDOM_STATE)
     if name == "hist_gradient_boosting":
         return HistGradientBoostingClassifier(random_state=RANDOM_STATE)
     if name == "hist_gradient_boosting_weak":

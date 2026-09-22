@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.compose import TransformedTargetRegressor
+from sklearn.ensemble import RandomForestClassifier
 
 from ml_common.estimators import ESTIMATOR_NAMES, build_estimator
 
@@ -82,5 +83,46 @@ def test_invalid_task_type_raises():
 
 
 def test_unknown_estimator_name_raises():
+    # "xgboost" used to stand in for an unknown name here. It is a real
+    # estimator now, so this needs a name that genuinely is not offered.
     with pytest.raises(ValueError, match="estimator"):
-        build_estimator("regression", "xgboost")
+        build_estimator("regression", "catboost")
+
+
+def test_regression_offers_xgboost():
+    assert type(build_estimator("regression", "xgboost")).__name__ == "XGBRegressor"
+
+
+def test_classification_offers_xgboost():
+    assert type(build_estimator("classification", "xgboost")).__name__ == "XGBClassifier"
+
+
+def test_classification_offers_random_forest():
+    assert isinstance(build_estimator("classification", "random_forest"), RandomForestClassifier)
+
+
+def test_random_forest_is_offered_for_classification_only():
+    # Asked for on classification only. Regression must refuse it loudly
+    # rather than quietly hand back a DummyRegressor under that name.
+    with pytest.raises(ValueError, match="estimator"):
+        build_estimator("regression", "random_forest")
+
+
+def test_xgboost_regression_predicts_in_original_units():
+    X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+    y = pd.Series([100000.0, 200000.0, 300000.0, 400000.0])
+
+    estimator = build_estimator("regression", "xgboost")
+    estimator.fit(X, y)
+
+    assert estimator.predict(X).min() > 1000, "predictions are not on the dollar scale"
+
+
+def test_xgboost_classification_predicts_the_labels_it_was_fitted_on():
+    X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+    y = pd.Series([0, 1, 0, 1])
+
+    estimator = build_estimator("classification", "xgboost")
+    estimator.fit(X, y)
+
+    assert set(estimator.predict(X)).issubset({0, 1})
