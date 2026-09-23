@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
-from ml_common.estimators import DIAGNOSTIC_ESTIMATORS, ESTIMATOR_NAMES
+from ml_common.estimators import ESTIMATOR_NAMES
 
 from ..clients.airflow import AirflowNotFoundError
 from ..deps import require_auth
@@ -28,7 +28,8 @@ class RunRequest(BaseModel):
     Example:
         # POST /api/pipeline/run
         # {"task_type": "regression", "force_reprocess": false,
-        #  "sample_rows": 1000, "dataset_version": "v1"}
+        #  "sample_rows": 1000, "dataset_version": "v1",
+        #  "tune_hyperparameters": false}
     """
 
     task_type: Literal["regression", "classification"]
@@ -36,6 +37,7 @@ class RunRequest(BaseModel):
     sample_rows: int | None = Field(default=None, gt=0)
     dataset_version: str = "v1"
     estimator_name: str | None = None
+    tune_hyperparameters: bool = False
 
     @model_validator(mode="after")
     def _estimator_belongs_to_the_task_type(self) -> RunRequest:
@@ -72,7 +74,9 @@ def trigger_run(request: Request, body: RunRequest) -> dict:
 
     Returns:
         `run_id`, `dag_id` and `state`. The run is only QUEUED - it has not
-        finished, and it will take minutes.
+        finished, and it will take minutes - and longer still when
+        `tune_hyperparameters` is set, since the train stage then runs a
+        GridSearchCV instead of fitting once.
 
     Example:
         # -> {"run_id": "manual__2026-09-20T10:00:00+00:00",
@@ -84,6 +88,7 @@ def trigger_run(request: Request, body: RunRequest) -> dict:
         "sample_rows": body.sample_rows,
         "dataset_version": body.dataset_version,
         "estimator_name": body.estimator_name,
+        "tune_hyperparameters": body.tune_hyperparameters,
     }
     return request.app.state.airflow.trigger_run(DAG_ID, conf)
 
@@ -101,20 +106,18 @@ def list_estimators() -> dict:
 
     Returns:
         One key per task type holding its estimator names in the order they
-        are declared, plus `diagnostic`: the names that exist to exercise the
-        promotion gates rather than to produce a good model, so the UI can
-        group them apart without hardcoding which ones they are.
+        are declared. Every name offered is a real candidate - since
+        2026-09-23 there is no separate "diagnostic" group of estimators that
+        exist only to exercise the promotion gates; ml_common.estimators
+        dropped that pair (hist_gradient_boosting_weak and dummy) along with
+        narrowing the list to three names per task type.
 
     Example:
         # GET /api/estimators
-        # {"regression": ["ridge", "xgboost", ...],
-        #  "classification": ["logistic", "xgboost", "random_forest", ...],
-        #  "diagnostic": ["dummy", "hist_gradient_boosting_weak"]}
+        # {"regression": ["ridge", "xgboost", "random_forest"],
+        #  "classification": ["xgboost", "svm", "random_forest"]}
     """
-    return {
-        **{task_type: list(names) for task_type, names in ESTIMATOR_NAMES.items()},
-        "diagnostic": sorted(DIAGNOSTIC_ESTIMATORS),
-    }
+    return {task_type: list(names) for task_type, names in ESTIMATOR_NAMES.items()}
 
 
 @router.get("/pipeline/runs", dependencies=[Depends(require_auth)])

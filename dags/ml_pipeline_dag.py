@@ -29,7 +29,10 @@ MODEL_NAME_BY_TASK_TYPE = {
 
 DEFAULT_ESTIMATOR_BY_TASK_TYPE = {
     "regression": "ridge",
-    "classification": "logistic",
+    # "logistic" until 2026-09-23, when the estimator list narrowed to
+    # xgboost/svm/random_forest for classification and logistic stopped being
+    # offered at all - see ml_common.estimators.
+    "classification": "xgboost",
 }
 
 # Passed into every stage container. Read from the scheduler's own environment,
@@ -97,6 +100,7 @@ RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | stage_result)['run_id'] }}"
 TASK_TYPE = "{{ params.task_type }}"
 MODEL_NAME = "{{ model_name_for(params.task_type) }}"
 ESTIMATOR_NAME = "{{ params.estimator_name or default_estimator_for(params.task_type) }}"
+TUNE_HYPERPARAMETERS = "{{ params.tune_hyperparameters | lower }}"
 
 
 def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
@@ -211,6 +215,7 @@ with DAG(
         "force_reprocess": False,
         "dataset_version": "v1",
         "estimator_name": None,
+        "tune_hyperparameters": False,
         # None = use every row, same as the old default. A triggered run's
         # conf overrides this, which is how the dashboard picks a row count.
         "sample_rows": None,
@@ -260,6 +265,7 @@ with DAG(
             "TASK_TYPE": TASK_TYPE,
             "MODEL_NAME": MODEL_NAME,
             "ESTIMATOR_NAME": ESTIMATOR_NAME,
+            "TUNE_HYPERPARAMETERS": TUNE_HYPERPARAMETERS,
         },
     )
 

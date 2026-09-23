@@ -15,17 +15,12 @@ export const scenarios = {
 };
 
 // Mirrors GET /api/estimators, which reads ml_common.estimators directly.
+// Narrowed to 3 names per task type on 2026-09-23; there is no more
+// "diagnostic" group since the two names that only existed to exercise the
+// promotion gates (hist_gradient_boosting_weak, dummy) were dropped with it.
 export const estimators = {
-  regression: ["ridge", "xgboost", "hist_gradient_boosting", "hist_gradient_boosting_weak", "dummy"],
-  classification: [
-    "logistic",
-    "xgboost",
-    "random_forest",
-    "hist_gradient_boosting",
-    "hist_gradient_boosting_weak",
-    "dummy",
-  ],
-  diagnostic: ["dummy", "hist_gradient_boosting_weak"],
+  regression: ["ridge", "xgboost", "random_forest"],
+  classification: ["xgboost", "svm", "random_forest"],
 };
 
 // The brief's literal `GET /pipeline/runs?limit=3` response, plus one
@@ -225,7 +220,7 @@ export const models = {
         {
           version: "1",
           metrics: { f1: 0.1046831955922865, accuracy: 0.756128064032016, auc: 0.6468311259876465 },
-          estimator: "logistic",
+          estimator: "svm",
           is_champion: true,
           created_at: "2026-09-19T10:49:51.116000+00:00",
         },

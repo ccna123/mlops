@@ -3,10 +3,13 @@
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import TransformedTargetRegressor
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import SVC
 
-from ml_common.estimators import ESTIMATOR_NAMES, build_estimator
+from ml_common.estimators import CV_FOLDS, ESTIMATOR_NAMES, PARAM_GRIDS, SCORING, build_estimator
 
 
 def test_regression_estimator_is_not_target_transformed():
@@ -23,7 +26,7 @@ def test_regression_estimator_is_not_target_transformed():
 
 
 def test_classification_estimator_is_not_target_transformed():
-    estimator = build_estimator("classification", "logistic")
+    estimator = build_estimator("classification", "xgboost")
     assert not isinstance(estimator, TransformedTargetRegressor)
 
 
@@ -65,32 +68,23 @@ def test_every_declared_classification_name_builds():
         assert build_estimator("classification", name) is not None
 
 
-def test_dummy_regression_predicts_a_constant():
-    """The evaluate gate needs a model that reliably fails; dummy is it."""
-    X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
-    y = pd.Series([100000.0, 500000.0, 200000.0, 900000.0])
-
-    estimator = build_estimator("regression", "dummy")
-    estimator.fit(X, y)
-    predictions = estimator.predict(X)
-
-    assert np.allclose(predictions, predictions[0])
-
-
 def test_invalid_task_type_raises():
     with pytest.raises(ValueError, match="task_type"):
         build_estimator("clustering", "ridge")
 
 
 def test_unknown_estimator_name_raises():
-    # "xgboost" used to stand in for an unknown name here. It is a real
-    # estimator now, so this needs a name that genuinely is not offered.
     with pytest.raises(ValueError, match="estimator"):
         build_estimator("regression", "catboost")
 
 
 def test_regression_offers_xgboost():
     assert type(build_estimator("regression", "xgboost")).__name__ == "XGBRegressor"
+
+
+def test_regression_offers_random_forest():
+    # Added 2026-09-23: random_forest used to be classification-only.
+    assert isinstance(build_estimator("regression", "random_forest"), RandomForestRegressor)
 
 
 def test_classification_offers_xgboost():
@@ -101,11 +95,29 @@ def test_classification_offers_random_forest():
     assert isinstance(build_estimator("classification", "random_forest"), RandomForestClassifier)
 
 
-def test_random_forest_is_offered_for_classification_only():
-    # Asked for on classification only. Regression must refuse it loudly
-    # rather than quietly hand back a DummyRegressor under that name.
+def test_classification_offers_svm_with_calibrated_probabilities():
+    # gates.evaluate_gates and drift.performance_severity both read AUC, and
+    # compute_metrics only computes it when the estimator exposes
+    # predict_proba (see its own docstring: "the gates read auc, so a
+    # candidate scored without probabilities fails with KeyError instead of
+    # sneaking past"). A bare SVC has no predict_proba at all unless built
+    # with probability=True, which scikit-learn deprecated in favor of this
+    # wrapper - without it every SVM-trained classifier would silently drop
+    # out of the gates.
+    estimator = build_estimator("classification", "svm")
+    assert isinstance(estimator, CalibratedClassifierCV)
+    assert isinstance(estimator.estimator, SVC)
+    assert hasattr(estimator, "predict_proba")
+
+
+def test_svm_is_offered_for_classification_only():
     with pytest.raises(ValueError, match="estimator"):
-        build_estimator("regression", "random_forest")
+        build_estimator("regression", "svm")
+
+
+def test_ridge_is_offered_for_regression_only():
+    with pytest.raises(ValueError, match="estimator"):
+        build_estimator("classification", "ridge")
 
 
 def test_xgboost_regression_predicts_in_original_units():
@@ -126,3 +138,50 @@ def test_xgboost_classification_predicts_the_labels_it_was_fitted_on():
     estimator.fit(X, y)
 
     assert set(estimator.predict(X)).issubset({0, 1})
+
+
+# --- tune=True: default hyperparameters vs GridSearchCV --------------------
+
+
+def test_tune_defaults_to_false_and_returns_the_bare_estimator():
+    estimator = build_estimator("regression", "ridge")
+    assert not isinstance(estimator, GridSearchCV)
+
+
+def test_tune_true_wraps_the_estimator_in_grid_search_cv():
+    estimator = build_estimator("regression", "ridge", tune=True)
+    assert isinstance(estimator, GridSearchCV)
+    assert estimator.param_grid == PARAM_GRIDS["regression"]["ridge"]
+    assert estimator.cv == CV_FOLDS
+
+
+def test_tune_true_uses_the_metric_this_project_already_grades_models_on():
+    # Tuning "best" has to mean the same thing gates and drift already use -
+    # rmse (ml_common.metrics, drift.performance_severity) for regression,
+    # auc for classification - or a "tuned" model could win a search on one
+    # yardstick and still fail the gate that judges it by another.
+    regression = build_estimator("regression", "ridge", tune=True)
+    classification = build_estimator("classification", "xgboost", tune=True)
+
+    assert regression.scoring == SCORING["regression"] == "neg_root_mean_squared_error"
+    assert classification.scoring == SCORING["classification"] == "roc_auc"
+
+
+def test_tune_true_fits_every_declared_regression_estimator():
+    X = pd.DataFrame({"a": np.arange(20, dtype=float), "b": np.arange(20, dtype=float) % 3})
+    y = pd.Series(np.arange(20, dtype=float) * 1000 + 50_000)
+
+    for name in ESTIMATOR_NAMES["regression"]:
+        estimator = build_estimator("regression", name, tune=True)
+        estimator.fit(X, y)
+        assert set(estimator.best_params_) == set(PARAM_GRIDS["regression"][name])
+
+
+def test_tune_true_fits_every_declared_classification_estimator():
+    X = pd.DataFrame({"a": np.arange(20, dtype=float), "b": np.arange(20, dtype=float) % 3})
+    y = pd.Series(np.arange(20) % 2)
+
+    for name in ESTIMATOR_NAMES["classification"]:
+        estimator = build_estimator("classification", name, tune=True)
+        estimator.fit(X, y)
+        assert set(estimator.best_params_) == set(PARAM_GRIDS["classification"][name])

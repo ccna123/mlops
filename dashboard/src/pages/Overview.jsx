@@ -100,6 +100,7 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
   const [useAllRows, setUseAllRows] = useState(false);
   const [sampleRows, setSampleRows] = useState("1000");
   const [forceReprocess, setForceReprocess] = useState(false);
+  const [tuneHyperparameters, setTuneHyperparameters] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
 
@@ -205,6 +206,7 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
     // "" means let the DAG pick its own default, so the default lives in one
     // place instead of being copied here.
     if (estimatorName) payload.estimator_name = estimatorName;
+    payload.tune_hyperparameters = tuneHyperparameters;
     try {
       const result = await client.triggerRun(payload);
       pushToast({ type: "success", text: `Đã tạo run ${result.run_id}` });
@@ -269,26 +271,13 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
             onChange={(event) => setEstimatorName(event.target.value)}
           >
             <option value="">Mặc định của pipeline</option>
-            {taskType && estimators && (
-              <>
-                {estimators[taskType]
-                  .filter((name) => !estimators.diagnostic.includes(name))
-                  .map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                <optgroup label="Chỉ để test cổng promote">
-                  {estimators[taskType]
-                    .filter((name) => estimators.diagnostic.includes(name))
-                    .map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                </optgroup>
-              </>
-            )}
+            {taskType &&
+              estimators &&
+              estimators[taskType].map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
           </select>
         </label>
         {!taskType && <p className="hint-note">Chọn loại model trước để thấy thuật toán tương ứng.</p>}
@@ -321,6 +310,14 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
             onChange={(event) => setForceReprocess(event.target.checked)}
           />
           Xử lý lại dữ liệu từ đầu
+        </label>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={tuneHyperparameters}
+            onChange={(event) => setTuneHyperparameters(event.target.checked)}
+          />
+          Tối ưu hyperparameter bằng Grid Search CV (chậm hơn — bỏ trống thì dùng hyperparameter mặc định)
         </label>
 
         <button className="btn-primary" disabled={!taskType || Boolean(activeRun)} onClick={openConfirm}>
@@ -433,6 +430,9 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
           </p>
           <p>
             Thuật toán: <b>{estimatorName || "mặc định của pipeline"}</b>
+          </p>
+          <p>
+            Hyperparameter: <b>{tuneHyperparameters ? "tối ưu bằng Grid Search CV" : "mặc định"}</b>
           </p>
           <p>
             Phiên bản dữ liệu: <b>{datasetVersion}</b>

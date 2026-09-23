@@ -26,8 +26,9 @@ def main() -> int:
 
     Args:
         None. Reads FINGERPRINT, TASK_TYPE, MODEL_NAME, ESTIMATOR_NAME (default
-        "ridge") and MLFLOW_TRACKING_URI, plus the MinIO variables
-        `Storage.from_env` needs.
+        "ridge"), TUNE_HYPERPARAMETERS ("true" runs GridSearchCV instead of
+        this project's fixed hyperparameters, default "false") and
+        MLFLOW_TRACKING_URI, plus the MinIO variables `Storage.from_env` needs.
 
     Returns:
         0. The stage result carries `run_id`, `experiment` and the training
@@ -46,6 +47,8 @@ def main() -> int:
     task_type = os.environ["TASK_TYPE"]
     model_name = os.environ["MODEL_NAME"]
     estimator_name = os.environ.get("ESTIMATOR_NAME", "ridge")
+    # Same forgiving parse FORCE_REPROCESS already uses in prepare_dataset_for_train.
+    tune_hyperparameters = os.environ.get("TUNE_HYPERPARAMETERS", "false").strip().lower() == "true"
 
     storage = Storage.from_env()
     train_df = storage.read_parquet(processed_key(fingerprint, task_type, "train"))
@@ -54,9 +57,13 @@ def main() -> int:
     # Drop the target so X looks exactly like a serving record does: no target.
     features = train_df.drop(columns=[target])
     y = train_df[target]
-    print(f"training on {len(train_df)} rows, estimator={estimator_name}", file=sys.stderr)
+    print(
+        f"training on {len(train_df)} rows, estimator={estimator_name}, "
+        f"tune_hyperparameters={tune_hyperparameters}",
+        file=sys.stderr,
+    )
 
-    estimator = build_estimator(task_type, estimator_name)
+    estimator = build_estimator(task_type, estimator_name, tune=tune_hyperparameters)
     pipeline = build_pipeline(task_type, estimator)
 
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
@@ -69,10 +76,21 @@ def main() -> int:
             {
                 "task_type": task_type,
                 "estimator": estimator_name,
+                "tune_hyperparameters": tune_hyperparameters,
                 "fingerprint": fingerprint,
                 "train_rows": len(train_df),
             }
         )
+        if tune_hyperparameters:
+            # `pipeline.named_steps["model"]` is the fitted GridSearchCV
+            # itself - build_estimator wrapped it because tune_hyperparameters
+            # was set - so best_params_ is what the search actually picked.
+            # Logged under their own names, not folded into "estimator", so a
+            # run trained with defaults and one trained tuned stay
+            # distinguishable by more than the one boolean flag.
+            best_params = pipeline.named_steps["model"].best_params_
+            mlflow.log_params({f"best_{key}": value for key, value in best_params.items()})
+
         train_metrics = compute_metrics(task_type, y, pipeline.predict(features))
         mlflow.log_metrics({f"train_{name}": value for name, value in train_metrics.items()})
         # MLflow 2.x uses `artifact_path`; the `name` parameter only exists from MLflow 3.

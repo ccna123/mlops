@@ -44,11 +44,16 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_foundation.ps1
 
 Trên Airflow UI, bật DAG `ml_pipeline` rồi Trigger DAG w/ config:
 
-    {"task_type": "regression", "estimator_name": "hist_gradient_boosting"}
+    {"task_type": "regression", "estimator_name": "xgboost", "tune_hyperparameters": true}
 
 Tham số: `task_type` (bắt buộc), `estimator_name`, `force_reprocess`,
-`dataset_version`. `estimator_name` mặc định theo `task_type` (`ridge` /
-`logistic`). Tên registered model luôn suy ra từ `task_type`, không truyền được.
+`dataset_version`, `tune_hyperparameters`. `estimator_name` mặc định theo
+`task_type` (`ridge` / `xgboost`) và chỉ nhận `ridge`/`xgboost`/`random_forest`
+(regression) hoặc `xgboost`/`svm`/`random_forest` (classification) — xem
+`ml_common.estimators.ESTIMATOR_NAMES`. `tune_hyperparameters` (mặc định
+`false`) chạy `GridSearchCV` tìm hyperparameter thay vì dùng bộ mặc định có
+sẵn trong code — chậm hơn, không thay đổi tên model đăng ký. Tên registered
+model luôn suy ra từ `task_type`, không truyền được.
 
 Bài toán classification là `needs_renovation` — sinh ra từ `condition`
 (`poor`/`fair`), không có sẵn trong dữ liệu thô.

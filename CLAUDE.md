@@ -196,7 +196,7 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 18 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
 | 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 4 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
 
-Đo ngày 2026-09-22: 656 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-23: 666 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
@@ -221,14 +221,47 @@ stack chưa chạy.
 **Chọn thuật toán train (2026-09-22).** Form train có dropdown "Thuật toán",
 danh sách lấy từ `GET /api/estimators` — endpoint đọc thẳng
 `ml_common.estimators.ESTIMATOR_NAMES`, nên không có danh sách nào bị chép lại
-ở frontend. Bỏ trống thì DAG tự chọn mặc định (`ridge` / `logistic`), nhờ đó
-mặc định chỉ tồn tại ở một chỗ. `hist_gradient_boosting_weak` và `dummy` nằm
-trong nhóm riêng "Chỉ để test cổng promote" (khoá `diagnostic` của endpoint).
+ở frontend. Bỏ trống thì DAG tự chọn mặc định (`ridge` / `xgboost`), nhờ đó
+mặc định chỉ tồn tại ở một chỗ.
+
+**Thu hẹp danh sách estimator, thêm toggle tuning bằng GridSearchCV
+(2026-09-23).** `ESTIMATOR_NAMES` giờ chỉ còn đúng 3 tên mỗi task_type — bỏ
+`logistic`, `hist_gradient_boosting` và cặp "chẩn đoán" `hist_gradient_boosting_weak`/
+`dummy` (tồn tại trước đó chỉ để tự tạo model vượt/rớt cổng promote mà không
+cần dữ liệu thật). Endpoint `/api/estimators` không còn khoá `diagnostic`.
 
 | task_type | Estimator |
 | --- | --- |
-| regression | `ridge`, `xgboost`, `hist_gradient_boosting`, `hist_gradient_boosting_weak`, `dummy` |
-| classification | `logistic`, `xgboost`, `random_forest`, `hist_gradient_boosting`, `hist_gradient_boosting_weak`, `dummy` |
+| regression | `ridge`, `xgboost`, `random_forest` |
+| classification | `xgboost`, `svm`, `random_forest` |
+
+Form train có thêm checkbox **"Tối ưu hyperparameter bằng Grid Search CV"**,
+gửi `tune_hyperparameters` trong `POST /api/pipeline/run` → DAG param cùng tên
+→ env `TUNE_HYPERPARAMETERS` cho container `train`. Bỏ trống (mặc định) thì
+`ml_common.estimators.build_estimator` trả thẳng estimator với hyperparameter
+cố định sẵn trong code (như trước giờ); bật lên thì trả về
+`GridSearchCV(cv=5, scoring=...)` bọc quanh estimator đó, tìm trong
+`PARAM_GRIDS[task_type][name]` — lưới nhỏ (≤8 tổ hợp) vì máy dev 16GB đã chật
+RAM sẵn (mục "Giới hạn máy" dưới đây). `scoring` khớp đúng chỉ số mà gate và
+drift của project đã dùng để chấm model — `neg_root_mean_squared_error` cho
+regression, `roc_auc` cho classification — để "tuned tốt nhất" và "gate/drift
+chấm tốt" là cùng một thước đo, không phải hai ý kiến khác nhau. Vì
+`GridSearchCV` là estimator sklearn hợp lệ, nó lắp vào bước cuối của
+`Pipeline` (`features.build_pipeline`) và log lên MLflow như bình thường —
+không chỗ nào ở phía dưới (`evaluate`, `register`, `serving`) phải biết việc
+tuning có xảy ra hay không, vì `predict`/`predict_proba` của `GridSearchCV`
+tự chuyển tiếp sang `best_estimator_` sau khi fit.
+
+`svm` không dùng `SVC(probability=True)` — sklearn 1.9 đã deprecate cách đó
+(bỏ ở 1.11) — mà bọc bằng `CalibratedClassifierCV(SVC(...), ensemble=False)`
+để có `predict_proba` mà không bị warning. `compute_metrics` chỉ tính `auc`
+khi estimator có `predict_proba`, và gate + drift đều đọc `auc`, nên thiếu
+bước này SVM sẽ rớt gate với `KeyError` ngay từ estimator đầu tiên.
+
+Hệ quả cần biết: mất luôn cách tạo model "chẩn đoán" nhanh để tự test cổng
+promote pass/fail mà không cần dữ liệu thật (trước đây là lý do tồn tại của
+`hist_gradient_boosting_weak`/`dummy`) — giờ muốn test cổng phải chạy thật
+với model thật.
 
 **`xgboost` là dependency mới của `common/`** (`pyproject.toml`), nên lần thêm
 nó đã phải build lại **đủ cả 5 tầng**. Đây không phải thủ tục thừa: `serving`
