@@ -75,7 +75,10 @@ Hệ thống phục vụ hai mô hình trên cùng một nguồn dữ liệu.
 
 Hai bài toán đo hai điều khác nhau — **giá bán** và **tình trạng tài sản** — nên bổ sung cho nhau.
 
-**Ý nghĩa nghiệp vụ của bài toán thứ hai.** Tình trạng nhà trong thực tế do người bán tự khai, thường bị bỏ trống hoặc khai lạc quan. Dự đoán nó từ các thuộc tính khách quan (tuổi nhà, diện tích, khu vực, giá rao, điểm trường, chỉ số tội phạm…) giúp: nền tảng bất động sản gắn cờ tin cần thẩm định kỹ, ngân hàng đánh giá tài sản thế chấp, nhà đầu tư tìm nhà cần cải tạo.
+**Ý nghĩa nghiệp vụ của bài toán thứ hai.** Tình trạng nhà trong thực tế do người bán tự khai, thường bị bỏ trống hoặc khai lạc quan. Dự đoán nó từ các thuộc tính khách quan (tuổi nhà, diện tích, khu vực, giá rao, điểm trường, chỉ số tội phạm…) giúp: 
+1. nền tảng bất động sản gắn cờ tin cần thẩm định kỹ
+2. ngân hàng đánh giá tài sản thế chấp
+3. nhà đầu tư tìm nhà cần cải tạo.
 
 **Vì sao không chọn các bài toán khác** (đã đo trên dữ liệu thật trước khi quyết định):
 
