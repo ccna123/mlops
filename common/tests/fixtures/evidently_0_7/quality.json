@@ -1,0 +1,46 @@
+{
+ "metrics": [
+  {
+   "id": "10a3719a1dcc04f005ac4af7bb8469f5",
+   "metric_name": "MissingValueCount(column=bedrooms)",
+   "config": {
+    "type": "evidently:metric_v2:MissingValueCount",
+    "column": "bedrooms"
+   },
+   "value": {
+    "count": 2.0,
+    "share": 0.5
+   }
+  },
+  {
+   "id": "dfd1232423d84fa8cb975d0a5194fa53",
+   "metric_name": "MissingValueCount(column=city)",
+   "config": {
+    "type": "evidently:metric_v2:MissingValueCount",
+    "column": "city"
+   },
+   "value": {
+    "count": 1.0,
+    "share": 0.25
+   }
+  },
+  {
+   "id": "e1aaf40314e796bb6c4c3e96bb67da4d",
+   "metric_name": "OutListValueCount(column=city,values=boston,miami,tulsa)",
+   "config": {
+    "type": "evidently:metric_v2:OutListValueCount",
+    "column": "city",
+    "values": [
+     "boston",
+     "miami",
+     "tulsa"
+    ]
+   },
+   "value": {
+    "count": 2.0,
+    "share": 0.6666666666666666
+   }
+  }
+ ],
+ "tests": []
+}

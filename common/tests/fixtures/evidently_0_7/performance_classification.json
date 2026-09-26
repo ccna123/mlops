@@ -1,0 +1,63 @@
+{
+ "metrics": [
+  {
+   "id": "836d15857ce444b246783aad42a94779",
+   "metric_name": "RocAuc(classification_name=default,roc_curve=True,pr_table=False)",
+   "config": {
+    "type": "evidently:metric_v2:RocAuc",
+    "classification_name": "default",
+    "roc_curve": true,
+    "pr_table": false
+   },
+   "value": 0.8803418803418803
+  },
+  {
+   "id": "7f784a702312f4e61e7f259ebda0dff3",
+   "metric_name": "F1Score(classification_name=default,probas_threshold=0.4,conf_matrix=True)",
+   "config": {
+    "type": "evidently:metric_v2:F1Score",
+    "classification_name": "default",
+    "probas_threshold": 0.4,
+    "conf_matrix": true
+   },
+   "value": 0.6607142857142857
+  },
+  {
+   "id": "dcadcd1075569c9132198fd5ffe68b57",
+   "metric_name": "Precision(classification_name=default,probas_threshold=0.4,conf_matrix=True,pr_curve=False,pr_table=False)",
+   "config": {
+    "type": "evidently:metric_v2:Precision",
+    "classification_name": "default",
+    "probas_threshold": 0.4,
+    "conf_matrix": true,
+    "pr_curve": false,
+    "pr_table": false
+   },
+   "value": 0.5068493150684932
+  },
+  {
+   "id": "c61b25f8ae02ee476aee815de80af222",
+   "metric_name": "Recall(classification_name=default,probas_threshold=0.4,conf_matrix=True,pr_curve=False,pr_table=False)",
+   "config": {
+    "type": "evidently:metric_v2:Recall",
+    "classification_name": "default",
+    "probas_threshold": 0.4,
+    "conf_matrix": true,
+    "pr_curve": false,
+    "pr_table": false
+   },
+   "value": 0.9487179487179487
+  },
+  {
+   "id": "71b162dc749a6aeff5ad3b15460d5c68",
+   "metric_name": "Accuracy(classification_name=default,probas_threshold=0.4)",
+   "config": {
+    "type": "evidently:metric_v2:Accuracy",
+    "classification_name": "default",
+    "probas_threshold": 0.4
+   },
+   "value": 0.6833333333333333
+  }
+ ],
+ "tests": []
+}

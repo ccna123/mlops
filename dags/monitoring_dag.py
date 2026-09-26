@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.request
 
 import pendulum
 from airflow import DAG
+from airflow.operators.python import PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 
 DOCKER_URL = "unix://var/run/docker.sock"
@@ -84,6 +86,37 @@ def stage_result(lines: list[str]) -> dict:
     raise ValueError(f"no {RESULT_PREFIX.strip()} line in stage output: {lines!r}")
 
 
+SERVING_URL = os.environ.get("SERVING_URL", "http://serving:8000").rstrip("/")
+
+
+def flush_prediction_log() -> dict:
+    """Asks serving to write its buffered predictions before they are measured.
+
+    Serving writes the prediction log in batches (500 records or 30 seconds),
+    so traffic sent just before this DAG may still sit in its buffer. Without
+    this step the report can silently miss part of the traffic (CN-29).
+
+    Args:
+        None. Posts to SERVING_URL (default http://serving:8000) + "/flush".
+
+    Returns:
+        `{"ok", "written", "error"}`. Never raises: monitoring still runs when
+        the flush fails, and each summary records that it did, instead of
+        silently measuring incomplete data (02 3.10).
+
+    Example:
+        flush_prediction_log()  # -> {"ok": True, "written": 137, "error": None}
+    """
+    request = urllib.request.Request(f"{SERVING_URL}/flush", data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return {"ok": bool(body.get("ok")), "written": body.get("written"),
+                "error": body.get("error")}
+    except Exception as error:  # noqa: BLE001 - reported in the summary, never fatal
+        return {"ok": False, "written": 0, "error": f"flush request failed: {error}"}
+
+
 with DAG(
     dag_id="monitoring_dag",
     schedule=None,
@@ -95,8 +128,10 @@ with DAG(
     tags=["ml", "monitoring"],
     user_defined_filters={"stage_result": stage_result},
 ) as dag:
+    flush = PythonOperator(task_id="flush_prediction_log", python_callable=flush_prediction_log)
+
     for task_type, model_name in MODEL_NAME_BY_TASK_TYPE.items():
-        DockerOperator(
+        flush >> DockerOperator(
             task_id=f"monitor_{task_type}",
             image="ml-monitor:latest",
             docker_url=DOCKER_URL,
@@ -106,6 +141,7 @@ with DAG(
                 "TASK_TYPE": task_type,
                 "MODEL_NAME": model_name,
                 "MONITOR_RUN_ID": "{{ run_id | replace(':', '-') | replace('+', '-') }}",
+                "FLUSH_RESULT": "{{ ti.xcom_pull(task_ids='flush_prediction_log') | tojson }}",
             },
             auto_remove="success",
             mount_tmp_dir=False,

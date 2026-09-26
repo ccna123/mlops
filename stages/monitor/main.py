@@ -1,36 +1,45 @@
-"""Monitor stage: measure drift for one model and publish the verdict.
+"""Monitor stage: measure one model's four monitoring sections and publish the verdict.
 
-This is the only place Evidently is imported, and it is imported inside a
-function. ml-base has no Evidently, and a module-level import here would
-make every stage that imports ml_common fail.
+This is the only place Evidently is imported, and it is imported inside
+functions: ml-base has no Evidently.
 
-What it compares:
+The division of labour (02 7.2): Evidently COUNTS - per-column drift tests,
+performance metrics, missing values, values outside a known list.
+`ml_common.evidently_adapter` reads those results into a fixed shape, and
+`ml_common.drift` DECIDES the level of each section. No threshold lives here.
 
-- Feature drift  - the served records against a sample of the train split
-- Prediction drift - predictions served against the champion's predictions
-  on that same sample
-- Performance drift - accuracy on the rows that have ground truth against
-  the metrics the train stage logged
+The four sections:
 
-The reference is the train split read back through the fingerprint logged in
-MLflow, not the baseline profile. Evidently takes DataFrames; profile.json is
-a summary and cannot be fed to it. See section 2.1 of the design doc.
+- Data drift - the served records against a sample of the train set
+- Prediction drift - predictions served against the champion's predictions on
+  that same sample
+- Performance drift - metrics on the rows that have ground truth against the
+  champion's metrics on the test set
+- Data quality of the input - missing rates and never-seen categories after
+  the model's own cleaning, against the train set
+
+The reference is the train set traced back through MLflow
+(`ml_common.lineage`), not the baseline profile: Evidently takes DataFrames.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import UTC, datetime
 
 import mlflow
+import mlflow.artifacts
 import mlflow.sklearn
 from mlflow import MlflowClient
 
 from ml_common import drift, schema
+from ml_common import evidently_adapter as adapter
 from ml_common.cleaning import DateFeatures, OutlierClipper, RawRecordCleaner
+from ml_common.estimators import decision_threshold
 from ml_common.features import _numeric_and_categorical_columns
-from ml_common.metrics import compute_metrics
+from ml_common.metrics import MONITORING_GROUP_MIN_ROWS, group_metrics
 from ml_common.stageio import emit_result
 from ml_common.storage import (
     Storage,
@@ -45,8 +54,6 @@ DEFAULT_WINDOW_HOURS = 24
 DEFAULT_REFERENCE_ROWS = 10_000
 REFERENCE_SEED = 42
 
-DRIFTED_COLUMNS_COUNT_TYPE = "evidently:metric_v2:DriftedColumnsCount"
-VALUE_DRIFT_TYPE = "evidently:metric_v2:ValueDrift"
 
 
 def load_champion_context(model_name: str) -> tuple[object, str, str, str]:
@@ -120,122 +127,6 @@ def test_metrics_of(run_id: str, task_type: str) -> dict:
         for name, value in logged.items()
         if name.startswith("test_")
     }
-
-
-def _drifted_share(summary: dict) -> float:
-    """Pulls the share of drifted columns out of Evidently's result dict.
-
-    `results.dict()` returns `{"metrics": [...], "tests": [...]}` where
-    `metrics` is a FLAT list of metric-result dicts (Evidently 0.7.23, not
-    the nested 0.4-era shape). The entry wanted is identified by
-    `config["type"] == "evidently:metric_v2:DriftedColumnsCount"`, never by
-    list position, since preset composition can reorder entries. Its value
-    is `{"count": ..., "share": ...}`.
-
-    Args:
-        summary: what `results.dict()` returned.
-
-    Returns:
-        The fraction of columns flagged as drifted, 0.0 to 1.0.
-
-    Raises:
-        KeyError: when no entry has that `config["type"]`. Better to fail
-            loudly than to report 0.0 and put a green badge on an unread
-            report.
-
-    Example:
-        _drifted_share(results.dict())   # -> 0.42
-    """
-    for metric in summary.get("metrics", []):
-        config = metric.get("config") or {}
-        if config.get("type") == DRIFTED_COLUMNS_COUNT_TYPE:
-            return float(metric["value"]["share"])
-    raise KeyError(
-        f"no metric with config.type == {DRIFTED_COLUMNS_COUNT_TYPE!r} in the "
-        f"Evidently result; metric types seen were "
-        f"{[(m.get('config') or {}).get('type') for m in summary.get('metrics', [])]}"
-    )
-
-
-def _feature_margins(summary: dict) -> list[float]:
-    """Pulls (observed value - detection threshold) for every per-column drift check.
-
-    `DriftedColumnsCount` (`_drifted_share`) only counts how many columns
-    crossed their threshold. `drift.feature_margin_severity` needs to know
-    HOW FAR each one sits past (or under) its threshold, to catch drift
-    concentrated into a few columns that the share path dilutes into
-    invisibility - see the comment above `FEATURE_MAGNITUDE_WARNING` in
-    `ml_common/drift.py` for the market_shift measurement that found this.
-
-    Each `evidently:metric_v2:ValueDrift` entry carries `config["column"]`,
-    `config["threshold"]` and a bare numeric `value` - the drift score
-    itself, whose meaning depends on `config["method"]` (Jensen-Shannon
-    distance for categoricals, Wasserstein distance (normed) for most
-    numerics, text-content drift for the auto-detected `property_id`).
-    Different methods are not on the same scale, which is exactly why this
-    subtracts each column's OWN threshold before comparing across columns,
-    rather than comparing raw values.
-
-    Args:
-        summary: what `results.dict()` returned - the same dict `_drifted_share`
-            reads.
-
-    Returns:
-        One float per USABLE `ValueDrift` entry found, in whatever order
-        Evidently listed them. An entry missing `threshold` or `value` is
-        skipped, not fatal on its own - one odd column should not take the
-        whole run down when the rest of the report is fine.
-
-    Raises:
-        KeyError: when there is nothing to skip PARTIALLY from - either no
-            `ValueDrift` entries exist at all, or every single one found is
-            missing `threshold`/`value`. Both mean extraction itself is
-            broken, not that nothing drifted, and silently returning `[]`
-            would make `feature_margin_severity` report "ok" - a green
-            badge produced by broken extraction, which is worse than a
-            crash because nobody investigates a green badge. This mirrors
-            `_drifted_share`'s KeyError on the same class of failure.
-
-    Example:
-        _feature_margins(results.dict())
-        # -> [-0.0409, 0.0193, ..., 0.7250]  # zipcode's ~0.725 excess, last
-
-        _feature_margins({"metrics": []})
-        # -> KeyError: no evidently:metric_v2:ValueDrift entries at all
-
-        _feature_margins({"metrics": [{"config": {"type": VALUE_DRIFT_TYPE}}]})
-        # -> KeyError: found entries but none had a usable (value, threshold)
-    """
-    found = 0
-    margins = []
-    for metric in summary.get("metrics", []):
-        config = metric.get("config") or {}
-        if config.get("type") != VALUE_DRIFT_TYPE:
-            continue
-        found += 1
-        threshold = config.get("threshold")
-        value = metric.get("value")
-        if threshold is None or value is None:
-            continue
-        margins.append(float(value) - float(threshold))
-
-    if found == 0:
-        raise KeyError(
-            f"no metric with config.type == {VALUE_DRIFT_TYPE!r} in the Evidently "
-            f"result; metric types seen were "
-            f"{[(m.get('config') or {}).get('type') for m in summary.get('metrics', [])]}"
-        )
-    if not margins:
-        value_drift_configs = [
-            m.get("config") or {}
-            for m in summary.get("metrics", [])
-            if (m.get("config") or {}).get("type") == VALUE_DRIFT_TYPE
-        ]
-        raise KeyError(
-            f"found {found} {VALUE_DRIFT_TYPE!r} entries but none had both "
-            f"config.threshold and value; configs seen were {value_drift_configs}"
-        )
-    return margins
 
 
 def clean_for_drift(frame):
@@ -326,39 +217,197 @@ def run_drift_report(reference, current, numeric: list[str], categorical: list[s
     )
 
 
+def performance_report(joined, task_type: str, threshold: float):
+    """Has Evidently compute the performance metrics on the rows with ground truth.
+
+    Args:
+        joined: predictions joined to outcomes: `actual`, `prediction`, and
+            for classification `probability`.
+        task_type: "regression" or "classification".
+        threshold: the champion's decision threshold (classification), so
+            F1, precision and recall are measured where the model answers.
+
+    Returns:
+        Evidently's result object; `evidently_adapter.performance_metrics`
+        reads it. Its numbers equal what the evaluate stage computes on the
+        same rows (common/tests/test_evidently_adapter.py).
+
+    Example:
+        summary = performance_report(joined, "regression", 0.5).dict()
+        adapter.performance_metrics(summary, "regression")  # -> {"rmse": ...}
+    """
+    import evidently.metrics as em
+    from evidently import BinaryClassification, DataDefinition, Dataset, Regression, Report
+
+    if task_type == "regression":
+        frame = joined[["actual", "prediction"]].astype(float)
+        definition = DataDefinition(
+            numerical_columns=["actual", "prediction"],
+            regression=[Regression(target="actual", prediction="prediction")],
+        )
+        metrics = [em.RMSE(), em.MAE(), em.R2Score()]
+    else:
+        frame = joined[["actual", "probability"]].copy()
+        frame["actual"] = frame["actual"].astype(bool).astype(int)
+        frame["probability"] = frame["probability"].astype(float)
+        definition = DataDefinition(
+            numerical_columns=["probability"],
+            categorical_columns=["actual"],
+            classification=[
+                BinaryClassification(
+                    target="actual", prediction_probas="probability", pos_label=1
+                )
+            ],
+        )
+        metrics = [
+            em.RocAuc(),
+            em.F1Score(probas_threshold=threshold),
+            em.Precision(probas_threshold=threshold),
+            em.Recall(probas_threshold=threshold),
+            em.Accuracy(probas_threshold=threshold),
+        ]
+    return Report(metrics).run(Dataset.from_pandas(frame, data_definition=definition), None)
+
+
+def known_categories(train_df, columns: list[str]) -> dict[str, list]:
+    """Lists every category the train set holds, after the model's cleaning.
+
+    The full train set, not the 10,000-row sample: a value the sample happens
+    to miss is not "never seen". Only distinct raw values are cleaned, so this
+    is cheap even on two million rows.
+
+    Args:
+        train_df: the champion's raw train set.
+        columns: the categorical feature columns.
+
+    Returns:
+        `{column: sorted cleaned values}`.
+
+    Example:
+        known_categories(train_df, ["city"])  # -> {"city": ["boston", "miami", ...]}
+    """
+    result = {}
+    for column in columns:
+        if column not in train_df.columns:
+            continue
+        distinct = train_df[[column]].drop_duplicates()
+        cleaned = clean_for_drift(distinct)[column].dropna().unique()
+        result[column] = sorted(str(value) for value in cleaned)
+    return result
+
+
+def quality_report(frame, numeric: list[str], categorical: list[str], categories: dict):
+    """Has Evidently count missing values and never-seen categories on one frame.
+
+    Evidently's result holds only the "current" side, so the monitor runs this
+    once on the traffic and once on the reference.
+
+    Args:
+        frame: cleaned records (`clean_for_drift`).
+        numeric: numeric columns to count missing values in.
+        categorical: categorical columns to count missing and unseen values in.
+        categories: `known_categories` of the train set.
+
+    Returns:
+        Evidently's result object; `evidently_adapter.quality_numbers` reads it.
+
+    Example:
+        numbers = adapter.quality_numbers(quality_report(cur, num, cat, known).dict())
+    """
+    import evidently.metrics as em
+    from evidently import DataDefinition, Dataset, Report
+
+    columns = [*numeric, *categorical]
+    metrics = [em.MissingValueCount(column=column) for column in columns]
+    metrics += [
+        em.OutListValueCount(column=column, values=categories.get(column, []))
+        for column in categorical
+    ]
+    definition = DataDefinition(numerical_columns=numeric, categorical_columns=categorical)
+    subset = frame[columns].copy()
+    for column in categorical:
+        subset[column] = subset[column].astype(object).where(subset[column].notna(), None)
+    return Report(metrics).run(Dataset.from_pandas(subset, data_definition=definition), None)
+
+
+def flush_result() -> dict | None:
+    """Reads what the DAG's flush step reported, if it ran.
+
+    Args:
+        None. Reads FLUSH_RESULT, the JSON the flush task returned.
+
+    Returns:
+        `{"ok", "written", "error"}`, or None when the variable is absent or
+        unreadable (a run started outside the DAG).
+
+    Example:
+        # FLUSH_RESULT='{"ok": false, "error": "minio down"}'
+        flush_result()  # -> {"ok": False, "error": "minio down"}
+    """
+    try:
+        return json.loads(os.environ.get("FLUSH_RESULT") or "null")
+    except ValueError:
+        return None
+
+
+def reference_group_metrics(run_id: str) -> dict | None:
+    """Reads the per-group test metrics evaluate logged for the champion.
+
+    Args:
+        run_id: the champion's training run.
+
+    Returns:
+        The dict `metrics.group_metrics` produced, or None for a champion
+        evaluated before group metrics existed.
+
+    Example:
+        reference_group_metrics(run_id)["city"]["boston"]["rmse"]  # -> 51000.0
+    """
+    try:
+        return mlflow.artifacts.load_dict(f"runs:/{run_id}/group_metrics.json")
+    except Exception as error:  # noqa: BLE001 - absent on older runs
+        print(f"no group metrics on the champion run: {error}", file=sys.stderr)
+        return None
+
+
+def previous_summary(storage: Storage, model_name: str) -> dict | None:
+    """Reads the last monitoring summary of a model, to continue warning streaks.
+
+    Args:
+        storage: where summaries live.
+        model_name: the model.
+
+    Returns:
+        The summary, or None when the model was never monitored.
+
+    Example:
+        previous_summary(storage, "house_price_regressor")["consecutive_warnings"]
+    """
+    try:
+        return storage.read_json(drift_latest_key(model_name))
+    except FileNotFoundError:
+        return None
+
+
 def main() -> int:
-    """Measures all three drift types for one model and publishes the verdict.
+    """Measures all four sections for one model and publishes the verdict.
 
     Args:
         None. Reads TASK_TYPE, MODEL_NAME, MLFLOW_TRACKING_URI, optional
         MONITOR_WINDOW_HOURS (default 24), MONITOR_REFERENCE_ROWS (default
-        10000) and MONITOR_RUN_ID, plus the MinIO variables Storage.from_env
-        needs.
+        10000), MONITOR_RUN_ID and FLUSH_RESULT, plus the MinIO variables
+        `Storage.from_env` needs.
 
     Returns:
-        0 in every case that completes, including when there was no traffic
-        to measure. A drifting model is a finding to report, not a task
-        failure - the same reasoning that makes evaluate exit 0 on a blocked
-        model - and the same is true of "nothing to measure yet": it is
-        emitted as severity INSUFFICIENT_DATA rather than treated as an
-        error. DockerOperator does not push XCom for a container that exits
-        non-zero, so returning 1 here would make that emitted result
-        unreachable no matter what it said. `monitoring_dag` runs hourly; on
-        a machine where traffic is only generated by hand, most hours would
-        have none, and that path needs to stay green, not fail the task.
-        The same is true, since 2026-09-22, of "no champion registered yet"
-        for this model: emitted as INSUFFICIENT_DATA rather than raised, for
-        the same reason - `monitoring_dag` runs one model per task with no
-        edge between them, so a champion missing for one model must not turn
-        the whole DagRun `failed` and block whatever is waiting on it
-        (`traffic_agent`'s `compute_drift`,
-        `TriggerDagRunOperator(wait_for_completion=True)`).
+        0 in every case that completes, including when there was no traffic or
+        no champion to measure: those are emitted as `insufficient_data`, not
+        failures, because `traffic_agent` waits on this DAG's run state and a
+        model not trained yet must not fail the other model's verdict.
+        DockerOperator does not push XCom for a container exiting non-zero.
 
     Raises:
-        Exception: when the train split for the champion's fingerprint is
-            gone from storage. A report built on a guess would be worse than
-            none, and unlike a missing champion this is not a normal state
-            to shrug off - the object it names should exist.
+        Exception: when the champion's train set is gone from storage. A
+            report built on a guess would be worse than none.
 
     Example:
         # TASK_TYPE=regression MODEL_NAME=house_price_regressor python main.py
@@ -366,153 +415,41 @@ def main() -> int:
     """
     task_type = os.environ["TASK_TYPE"]
     model_name = os.environ["MODEL_NAME"]
-    # float, not int: back-to-back scenario runs in a single test session land
-    # within the same wall-clock hour, and load_predictions now filters by
-    # real timestamp, so isolating one batch from the next needs sub-hour
-    # precision (e.g. 0.1 = 6 minutes). Production's hourly Airflow schedule
-    # keeps using whole hours by way of DEFAULT_WINDOW_HOURS.
+    # float, not int: back-to-back scenario runs need sub-hour windows.
     window_hours = float(os.environ.get("MONITOR_WINDOW_HOURS", DEFAULT_WINDOW_HOURS))
     reference_rows = int(os.environ.get("MONITOR_REFERENCE_ROWS", DEFAULT_REFERENCE_ROWS))
     run_id = os.environ.get("MONITOR_RUN_ID", datetime.now(UTC).strftime("%Y%m%dT%H%M%S"))
+    flushed = flush_result()
+    if flushed is not None and not flushed.get("ok", False):
+        print(f"WARNING: the log flush before this run failed: {flushed}", file=sys.stderr)
 
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
     storage = Storage.from_env()
     now = datetime.now(UTC)
 
     predictions = drift.load_predictions(storage, model_name, now, window_hours)
-    if len(predictions) == 0:
+    n_predictions = int(len(predictions))
+    if n_predictions == 0:
         print(f"no traffic for {model_name} in the last {window_hours}h", file=sys.stderr)
-        emit_result(
-            {
-                "severity": drift.INSUFFICIENT,
-                "parts": {},
-                "n_predictions": 0,
-                "n_ground_truth": 0,
-                "report_key": None,
-            }
-        )
+        emit_result({"severity": drift.INSUFFICIENT, "parts": {}, "n_predictions": 0,
+                     "n_ground_truth": 0, "report_key": None})
         return 0
 
     try:
-        model, version, champion_run_id, fingerprint = load_champion_context(model_name)
+        model, version, champion_run_id, data_id = load_champion_context(model_name)
     except mlflow.exceptions.MlflowException as error:
-        # Same treatment as "no traffic": a model that has not been trained
-        # and promoted yet is a normal state on a dev box, not a crash. Before
-        # `traffic_agent` (2026-09-22) this raised uncaught, which was
-        # harmless while nothing waited on monitoring_dag's own run state -
-        # an hourly scheduled run failing quietly in Airflow's history did
-        # not block anything. `compute_drift`'s
-        # `TriggerDagRunOperator(wait_for_completion=True,
-        # failed_states=["failed"])` changed that: Airflow marks a DagRun
-        # failed the moment ANY task fails, with no notion of "one model's
-        # task failed, the other's verdict still counts" - so a stack where
-        # only `house_price_regressor` has ever been promoted made every
-        # simulate run report failed, even though the regression drift this
-        # window actually computed and wrote just fine in the sibling task.
         print(f"no champion for {model_name} yet: {error}", file=sys.stderr)
-        emit_result(
-            {
-                "severity": drift.INSUFFICIENT,
-                "parts": {},
-                "n_predictions": int(len(predictions)),
-                "n_ground_truth": 0,
-                "report_key": None,
-            }
-        )
+        emit_result({"severity": drift.INSUFFICIENT, "parts": {},
+                     "n_predictions": n_predictions, "n_ground_truth": 0,
+                     "report_key": None})
         return 0
-    print(f"champion v{version}, fingerprint {fingerprint}", file=sys.stderr)
+    print(f"champion v{version}, data ID {data_id}", file=sys.stderr)
 
-    train_df = storage.read_parquet(processed_key(fingerprint, task_type, "train"))
-    target = schema.target_column(task_type)
-    reference = train_df.drop(columns=[target])
-    if len(reference) > reference_rows:
-        reference = reference.sample(n=reference_rows, random_state=REFERENCE_SEED)
-
-    current = drift.decode_raw_inputs(predictions)
-    numeric, categorical = _numeric_and_categorical_columns(task_type)
-
-    # Feature drift. Both sides are raw - clean them the same way the
-    # champion's Pipeline does before Evidently ever sees them; see
-    # clean_for_drift for why. Only compare columns both sides actually have.
-    reference_clean = clean_for_drift(reference)
-    current_clean = clean_for_drift(current)
-    shared_numeric = [
-        c for c in numeric if c in current_clean.columns and c in reference_clean.columns
-    ]
-    shared_categorical = [
-        c for c in categorical if c in current_clean.columns and c in reference_clean.columns
-    ]
-    feature_report = run_drift_report(
-        reference_clean, current_clean, shared_numeric, shared_categorical
-    )
-    feature_report_summary = feature_report.dict()
-    feature_part = drift.feature_severity(
-        _drifted_share(feature_report_summary), _feature_margins(feature_report_summary)
-    )
-
-    # Prediction drift. The champion has to be run over the reference here:
-    # training never logged the distribution of its own output.
-    reference_predictions = model.predict(reference)
-    prediction_report = run_drift_report(
-        reference.assign(prediction=reference_predictions)[["prediction"]],
-        predictions[["prediction"]],
-        ["prediction"] if task_type == "regression" else [],
-        [] if task_type == "regression" else ["prediction"],
-    )
-    prediction_part = drift.prediction_severity(_drifted_share(prediction_report.dict()) > 0)
-
-    # Read the baseline BEFORE deciding whether performance can be graded. It
-    # is the yardstick the verdict is made against, and a dashboard showing
-    # "rmse 286k" without it cannot say whether that is bad - so it goes into
-    # the summary either way, including when there is not enough ground truth
-    # to grade anything.
     reference_metrics = test_metrics_of(champion_run_id, task_type)
-
-    # Performance drift, when there is anything to measure it on.
+    threshold = decision_threshold(model.named_steps.get("model")) if hasattr(
+        model, "named_steps") else None
     outcomes = drift.load_outcomes(storage, model_name, now, window_hours)
     joined = drift.join_outcomes(predictions, outcomes)
-    if not reference_metrics:
-        # No baseline, no ratio. Reported as unmeasured rather than as a crash
-        # or - far worse - as "ok": a champion registered outside the pipeline
-        # never went through evaluate, and grading it against nothing would be
-        # inventing a verdict.
-        print(
-            f"no test_ metrics on run {champion_run_id}, performance cannot be graded",
-            file=sys.stderr,
-        )
-        current_metrics = {}
-        performance_part = drift.INSUFFICIENT
-    elif len(joined) >= drift.MIN_GROUND_TRUTH:
-        # Classification is scored on AUC, so it needs the probability serving
-        # logged alongside the label. Regression has no probability at all.
-        y_proba = None
-        if task_type == "classification" and "probability" in joined.columns:
-            y_proba = joined["probability"]
-        current_metrics = compute_metrics(
-            task_type, joined["actual"], joined["prediction"], y_proba
-        )
-        performance_part = drift.performance_severity(
-            task_type,
-            current_metrics,
-            reference_metrics,
-            len(joined),
-        )
-    else:
-        current_metrics = {}
-        performance_part = drift.INSUFFICIENT
-
-    parts = {
-        "feature": feature_part,
-        "prediction": prediction_part,
-        "performance": performance_part,
-    }
-    severity = drift.overall_severity(parts)
-    print(f"severity={severity} parts={parts}", file=sys.stderr)
-
-    html_key = report_key(model_name, run_id, "html")
-    feature_report.save_html("/tmp/evidently.html")
-    with open("/tmp/evidently.html", "rb") as handle:
-        storage.write_bytes(handle.read(), html_key, "text/html")
 
     summary = {
         "model_name": model_name,
@@ -521,38 +458,150 @@ def main() -> int:
         "run_id": run_id,
         "computed_at": now.isoformat(),
         "window_hours": window_hours,
-        "severity": severity,
-        "parts": parts,
-        "n_predictions": int(len(predictions)),
+        "n_predictions": n_predictions,
         "n_ground_truth": int(len(joined)),
-        "current_metrics": current_metrics,
-        # What this champion scored on the held-out test split. Added
-        # 2026-09-22 so the dashboard can plot the baseline; summaries written
-        # before that date do not have it, and every reader must cope with it
-        # missing.
+        # What the champion scored on the test set: the yardstick for
+        # performance drift (see test_metrics_of). Absent before 2026-09-22.
         "reference_metrics": reference_metrics,
-        # Which baseline the two fields above were compared against. It exists
-        # because the answer already changed once - for a few hours on
-        # 2026-09-22 `reference_metrics` held the TRAIN metrics - and a reader
-        # cannot otherwise tell one generation of summary from the other. A
-        # summary without this key was graded some other way; do not plot its
-        # baseline next to these.
         "reference_source": "test_metrics",
-        "report_key": html_key,
+        "decision_threshold": threshold,
+        "flush": flushed,
     }
+
+    if not drift.enough_predictions(n_predictions):
+        print(f"only {n_predictions} predictions, below {drift.MIN_PREDICTIONS}", file=sys.stderr)
+        parts = {name: drift.INSUFFICIENT for name in drift.PART_NAMES}
+        summary.update({"parts": parts, "current_metrics": {},
+                        "input_quality": {"level": drift.INSUFFICIENT, "columns": []},
+                        "group_metrics": None, "report_key": None})
+        return _publish(storage, summary, parts, feature_summary=None, html=None)
+
+    train_df = storage.read_parquet(processed_key(data_id, task_type, "train"))
+    target = schema.target_column(task_type)
+    reference = train_df.drop(columns=[target])
+    if len(reference) > reference_rows:
+        reference = reference.sample(n=reference_rows, random_state=REFERENCE_SEED)
+
+    current = drift.decode_raw_inputs(predictions)
+    numeric, categorical = _numeric_and_categorical_columns(task_type)
+    reference_clean = clean_for_drift(reference)
+    current_clean = clean_for_drift(current)
+    shared_numeric = [
+        c for c in numeric if c in current_clean.columns and c in reference_clean.columns
+    ]
+    shared_categorical = [
+        c for c in categorical if c in current_clean.columns and c in reference_clean.columns
+    ]
+
+    # Data drift.
+    feature_report = run_drift_report(
+        reference_clean, current_clean, shared_numeric, shared_categorical
+    )
+    feature_summary = feature_report.dict()
+    feature_part = drift.feature_severity(
+        adapter.drifted_share(feature_summary), adapter.feature_margins(feature_summary)
+    )
+
+    # Prediction drift: training never logged the distribution of its own
+    # output, so the champion is run over the reference sample here.
+    reference_predictions = model.predict(reference)
+    prediction_report = run_drift_report(
+        reference.assign(prediction=reference_predictions)[["prediction"]],
+        predictions[["prediction"]],
+        ["prediction"] if task_type == "regression" else [],
+        [] if task_type == "regression" else ["prediction"],
+    )
+    prediction_part = drift.prediction_severity(
+        adapter.drifted_share(prediction_report.dict()) > 0
+    )
+
+    # Performance drift.
+    current_metrics: dict = {}
+    groups = None
+    if not reference_metrics:
+        print(f"no test_ metrics on run {champion_run_id}, performance cannot be graded",
+              file=sys.stderr)
+        performance_part = drift.INSUFFICIENT
+    elif len(joined) >= drift.MIN_GROUND_TRUTH:
+        current_metrics = adapter.performance_metrics(
+            performance_report(joined, task_type, threshold or 0.5).dict(), task_type
+        )
+        performance_part = drift.performance_severity(
+            task_type, current_metrics, reference_metrics, len(joined)
+        )
+        probability = joined["probability"] if task_type == "classification" else None
+        groups = group_metrics(
+            task_type, drift.decode_raw_inputs(joined), joined["actual"],
+            joined["prediction"], probability, min_rows=MONITORING_GROUP_MIN_ROWS,
+        )
+    else:
+        performance_part = drift.INSUFFICIENT
+
+    # Data quality of the input, on data cleaned the way the model cleans it.
+    categories = known_categories(train_df, shared_categorical)
+    quality_current = adapter.quality_numbers(
+        quality_report(current_clean, shared_numeric, shared_categorical, categories).dict()
+    )
+    quality_reference = adapter.quality_numbers(
+        quality_report(reference_clean, shared_numeric, shared_categorical, categories).dict()
+    )
+    quality = drift.input_quality(quality_reference, quality_current, n_predictions)
+
+    parts = {
+        "feature": feature_part,
+        "prediction": prediction_part,
+        "performance": performance_part,
+        "input_quality": quality["level"],
+    }
+    summary.update({
+        "parts": parts,
+        "current_metrics": current_metrics,
+        "input_quality": quality,
+        "group_metrics": {"current": groups,
+                          "reference": reference_group_metrics(champion_run_id)},
+        "report_key": report_key(model_name, run_id, "html"),
+    })
+    feature_report.save_html("/tmp/evidently.html")
+    with open("/tmp/evidently.html", "rb") as handle:
+        html = handle.read()
+    return _publish(storage, summary, parts, feature_summary=feature_summary, html=html)
+
+
+def _publish(storage: Storage, summary: dict, parts: dict, feature_summary, html) -> int:
+    """Finishes the summary, writes it and the report, and emits the result.
+
+    Args:
+        storage: where reports live.
+        summary: everything measured so far.
+        parts: the level of each section.
+        feature_summary: Evidently's data drift result dict, or None.
+        html: the Evidently report page, or None.
+
+    Returns:
+        0.
+
+    Example:
+        return _publish(storage, summary, parts, feature_summary=None, html=None)
+    """
+    model_name, run_id = summary["model_name"], summary["run_id"]
+    summary["severity"] = drift.overall_severity(parts)
+    summary["consecutive_warnings"] = drift.consecutive_warnings(
+        previous_summary(storage, model_name), parts, summary["model_version"]
+    )
+    print(f"severity={summary['severity']} parts={parts}", file=sys.stderr)
+    if html is not None:
+        storage.write_bytes(html, report_key(model_name, run_id, "html"), "text/html")
+    if feature_summary is not None:
+        storage.write_json(feature_summary, report_key(model_name, run_id, "json"))
     storage.write_json(summary, drift_summary_key(model_name, run_id))
     storage.write_json(summary, drift_latest_key(model_name))
-    storage.write_json(feature_report_summary, report_key(model_name, run_id, "json"))
-
-    emit_result(
-        {
-            "severity": severity,
-            "parts": parts,
-            "n_predictions": int(len(predictions)),
-            "n_ground_truth": int(len(joined)),
-            "report_key": html_key,
-        }
-    )
+    emit_result({
+        "severity": summary["severity"],
+        "parts": parts,
+        "n_predictions": summary["n_predictions"],
+        "n_ground_truth": summary["n_ground_truth"],
+        "report_key": summary.get("report_key"),
+    })
     return 0
 
 

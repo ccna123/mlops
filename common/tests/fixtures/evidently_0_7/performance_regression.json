@@ -1,0 +1,43 @@
+{
+ "metrics": [
+  {
+   "id": "07a6d46c093f8fd4d3fd9a8f834e0446",
+   "metric_name": "RMSE(regression_name=default,error_plot=False,error_distr=True,error_normality=False)",
+   "config": {
+    "type": "evidently:metric_v2:RMSE",
+    "regression_name": "default",
+    "error_plot": false,
+    "error_distr": true,
+    "error_normality": false
+   },
+   "value": 28627.783449724197
+  },
+  {
+   "id": "388a1f90d7785053ba4b44301e310cf2",
+   "metric_name": "MAE(regression_name=default,error_plot=False,error_distr=True,error_normality=False)",
+   "config": {
+    "type": "evidently:metric_v2:MAE",
+    "regression_name": "default",
+    "error_plot": false,
+    "error_distr": true,
+    "error_normality": false
+   },
+   "value": {
+    "mean": 22631.898382718464,
+    "std": 17604.826329428884
+   }
+  },
+  {
+   "id": "9c7e7b78ceb0ed9bc65fd16a8cca6237",
+   "metric_name": "R2Score(regression_name=default,error_distr=False,error_normality=False)",
+   "config": {
+    "type": "evidently:metric_v2:R2Score",
+    "regression_name": "default",
+    "error_distr": false,
+    "error_normality": false
+   },
+   "value": 0.8591681020308872
+  }
+ ],
+ "tests": []
+}

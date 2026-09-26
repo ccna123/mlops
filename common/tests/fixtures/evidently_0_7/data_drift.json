@@ -1,0 +1,39 @@
+{
+ "metrics": [
+  {
+   "id": "15e89f895b482f9b84ba7274ed18a106",
+   "metric_name": "DriftedColumnsCount(drift_share=0.5)",
+   "config": {
+    "type": "evidently:metric_v2:DriftedColumnsCount",
+    "drift_share": 0.5
+   },
+   "value": {
+    "count": 1.0,
+    "share": 0.5
+   }
+  },
+  {
+   "id": "57754c32b195592f789d6f2a07199c45",
+   "metric_name": "ValueDrift(column=bedrooms,method=chi-square p_value,threshold=0.05)",
+   "config": {
+    "type": "evidently:metric_v2:ValueDrift",
+    "column": "bedrooms",
+    "method": "chi-square p_value",
+    "threshold": 0.05
+   },
+   "value": 0.29244604191927887
+  },
+  {
+   "id": "4bd6c98f8033d77d44302ab922086436",
+   "metric_name": "ValueDrift(column=city,method=chi-square p_value,threshold=0.05)",
+   "config": {
+    "type": "evidently:metric_v2:ValueDrift",
+    "column": "city",
+    "method": "chi-square p_value",
+    "threshold": 0.05
+   },
+   "value": 2.2505389130405303e-69
+  }
+ ],
+ "tests": []
+}

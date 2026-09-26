@@ -383,3 +383,68 @@ def test_overall_severity_with_nothing_measured_is_insufficient():
         }
     )
     assert result == "insufficient_data"
+
+
+# --- minimum predictions, input data quality, consecutive warnings -----------
+
+
+
+def test_input_quality_is_insufficient_below_the_minimum_predictions():
+    assert drift.input_quality({}, {"a": {"missing_share": 0.9}}, 10)["level"] == (
+        drift.INSUFFICIENT
+    )
+
+
+def test_a_column_that_became_unreadable_is_high():
+    result = drift.input_quality(
+        {"listing_year": {"missing_share": 0.08}},
+        {"listing_year": {"missing_share": 0.95, "unseen_share": None}},
+        300,
+    )
+    assert result["level"] == "high"
+    assert result["columns"][0]["column"] == "listing_year"
+    assert result["columns"][0]["missing_increase_points"] == pytest.approx(87.0)
+
+
+def test_unseen_categories_grade_by_share():
+    reference = {"property_type": {"missing_share": 0.0, "unseen_share": None}}
+    assert drift.input_quality(
+        reference, {"property_type": {"missing_share": 0.0, "unseen_share": 0.10}}, 300
+    )["level"] == "warning"
+    assert drift.input_quality(
+        reference, {"property_type": {"missing_share": 0.0, "unseen_share": 0.30}}, 300
+    )["level"] == "high"
+
+
+def test_small_changes_are_ok_and_list_nothing():
+    result = drift.input_quality(
+        {"city": {"missing_share": 0.02}},
+        {"city": {"missing_share": 0.05, "unseen_share": 0.01}},
+        300,
+    )
+    assert result == {"level": "ok", "columns": []}
+
+
+def test_consecutive_warnings_count_up_for_the_same_model():
+    previous = {"model_version": "4", "consecutive_warnings": {"feature": 2, "performance": 5}}
+    counts = drift.consecutive_warnings(
+        previous, {"feature": "warning", "performance": "ok"}, "4"
+    )
+    assert counts == {"feature": 3, "performance": 0}
+
+
+def test_consecutive_warnings_restart_for_a_new_champion():
+    previous = {"model_version": "3", "consecutive_warnings": {"feature": 2}}
+    assert drift.consecutive_warnings(previous, {"feature": "warning"}, "4") == {"feature": 1}
+
+
+def test_insufficient_data_breaks_a_streak():
+    previous = {"model_version": "4", "consecutive_warnings": {"feature": 2}}
+    assert drift.consecutive_warnings(
+        previous, {"feature": drift.INSUFFICIENT}, "4"
+    ) == {"feature": 0}
+
+
+def test_overall_severity_includes_input_quality():
+    parts = {"feature": "ok", "prediction": "ok", "performance": "ok", "input_quality": "high"}
+    assert drift.overall_severity(parts) == "high"

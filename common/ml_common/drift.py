@@ -454,3 +454,141 @@ def overall_severity(parts: dict) -> str:
     if not measured:
         return INSUFFICIENT
     return max(measured, key=SEVERITIES.index)
+
+
+# Below this many predictions in the window, data drift, prediction drift and
+# data quality are "insufficient_data" too (02 7.2): a handful of records
+# decides nothing, and "ok" on them would be a check that never happened.
+MIN_PREDICTIONS = 50
+
+# Data quality of the input (CN-44), per column: how many percentage points
+# the missing rate rose over the reference, and what share of present values
+# is a category the reference never held. Initial values, not yet calibrated.
+QUALITY_MISSING_WARNING_POINTS = 5.0
+QUALITY_MISSING_HIGH_POINTS = 20.0
+QUALITY_UNSEEN_WARNING_SHARE = 0.05
+QUALITY_UNSEEN_HIGH_SHARE = 0.20
+
+PART_NAMES = ("feature", "prediction", "performance", "input_quality")
+
+
+def enough_predictions(n_predictions: int) -> bool:
+    """Tells whether the window holds enough predictions to grade anything.
+
+    Args:
+        n_predictions: predictions served in the window.
+
+    Returns:
+        True from `MIN_PREDICTIONS` up.
+
+    Example:
+        enough_predictions(12)   # -> False, every part is insufficient_data
+    """
+    return n_predictions >= MIN_PREDICTIONS
+
+
+def _level_of(value: float, warning: float, high: float) -> str:
+    """Grades one number against a warning and a high line.
+
+    Args:
+        value: the number.
+        warning: from this value up, "warning".
+        high: above this value, "high".
+
+    Returns:
+        "ok", "warning" or "high".
+
+    Example:
+        _level_of(7.0, 5.0, 20.0)  # -> "warning"
+    """
+    if value > high:
+        return "high"
+    if value >= warning:
+        return "warning"
+    return "ok"
+
+
+def input_quality(reference: dict, current: dict, n_predictions: int) -> dict:
+    """Grades the data quality of the input against the reference (CN-44).
+
+    Both sides are what `evidently_adapter.quality_numbers` read, computed on
+    data AFTER the model's own cleaning, so a value the model cannot read
+    counts as missing exactly as the model sees it.
+
+    Args:
+        reference: per column `missing_share` (and `unseen_share`) of the
+            cleaned train-set sample.
+        current: the same for the cleaned traffic, with `unseen_share` the
+            share of present values outside the reference's categories.
+        n_predictions: predictions in the window.
+
+    Returns:
+        `{"level": ..., "columns": [...]}`. `columns` lists every column at
+        warning or worse, with `missing_increase_points`, `unseen_share` and
+        its own `level`, worst first. The level is `insufficient_data` below
+        `MIN_PREDICTIONS`, otherwise the worst column's.
+
+    Example:
+        input_quality({"listing_year": {"missing_share": 0.08}},
+                      {"listing_year": {"missing_share": 0.95}}, 300)
+        # -> {"level": "high", "columns": [{"column": "listing_year",
+        #     "missing_increase_points": 87.0, "unseen_share": None,
+        #     "level": "high"}]}
+        # a sender switched date format: the whole column became unreadable.
+    """
+    if not enough_predictions(n_predictions):
+        return {"level": INSUFFICIENT, "columns": []}
+    flagged = []
+    for column, numbers in sorted(current.items()):
+        base = reference.get(column, {}).get("missing_share", 0.0)
+        increase = round((numbers.get("missing_share", 0.0) - base) * 100, 4)
+        unseen = numbers.get("unseen_share")
+        levels = [_level_of(increase, QUALITY_MISSING_WARNING_POINTS,
+                            QUALITY_MISSING_HIGH_POINTS)]
+        if unseen is not None:
+            levels.append(_level_of(unseen, QUALITY_UNSEEN_WARNING_SHARE,
+                                    QUALITY_UNSEEN_HIGH_SHARE))
+        level = max(levels, key=SEVERITIES.index)
+        if level != "ok":
+            flagged.append({"column": column, "missing_increase_points": increase,
+                            "unseen_share": unseen, "level": level})
+    flagged.sort(key=lambda item: -SEVERITIES.index(item["level"]))
+    level = flagged[0]["level"] if flagged else "ok"
+    return {"level": level, "columns": flagged}
+
+
+def consecutive_warnings(previous_summary: dict | None, parts: dict, model_version: str) -> dict:
+    """Counts, per part, how many monitoring runs in a row ended at "warning".
+
+    The count feeds the "warning three times in a row" alert (CN-46). It lives
+    here, next to the levels, rather than in the alerting tool, so all the
+    rules stay in one place and the alerting tool only compares a number.
+
+    Args:
+        previous_summary: the last summary of this model, or None.
+        parts: this run's level per part.
+        model_version: the champion version this run graded.
+
+    Returns:
+        `{part: count}`. A part not at "warning" now counts 0. The count
+        restarts when the champion version changed, since the streak belonged
+        to another model. `insufficient_data` breaks a streak too: nothing was
+        measured, so nothing was seen to persist.
+
+    Example:
+        consecutive_warnings({"model_version": "4", "consecutive_warnings":
+                              {"feature": 2}}, {"feature": "warning"}, "4")
+        # -> {"feature": 3}
+    """
+    same_model = (
+        previous_summary is not None
+        and str(previous_summary.get("model_version")) == str(model_version)
+    )
+    before = (previous_summary or {}).get("consecutive_warnings") or {}
+    counts = {}
+    for part, level in parts.items():
+        if level != "warning":
+            counts[part] = 0
+        else:
+            counts[part] = (int(before.get(part, 0)) if same_model else 0) + 1
+    return counts
