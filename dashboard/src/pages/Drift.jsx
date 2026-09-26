@@ -12,6 +12,8 @@ import MetricComparison from "../components/MetricComparison";
 import EvidentlyReport from "../components/EvidentlyReport";
 import RelativeTime from "../components/RelativeTime";
 import TrafficSimulator from "../components/TrafficSimulator";
+import InputQuality from "../components/InputQuality";
+import GroupMetrics from "../components/GroupMetrics";
 import { DRIFT_FACTORS, STATUS_META } from "../lib/constants";
 import { formatAbsoluteTime, formatNumber } from "../lib/format";
 import { axisTime, dayBoundaries, primaryMetric, readHistory, RECENT_WINDOW } from "../lib/driftReading";
@@ -441,7 +443,7 @@ function DriftHistoryChart({ history, taskType }) {
  * Returns:
  *   A JSX page element.
  */
-export default function Drift({ onRetrain }) {
+export default function Drift({ onRetrain, onOpenData }) {
   const client = useClient();
   const pushToast = useToast();
   const [models, setModels] = useState([]);
@@ -516,7 +518,8 @@ export default function Drift({ onRetrain }) {
           <div>
             <h2>Drift</h2>
             <p className="section-sub">
-              Ba phép đo tách biệt, không gộp thành một điểm số: data, model, performance.
+              Ba loại drift tách biệt, không gộp thành một điểm số (data, prediction, performance), và riêng một mục
+              data quality của input.
             </p>
           </div>
           <div className="filters">
@@ -568,6 +571,16 @@ export default function Drift({ onRetrain }) {
               {isStale && <span className="chip-stale">báo cáo cũ</span>}
             </div>
 
+            {latestState.summary.flush && !latestState.summary.flush.ok && (
+              <div className="insufficient-notice">
+                <TriangleAlert size={16} />
+                <p>
+                  Ghi prediction log xuống storage trước khi tính <b>thất bại</b> ({latestState.summary.flush.error}).
+                  Một phần traffic vừa gửi có thể chưa có trong báo cáo này.
+                </p>
+              </div>
+            )}
+
             <div className="severity-overview">
               {DRIFT_FACTORS.map((factor) => (
                 <div className="severity-cell" key={factor.key}>
@@ -576,9 +589,16 @@ export default function Drift({ onRetrain }) {
                   </p>
                   <StatusBadge value={latestState.summary.parts[factor.key]} />
                   <p className="severity-cell-hint">{factor.hint}</p>
+                  {latestState.summary.consecutive_warnings?.[factor.key] >= 2 && (
+                    <p className="warn-note">
+                      Cảnh báo {latestState.summary.consecutive_warnings[factor.key]} lần liên tiếp.
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
+
+            <InputQuality quality={latestState.summary.input_quality} />
 
             {latestState.summary.parts.performance === "insufficient_data" && (
               <div className="insufficient-notice">
@@ -602,6 +622,8 @@ export default function Drift({ onRetrain }) {
               }
             />
 
+            <GroupMetrics groups={latestState.summary.group_metrics} taskType={latestState.summary.task_type} />
+
             {history.length > 0 && (
               <div className="chart-wrap">
                 <DriftHistoryChart history={history} taskType={latestState.summary.task_type} />
@@ -615,9 +637,20 @@ export default function Drift({ onRetrain }) {
             />
 
             {latestState.summary.severity === "high" && (
-              <button className="btn-primary" onClick={() => onRetrain?.(latestState.summary.task_type)}>
-                Retrain model này →
-              </button>
+              <div className="retrain-box">
+                <p>
+                  Có mục ở mức <b>Cao</b>. Retrain trên đúng data cũ thì model mới sẽ học y hệt model cũ — nên tạo data
+                  version từ traffic thực tế trước, rồi retrain trên data version đó.
+                </p>
+                <div className="row-actions">
+                  <button className="btn-secondary" onClick={() => onOpenData?.()}>
+                    1. Tạo data version từ traffic →
+                  </button>
+                  <button className="btn-primary" onClick={() => onRetrain?.(latestState.summary.task_type)}>
+                    2. Retrain model này →
+                  </button>
+                </div>
+              </div>
             )}
           </>
         )}

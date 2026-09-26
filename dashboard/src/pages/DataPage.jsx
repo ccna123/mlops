@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { UploadCloud, Eye } from "lucide-react";
+import FeedbackDataset from "../components/FeedbackDataset";
 import { useClient } from "../lib/DemoModeContext";
 import { useToast } from "../components/Toast";
-import ConfirmDialog from "../components/ConfirmDialog";
 import EmptyState from "../components/EmptyState";
 import ErrorState from "../components/ErrorState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
@@ -31,7 +31,7 @@ export default function DataPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [convertingPhase, setConvertingPhase] = useState(false);
-  const [overwriteDialog, setOverwriteDialog] = useState(null);
+  const [versionTaken, setVersionTaken] = useState(null);
   const fileInputRef = useRef(null);
 
   const [previewVersionInput, setPreviewVersionInput] = useState("v1");
@@ -43,25 +43,24 @@ export default function DataPage() {
   const sizeValid = !file || file.size <= MAX_UPLOAD_BYTES;
   const canUpload = fileValid && versionValid && sizeValid && !uploading;
 
-  // Checks whether the target version already exists via a cheap
-  // rows=1 preview before actually uploading, per brief §4.3 — the API has
-  // no 409, so a silent overwrite needs this client-side confirmation gate.
+  // A dataset version is never overwritten (要件定義書 CN-02): the API answers
+  // 409. The cheap rows=1 preview only lets the screen say so before a
+  // multi-hundred-megabyte file is sent for nothing.
   async function startUploadFlow() {
     if (!canUpload) return;
     try {
       await client.getPreview(uploadVersion, 1);
-      setOverwriteDialog({ kind: "exists" });
-    } catch (error) {
-      if (error instanceof ApiError && error.kind === "notfound") {
-        doUpload();
-      } else {
-        setOverwriteDialog({ kind: "unknown" });
-      }
+      setVersionTaken(uploadVersion);
+      return;
+    } catch {
+      // Not found (the usual case), or the check itself failed: either way
+      // the API still refuses a taken name with 409.
     }
+    doUpload();
   }
 
   async function doUpload() {
-    setOverwriteDialog(null);
+    setVersionTaken(null);
     setUploading(true);
     setUploadProgress(0);
     setConvertingPhase(false);
@@ -70,15 +69,22 @@ export default function DataPage() {
         setUploadProgress(progress);
         if (progress >= 1) setConvertingPhase(true);
       });
+      const rule = result.split_points?.original;
       pushToast({
         type: "success",
-        text: `Đã tải lên ${result.rows} dòng vào phiên bản ${result.dataset_version} (${result.size_mb} MB parquet)`,
+        text:
+          `Đã tạo data version ${result.dataset_version}: ${formatNumber(result.rows)} dòng (${result.size_mb} MB parquet)` +
+          (rule ? `. Split point: T1 = ${rule.t1}, T2 = ${rule.t2}.` : ""),
       });
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
-      const detail = error instanceof ApiError ? error.detail : null;
-      pushToast({ type: "error", text: `Tải lên thất bại: ${typeof detail === "string" ? detail : "lỗi không xác định"}` });
+      if (error instanceof ApiError && error.kind === "conflict") {
+        setVersionTaken(uploadVersion);
+      } else {
+        const detail = error instanceof ApiError ? error.detail : null;
+        pushToast({ type: "error", text: `Tải lên thất bại: ${typeof detail === "string" ? detail : "lỗi không xác định"}` });
+      }
     } finally {
       setUploading(false);
       setConvertingPhase(false);
@@ -133,11 +139,24 @@ export default function DataPage() {
         )}
 
         <label className="field">
-          <span>Phiên bản đích *</span>
-          <input value={uploadVersion} onChange={(event) => setUploadVersion(event.target.value)} placeholder="ví dụ v2" />
+          <span>Tên data version mới *</span>
+          <input
+            value={uploadVersion}
+            onChange={(event) => {
+              setUploadVersion(event.target.value);
+              setVersionTaken(null);
+            }}
+            placeholder="ví dụ v2"
+          />
         </label>
         {uploadVersion && !versionValid && (
           <p className="field-error">Chỉ chữ, số, dấu chấm, gạch dưới, gạch nối; bắt đầu bằng chữ hoặc số; tối đa 64 ký tự.</p>
+        )}
+        {versionTaken && versionTaken === uploadVersion && (
+          <p className="field-error">
+            Data version <b>{versionTaken}</b> đã tồn tại. Data version không bao giờ bị ghi đè — model đã học từ nó
+            phải truy ngược được về đúng data đó. Hãy đặt tên khác.
+          </p>
         )}
 
         <button className="btn-primary" disabled={!canUpload} onClick={startUploadFlow}>
@@ -152,7 +171,10 @@ export default function DataPage() {
             <p>{convertingPhase ? "Đang chuyển sang parquet…" : `Đang tải lên… ${Math.round(uploadProgress * 100)}%`}</p>
           </div>
         )}
-        <p className="hint-note">Ghi đè một phiên bản đã tồn tại sẽ hỏi xác nhận trước khi gửi.</p>
+        <p className="hint-note">
+          Split point theo thời gian (train / test / simulation set) được tính một lần khi tạo data version và không
+          bao giờ đổi. Tên đã tồn tại sẽ bị từ chối.
+        </p>
       </section>
 
       <section className="card">
@@ -199,6 +221,8 @@ export default function DataPage() {
           </p>
         )}
       </section>
+
+      <FeedbackDataset />
 
       {previewState.status === "data" && (
         <>
@@ -278,34 +302,6 @@ export default function DataPage() {
         </>
       )}
 
-      {overwriteDialog?.kind === "exists" && (
-        <ConfirmDialog
-          title="Ghi đè phiên bản đã tồn tại?"
-          confirmLabel="Ghi đè và tải lên"
-          danger
-          busy={uploading}
-          onConfirm={doUpload}
-          onCancel={() => setOverwriteDialog(null)}
-        >
-          <p>
-            Phiên bản <b>{uploadVersion}</b> đã tồn tại. Tải lên sẽ <b>ghi đè âm thầm</b> dữ liệu cũ, không thể hoàn tác.
-          </p>
-        </ConfirmDialog>
-      )}
-      {overwriteDialog?.kind === "unknown" && (
-        <ConfirmDialog
-          title="Không xác định được phiên bản này đã tồn tại chưa"
-          confirmLabel="Vẫn tải lên"
-          danger
-          busy={uploading}
-          onConfirm={doUpload}
-          onCancel={() => setOverwriteDialog(null)}
-        >
-          <p>
-            Không kiểm tra được phiên bản <b>{uploadVersion}</b> đã tồn tại hay chưa. Nếu nó đã tồn tại, tải lên sẽ ghi đè âm thầm.
-          </p>
-        </ConfirmDialog>
-      )}
     </div>
   );
 }

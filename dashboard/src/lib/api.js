@@ -133,6 +133,25 @@ export const api = {
 
   listModels: () => request("/models"),
 
+  modelCard: (name, version) =>
+    request(`/models/${encodeURIComponent(name)}/${encodeURIComponent(version)}/card`),
+
+  feedbackPreview: (taskType, periodStart, periodEnd) => {
+    const params = new URLSearchParams({ task_type: taskType });
+    if (periodStart) params.set("period_start", periodStart);
+    if (periodEnd) params.set("period_end", periodEnd);
+    return request(`/feedback/preview?${params.toString()}`, { timeout: 60000 });
+  },
+
+  feedbackRun: (payload) =>
+    request("/feedback/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+
+  feedbackStatus: () => request("/feedback/status", { timeout: 6000 }),
+
   promote: (name, version) =>
     request(`/models/${encodeURIComponent(name)}/${encodeURIComponent(version)}/promote`, { method: "POST" }),
 

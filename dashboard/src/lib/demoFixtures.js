@@ -267,7 +267,7 @@ export const driftLatest = {
   computed_at: "2026-09-20T07:56:45.249085+00:00",
   window_hours: 0.045,
   severity: "high",
-  parts: { feature: "ok", prediction: "high", performance: "high" },
+  parts: { feature: "ok", prediction: "high", performance: "high", input_quality: "warning" },
   n_predictions: 500,
   n_ground_truth: 500,
   current_metrics: { rmse: 305791.86789740255, mae: 184188.3288157089, r2: 0.5677294118532599 },
@@ -278,6 +278,39 @@ export const driftLatest = {
   reference_metrics: { rmse: 98175.10328533906, mae: 64040.68658593348, r2: 0.9475422335571709 },
   reference_source: "test_metrics",
   report_key: "reports/house_price_regressor/20260920T075645/evidently.html",
+  // NOT captured output either: the fields below arrived with 基本設計書 1.1
+  // (data quality of the input, per-group metrics, flush result, warning
+  // streaks). Shaped exactly as stages/monitor/main.py writes them.
+  input_quality: {
+    level: "warning",
+    columns: [{ column: "listing_year", missing_increase_points: 9.4, unseen_share: null, level: "warning" }],
+  },
+  flush: { ok: true, written: 137, error: null },
+  consecutive_warnings: { feature: 0, prediction: 0, performance: 0, input_quality: 1 },
+  group_metrics: {
+    current: {
+      city: {
+        phoenix: { n: 412, rmse: 318204.1, mae: 190331.4, r2: 0.52 },
+        boston: { n: 51, rmse: 201337.9, mae: 120004.2, r2: 0.71 },
+        tulsa: { n: 37, insufficient_data: true },
+      },
+      property_type: {
+        "single family": { n: 301, rmse: 297331.0, mae: 181002.3, r2: 0.58 },
+        condo: { n: 199, rmse: 309874.5, mae: 188118.8, r2: 0.55 },
+      },
+    },
+    reference: {
+      city: {
+        phoenix: { n: 5120, rmse: 101223.4, mae: 66012.2, r2: 0.94 },
+        boston: { n: 4987, rmse: 97002.1, mae: 63340.9, r2: 0.95 },
+        tulsa: { n: 5230, rmse: 96550.0, mae: 62987.1, r2: 0.95 },
+      },
+      property_type: {
+        "single family": { n: 16012, rmse: 99870.2, mae: 65001.4, r2: 0.95 },
+        condo: { n: 9744, rmse: 95511.7, mae: 62110.0, r2: 0.94 },
+      },
+    },
+  },
 };
 
 // Three literal elements out of the real 12-entry history (brief §4.5),
@@ -389,4 +422,41 @@ export const driftFixturesByModel = {
     latest: driftLatestClassification,
     history: driftHistoryClassification,
   },
+};
+
+// Demo stand-ins for the feedback data pipeline (基本設計書 3.11).
+export const feedbackPreview = {
+  task_type: "regression",
+  period_start: "2026-08-27T00:00:00+00:00",
+  period_end: "2026-09-26T00:00:00+00:00",
+  matched: 1480,
+  minimum: 500,
+  enough: true,
+};
+
+export const modelCard = {
+  model_name: "house_price_regressor",
+  version: "3",
+  task_type: "regression",
+  created_at: "2026-09-20T07:30:00+00:00",
+  purpose: "Predicts the final sale price of a house, in US dollars.",
+  algorithm: { estimator: "xgboost", tuned: "False", decision_threshold: null },
+  data: {
+    dataset_version: "v1",
+    data_id: "3f0a9c1d5e2b7a48",
+    split_points: '{"original": {"t1": "2023-11-02", "t2": "2024-10-15", "undated_test_share": 0.2}}',
+    train_rows: "200000",
+    sample_rows: "200000",
+    seed: "42",
+  },
+  code: { git_commit: "a1b2c3d", image_digest: "sha256:9f2c…" },
+  metrics: {
+    test: { rmse: 98175.1, mae: 64040.7, r2: 0.9475 },
+    by_group: { city: { phoenix: { n: 5120, rmse: 101223.4, mae: 66012.2, r2: 0.94 } } },
+  },
+  excluded_columns: ["property_id", "list_price", "sale_price", "price_category"],
+  known_limitations: [
+    "Trained on simulated data, not real transactions.",
+    "Tree models cannot predict prices above the range they learned; a market that rises beyond it is underestimated.",
+  ],
 };

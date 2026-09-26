@@ -49,7 +49,12 @@ export const demoApi = {
       await delay(120);
       onProgress?.(progress);
     }
-    return { dataset_version: datasetVersion, rows: 4, size_mb: 0.01 };
+    return {
+      dataset_version: datasetVersion,
+      rows: 4,
+      size_mb: 0.01,
+      split_points: { original: { t1: "2023-11-02", t2: "2024-10-15", undated_test_share: 0.2 } },
+    };
   },
 
   getPreview: async (datasetVersion) => {
@@ -67,7 +72,27 @@ export const demoApi = {
 
   promote: async (name, version) => {
     await delay(300);
-    return { name, version, alias: "champion" };
+    return { name, version, alias: "champion", serving: { switched: true, version, error: null } };
+  },
+
+  modelCard: async (name, version) => {
+    await delay(200);
+    return { ...fx.modelCard, model_name: name, version };
+  },
+
+  feedbackPreview: async (taskType) => {
+    await delay(300);
+    return { ...fx.feedbackPreview, task_type: taskType };
+  },
+
+  feedbackRun: async () => {
+    await delay(300);
+    return { run_id: `manual__${new Date().toISOString()}`, dag_id: "feedback_data_pipeline", state: "queued" };
+  },
+
+  feedbackStatus: async () => {
+    await delay(150);
+    return { run: null };
   },
 
   deleteModelVersion: async (name, version) => {
@@ -77,7 +102,7 @@ export const demoApi = {
 
   deleteModel: async (name) => {
     await delay(300);
-    return { name, deleted: true };
+    return { name, deleted: true, serving: { switched: true, version: null, error: null } };
   },
 
   listScenarios: async () => {

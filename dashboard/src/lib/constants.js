@@ -63,7 +63,7 @@ export const SERVICE_LABELS = {
 // Metric direction hints — NOT returned by the API, purely a UI convention
 // (brief §4.4). Unknown metric keys render with no arrow.
 export const LOWER_IS_BETTER = new Set(["rmse", "mae"]);
-export const HIGHER_IS_BETTER = new Set(["r2", "accuracy", "auc", "f1"]);
+export const HIGHER_IS_BETTER = new Set(["r2", "accuracy", "auc", "f1", "precision", "recall"]);
 
 // Upload constant not published by the API — the brief says to hardcode it
 // with a comment (§4.3) so the client can block oversized files before the
@@ -86,7 +86,9 @@ export const DRIFT_FACTORS = [
   },
   {
     key: "prediction",
-    label: "Model drift",
+    // "Model drift" until 2026-09-26: the design documents call it prediction
+    // drift, and two names for one thing made readers think they were two.
+    label: "Prediction drift",
     hint: "Phân bố dự đoán của model lệch so với lúc train, dù dữ liệu vào có lệch hay không.",
     color: "#7C3AED",
   },
@@ -98,6 +100,16 @@ export const DRIFT_FACTORS = [
   },
 ];
 
+// The fourth monitoring section, kept apart from the three drift factors on
+// purpose (基本設計書 8.3): it is not drift, it is whether the input can still
+// be read the way the model reads it. Its key is the API's.
+export const QUALITY_FACTOR = {
+  key: "input_quality",
+  label: "Data quality của input",
+  hint: "Tỉ lệ missing sau data cleaning và tỉ lệ giá trị category chưa từng gặp, so với lúc train.",
+  color: "#0D9488",
+};
+
 // What each agent scenario does, in words. The NAMES come from
 // GET /api/scenarios — this map only labels them, so a scenario the backend
 // drops simply stops being offered instead of rendering a dead option.
@@ -108,7 +120,7 @@ export const SCENARIO_META = {
   },
   price_inflation: {
     label: "Giá rao tăng 20%",
-    hint: "list_price bị loại vì leakage nên model không hề nhìn thấy — cố ý không sinh drift.",
+    hint: "Model giá bán không dùng giá rao → không được báo động nhầm. Model cải tạo có dùng → phải thấy data drift.",
   },
   market_rally: {
     label: "Thị trường tăng thật 20%",
@@ -116,11 +128,11 @@ export const SCENARIO_META = {
   },
   market_shift: {
     label: "Traffic dồn về Phoenix",
-    hint: "city là feature thật → data drift, thường kéo theo model drift.",
+    hint: "city là feature thật → data drift, thường kéo theo prediction drift.",
   },
   new_segment: {
     label: "Loại bất động sản chưa từng thấy",
-    hint: "property_type = “floating home”, chưa từng có lúc train → data drift.",
+    hint: "property_type = “floating home”, chưa từng có lúc train → serving không được lỗi; data quality báo giá trị lạ.",
   },
 };
 
@@ -141,3 +153,9 @@ export const SIMULATE_STAGES = [
     hint: "chạy monitoring_dag và chờ nó xong",
   },
 ];
+
+// The one task of a feedback_data_pipeline run.
+export const FEEDBACK_STAGE = {
+  id: "build_feedback_dataset",
+  label: "Tạo data version từ traffic thực tế",
+};

@@ -682,3 +682,48 @@ tbody tr[onclick],
 .evidently-frame {
   @apply mt-3 h-[640px] w-full rounded-lg border border-slate-200 bg-white;
 }
+
+/* Model card dialog */
+.modal-wide {
+  max-width: 760px;
+}
+.model-card table th {
+  text-align: left;
+  white-space: nowrap;
+  padding-right: 16px;
+  vertical-align: top;
+}
+.model-card ul {
+  margin: 4px 0 0 18px;
+}
+
+/* Fourth monitoring section and per-group metrics */
+.quality-cell {
+  margin-top: 12px;
+  border-top: 1px dashed #CBD5E1;
+  padding-top: 12px;
+}
+.quality-table {
+  margin-top: 8px;
+}
+.group-metrics {
+  margin-top: 16px;
+}
+.retrain-box {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid #FCA5A5;
+  border-radius: 8px;
+  background: #FEF2F2;
+}
+.model-card table th,
+.model-card table td {
+  padding: 8px 12px 8px 0;
+  border-bottom: 1px solid #F1F5F9;
+  vertical-align: top;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.row-actions button {
+  white-space: nowrap;
+}

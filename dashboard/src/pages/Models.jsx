@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Crown, Trash2 } from "lucide-react";
+import { Crown, FileText, Trash2 } from "lucide-react";
 import { useClient } from "../lib/DemoModeContext";
 import { useToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -7,6 +7,7 @@ import EmptyState from "../components/EmptyState";
 import ErrorState from "../components/ErrorState";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import MetricTile from "../components/MetricTile";
+import ModelCardDialog from "../components/ModelCardDialog";
 import RelativeTime from "../components/RelativeTime";
 import { formatNumber } from "../lib/format";
 import { ApiError } from "../lib/api";
@@ -33,6 +34,22 @@ export default function Models({ onNavigateToOverview }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteModelTarget, setDeleteModelTarget] = useState(null);
+  const [cardTarget, setCardTarget] = useState(null);
+
+  // The API asks serving to reload after a manual change and says whether it
+  // followed (基本設計書 9.1). The MLflow change is kept either way, so a
+  // serving that did not follow is reported, never folded into "success".
+  function reportServing(result, doneText) {
+    const serving = result?.serving;
+    if (!serving || serving.switched) {
+      pushToast({ type: "success", text: `${doneText} Serving đã chuyển theo.` });
+      return;
+    }
+    pushToast({
+      type: "error",
+      text: `${doneText} Nhưng serving CHƯA chuyển: ${serving.error ?? "không rõ lý do"}.`,
+    });
+  }
 
   async function load() {
     setState({ status: "loading" });
@@ -53,8 +70,8 @@ export default function Models({ onNavigateToOverview }) {
     if (!promoteTarget) return;
     setPromoting(true);
     try {
-      await client.promote(promoteTarget.modelName, promoteTarget.toVersion);
-      pushToast({ type: "success", text: `Đã chuyển champion của ${promoteTarget.modelName} sang v${promoteTarget.toVersion}` });
+      const result = await client.promote(promoteTarget.modelName, promoteTarget.toVersion);
+      reportServing(result, `Đã chuyển champion của ${promoteTarget.modelName} sang v${promoteTarget.toVersion}.`);
     } catch (error) {
       const detail = error instanceof ApiError ? error.detail : null;
       pushToast({ type: "error", text: `Không thể chuyển champion: ${typeof detail === "string" ? detail : "lỗi không xác định"}` });
@@ -85,8 +102,8 @@ export default function Models({ onNavigateToOverview }) {
     if (!deleteModelTarget) return;
     setDeleting(true);
     try {
-      await client.deleteModel(deleteModelTarget.name);
-      pushToast({ type: "success", text: `Đã xoá model ${deleteModelTarget.name}` });
+      const result = await client.deleteModel(deleteModelTarget.name);
+      reportServing(result, `Đã xoá model ${deleteModelTarget.name}.`);
     } catch (error) {
       const detail = error instanceof ApiError ? error.detail : null;
       pushToast({
@@ -181,10 +198,18 @@ export default function Models({ onNavigateToOverview }) {
                           <RelativeTime iso={version.created_at} />
                         </td>
                         <td>
+                          <div className="row-actions">
+                            <button
+                              className="btn-ghost"
+                              onClick={() => setCardTarget({ modelName: model.name, version: version.version })}
+                              aria-label={`Model card của version ${version.version}`}
+                            >
+                              <FileText size={14} /> Model card
+                            </button>
                           {/* Champion row gets neither button: promoting it is a
                               no-op and deleting it is refused with a 409. */}
                           {!version.is_champion && (
-                            <div className="row-actions">
+                            <>
                               <button
                                 className="btn-secondary"
                                 disabled={promoting || deleting}
@@ -206,8 +231,9 @@ export default function Models({ onNavigateToOverview }) {
                               >
                                 <Trash2 size={14} /> Xoá
                               </button>
-                            </div>
+                            </>
                           )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -231,10 +257,18 @@ export default function Models({ onNavigateToOverview }) {
             {promoteTarget.toVersion}.
           </p>
           <p className="warn-note">
-            Alias đổi ngay trong Model Registry, nhưng dịch vụ serving chỉ nạp lại champion lúc khởi động hoặc khi
-            được gọi <code>/reload</code>. Serving có thể vẫn trả lời bằng model cũ cho tới lúc đó.
+            Alias đổi ngay trong Model Registry, rồi prediction service được yêu cầu nạp lại. Kết quả sẽ cho biết
+            serving đã thật sự chuyển sang version này hay chưa. Đây là cách rollback khi version mới gặp vấn đề.
           </p>
         </ConfirmDialog>
+      )}
+
+      {cardTarget && (
+        <ModelCardDialog
+          modelName={cardTarget.modelName}
+          version={cardTarget.version}
+          onClose={() => setCardTarget(null)}
+        />
       )}
 
       {deleteTarget && (
@@ -270,10 +304,9 @@ export default function Models({ onNavigateToOverview }) {
             version và alias champion.
           </p>
           <p className="warn-note">
-            Không hoàn tác được. Sau khi xoá, <code>serving</code> vẫn trả lời bằng model đang nằm sẵn trong bộ nhớ
-            cho tới lần khởi động lại hoặc <code>/reload</code> kế tiếp; từ đó trở đi <code>/predict</code> trả 503
-            &ldquo;no champion loaded&rdquo; cho loại model này. Muốn có model trở lại thì phải chạy pipeline train
-            và qua được cổng promote.
+            Không hoàn tác được. Prediction service được yêu cầu nạp lại ngay, nên <b>ngừng dùng model này</b> và
+            <code>/predict</code> trả 503 &ldquo;no champion loaded&rdquo; cho bài toán này. Muốn có model trở lại thì
+            phải chạy pipeline train và qua được evaluation gate.
           </p>
         </ConfirmDialog>
       )}

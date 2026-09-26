@@ -35,6 +35,7 @@ function Router({ page, setPage, prefillTaskType, setPrefillTaskType }) {
             setPrefillTaskType(taskType);
             setPage("overview");
           }}
+          onOpenData={() => setPage("data")}
         />
       );
     default:

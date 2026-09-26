@@ -32,8 +32,8 @@ export default function EvidentlyReport({ url, reportKey, onCopyKey }) {
     return (
       <div className="evidently-placeholder">
         <p>
-          Lần đo này <b>không sinh báo cáo Evidently</b> — không có dự đoán nào trong cửa sổ theo dõi, nên monitor
-          dừng trước khi chạy Evidently.
+          Lần đo này <b>không sinh báo cáo Evidently</b> — cửa sổ theo dõi có dưới 50 dự đoán, quá ít để đo, nên
+          monitor dừng trước khi chạy Evidently và mọi mục là &ldquo;chưa đủ dữ liệu&rdquo;.
         </p>
       </div>
     );
@@ -51,8 +51,8 @@ export default function EvidentlyReport({ url, reportKey, onCopyKey }) {
           </p>
           <p className="evidently-sub">
             Evidently chỉ kết luận theo <b>tỉ lệ cột bị lệch</b> (ngưỡng 0,5), nên nó có thể ghi &ldquo;Dataset Drift
-            is NOT detected&rdquo; trong khi ô Data drift ở trên báo cảnh báo: mức đó còn tính thêm luật độ lớn của
-            Plan 4, vốn sinh ra để bắt trường hợp drift dồn vào một hai cột.
+            is NOT detected&rdquo; trong khi ô Data drift ở trên báo cảnh báo: mức đó do hệ thống tự xếp, còn tính
+            thêm luật độ lớn, vốn sinh ra để bắt trường hợp drift dồn vào một hai cột.
           </p>
         </div>
         <div className="evidently-actions">

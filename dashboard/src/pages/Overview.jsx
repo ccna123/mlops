@@ -288,7 +288,7 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
             <input value={datasetVersion} onChange={(event) => setDatasetVersion(event.target.value)} />
           </label>
           <label className="field">
-            <span>Số dòng dùng để train</span>
+            <span>Số dòng train (lấy ngẫu nhiên từ train set)</span>
             <input
               type="number"
               min="1"
@@ -301,7 +301,8 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
 
         <label className="checkbox-row">
           <input type="checkbox" checked={useAllRows} onChange={(event) => setUseAllRows(event.target.checked)} />
-          Dùng toàn bộ dòng (2.012.000 dòng — chậm hơn và tốn RAM hơn đáng kể)
+          Dùng toàn bộ train set (chậm hơn và tốn RAM hơn đáng kể). Test set luôn giữ nguyên, không phụ thuộc số
+          dòng train.
         </label>
         <label className="checkbox-row">
           <input
@@ -317,7 +318,7 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
             checked={tuneHyperparameters}
             onChange={(event) => setTuneHyperparameters(event.target.checked)}
           />
-          Tối ưu hyperparameter bằng Grid Search CV (chậm hơn — bỏ trống thì dùng hyperparameter mặc định)
+          Hyperparameter tuning (time-based cross-validation, chậm hơn — bỏ trống thì dùng hyperparameter mặc định)
         </label>
 
         <button className="btn-primary" disabled={!taskType || Boolean(activeRun)} onClick={openConfirm}>
@@ -429,16 +430,16 @@ export default function Overview({ prefillTaskType, onConsumePrefill }) {
             Model: <b>{taskType === "regression" ? "Hồi quy giá nhà" : "Phân loại cần cải tạo"}</b>
           </p>
           <p>
-            Thuật toán: <b>{estimatorName || "mặc định của pipeline"}</b>
+            Thuật toán: <b>{estimatorName || "mặc định của pipeline (xgboost)"}</b>
           </p>
           <p>
-            Hyperparameter: <b>{tuneHyperparameters ? "tối ưu bằng Grid Search CV" : "mặc định"}</b>
+            Hyperparameter: <b>{tuneHyperparameters ? "tuning bằng time-based cross-validation" : "mặc định"}</b>
           </p>
           <p>
             Phiên bản dữ liệu: <b>{datasetVersion}</b>
           </p>
           <p>
-            Quy mô: <b>{useAllRows ? "toàn bộ dòng" : `${sampleRows} dòng`}</b>
+            Số dòng train: <b>{useAllRows ? "toàn bộ train set" : `${sampleRows} dòng, lấy ngẫu nhiên từ train set`}</b>
           </p>
           <p>
             Xử lý lại dữ liệu: <b>{forceReprocess ? "có" : "không"}</b>
