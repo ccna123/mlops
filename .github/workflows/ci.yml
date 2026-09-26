@@ -1,0 +1,93 @@
+# CI: runs on every push and pull request (要件定義書 PCN-28, 基本設計書 11.6).
+#
+# A change that breaks any job must not be merged into main. That last part is
+# a repository setting, not this file: in GitHub, Settings -> Branches -> add a
+# protection rule for main that requires these checks to pass.
+#
+# The scripts that run against the live stack (scripts/verify_*.ps1) and the
+# dashboard check in a browser stay manual: they need the whole system running.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    name: lint, boundaries, tests, alert config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12 is what every container runs (CLAUDE.md, constraint 4).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "common[dev]" \
+            "mlflow>=2.14,<3" "fastapi>=0.115" "uvicorn>=0.30" "httpx>=0.27" \
+            "python-multipart>=0.0.9" "prometheus-client>=0.20" "evidently>=0.7,<0.8"
+
+      - name: 1. Lint
+        run: ruff check .
+
+      - name: 3. Component boundaries
+        # Dashboard calls only the backend layer (PCN-13); model building and
+        # serving never import row-dropping code (PCN-09); only storage.py
+        # builds object storage keys (PCN-15). Also part of the full run below;
+        # run first so a boundary break is named as such.
+        run: python -m pytest common/tests/test_boundaries.py -q
+
+      - name: 2. Tests
+        run: python -m pytest common/ services/ -q
+
+      - name: 5. Alert configuration
+        run: |
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz \
+            | tar xz --strip-components=1 -C /usr/local/bin prometheus-2.54.1.linux-amd64/promtool
+          python scripts/check_alert_config.py
+
+  dashboard:
+    name: dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Build
+        working-directory: dashboard
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+  images:
+    name: 4. build images in order
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Base first, then everything FROM it: an image built on a stale base
+      # keeps the old ml_common inside (CLAUDE.md, "build lai ca nam tang").
+      - name: ml-base, with the commit it was built from
+        run: |
+          commit="$(git rev-parse --short HEAD)"
+          docker build -f stages/base/Dockerfile --build-arg "GIT_COMMIT=$commit" -t ml-base:latest .
+      - name: stage images
+        run: |
+          for stage in extract validate prepare_dataset_for_train train evaluate register monitor build_feedback; do
+            docker build -f "stages/$stage/Dockerfile" -t "ml-$stage:ci" .
+          done
+      - name: service images
+        run: |
+          docker build -f services/serving/Dockerfile -t ml-serving:ci .
+          docker build -f services/agent/Dockerfile -t ml-agent:ci .
+          docker build -f services/api/Dockerfile -t ml-api:ci .
+      - name: the commit is baked into the image
+        run: docker run --rm ml-base:latest sh -c 'test "$GIT_COMMIT" != unknown && echo "$GIT_COMMIT"'
