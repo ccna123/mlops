@@ -301,9 +301,9 @@ def feature_severity(drifted_share: float, margins: list[float] | None = None) -
         feature_severity(0.4)   # -> "warning"
         feature_severity(0.8)   # -> "high"
 
-        # market_shift: share alone says "ok" (2/22 = 0.0909, same as a
-        # clean run), but the magnitude of those 2 columns' drift tells a
-        # different story:
+        market_shift: share alone says "ok" (2/22 = 0.0909, same as a
+        clean run), but the magnitude of those 2 columns' drift tells a
+        different story:
         feature_severity(0.0909, margins=[0.3901])   # -> "warning"
     """
     if drifted_share > FEATURE_HIGH_SHARE:
