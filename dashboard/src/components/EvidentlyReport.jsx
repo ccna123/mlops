@@ -4,11 +4,15 @@ import { Copy, ExternalLink, FileBarChart } from "lucide-react";
 /**
  * Shows Evidently's own HTML report for one monitoring run.
  *
- * What it adds over the strips above: Evidently's per-column view — which
- * feature drifted, by how much, with the distributions drawn. What it cannot
- * do: say anything about the other runs, or about performance. It is the
- * detail behind one point of the history, so it sits next to the history
- * rather than in place of it.
+ * What it adds over the strips above: Evidently's own view of every section
+ * of this run — which feature drifted and how, a summary of each column, the
+ * prediction distribution and the performance plots (residuals, or confusion
+ * matrix and ROC), served records drawn over the test set. Input quality is
+ * not on it: its verdict is the
+ * InputQuality table on this screen. What it cannot do: say
+ * anything about the other runs. It is the detail behind one point of the
+ * history, so it sits next to the history rather than in place of it.
+ * Reports written before 2026-09-26 hold the data drift section only.
  *
  * The report is fetched from the API, never from MinIO: the browser has no
  * storage credentials and must not get any (design doc section 8.2). It is
@@ -44,10 +48,13 @@ export default function EvidentlyReport({ url, reportKey, onCopyKey }) {
       <div className="evidently-head">
         <div>
           <p className="evidently-title">
-            <FileBarChart size={15} /> Báo cáo Evidently (chi tiết từng cột)
+            <FileBarChart size={15} /> Báo cáo Evidently (chi tiết lần đo)
           </p>
           <p className="evidently-sub">
-            Đây là báo cáo feature drift của <b>riêng lần đo này</b> — không có lịch sử và không có performance.
+            Chi tiết của <b>riêng lần đo này</b>, không có lịch sử: data drift, tổng quan từng cột, prediction
+            drift và performance (khi có đủ ground truth). Ở phần performance, &ldquo;current&rdquo; là traffic thật
+            còn &ldquo;reference&rdquo; là tập test, vẽ chồng lên nhau. Chất lượng input xem ở bảng phía trên. Báo cáo
+            viết trước ngày 26/9/2026 chỉ có phần data drift.
           </p>
           <p className="evidently-sub">
             Evidently chỉ kết luận theo <b>tỉ lệ cột bị lệch</b> (ngưỡng 0,5), nên nó có thể ghi &ldquo;Dataset Drift

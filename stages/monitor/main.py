@@ -20,6 +20,11 @@ The four sections:
 
 The reference is the train set traced back through MLflow
 (`ml_common.lineage`), not the baseline profile: Evidently takes DataFrames.
+
+The drift sections' Evidently results also go on ONE report page
+(`combined_html`), beside two display-only presets - a data summary and the
+full performance picture - that nothing reads numbers from. Input quality
+stays off the page; see REPORT_SECTION_TITLES.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from datetime import UTC, datetime
 import mlflow
 import mlflow.artifacts
 import mlflow.sklearn
+import pandas as pd
 from mlflow import MlflowClient
 
 from ml_common import drift, pushgateway, schema
@@ -54,6 +60,23 @@ DEFAULT_WINDOW_HOURS = 24
 DEFAULT_REFERENCE_ROWS = 10_000
 REFERENCE_SEED = 42
 
+# The sections of the one Evidently page the dashboard embeds, in page order.
+# "data_summary" and "performance" are display-only: nothing is read from
+# them, so the levels are decided exactly as before they existed.
+#
+# Input quality is left off on purpose. Its two reports (served, train) only
+# make sense subtracted from each other, which Evidently does not do, and each
+# "out of list" tile prints every known category in its title - a wall of
+# zipcodes. The verdict, the offending columns only, is on the dashboard
+# (InputQuality.jsx), and the per-column missing counts are in data_summary.
+REPORT_SECTION_TITLES = {
+    "feature": "Data drift - served records vs train sample",
+    "data_summary": "Data summary - served records vs train sample",
+    "prediction": "Prediction drift - served predictions vs predictions on the train sample",
+    "performance": (
+        "Performance - served records with ground truth (current) vs test set (reference)"
+    ),
+}
 
 
 def load_champion_context(model_name: str) -> tuple[object, str, str, str]:
@@ -191,7 +214,7 @@ def run_drift_report(reference, current, numeric: list[str], categorical: list[s
 
     Example:
         results = run_drift_report(ref, cur, numeric, categorical)
-        results.save_html("/tmp/evidently.html")
+        combined_html([("Data drift", results)])
 
         # NOTE the argument order below: current comes FIRST. Swapping them
         # still runs and still produces a report - it just measures whether
@@ -217,6 +240,80 @@ def run_drift_report(reference, current, numeric: list[str], categorical: list[s
     )
 
 
+def data_summary_report(reference, current, numeric: list[str], categorical: list[str]):
+    """Has Evidently describe every compared column, served records beside the train sample.
+
+    Display-only: it goes on the report page and nothing reads its numbers.
+    Takes the same columns as `run_drift_report`, subset the same way, so the
+    summary describes exactly what the drift section tested.
+
+    Args:
+        reference: cleaned train sample.
+        current: cleaned served records.
+        numeric: numeric column names.
+        categorical: categorical column names.
+
+    Returns:
+        Evidently's result object, for `combined_html`.
+
+    Example:
+        snapshot = data_summary_report(reference_clean, current_clean, numeric, categorical)
+        combined_html([("Data summary", snapshot)])
+    """
+    from evidently import DataDefinition, Dataset, Report
+    from evidently.presets import DataSummaryPreset
+
+    compared_columns = [*numeric, *categorical]
+    definition = DataDefinition(numerical_columns=numeric, categorical_columns=categorical)
+    # No pass/fail checks on the page: Report defaults to include_tests=False,
+    # and thresholds belong to ml_common.drift. Do NOT pass include_tests=False
+    # to the preset itself - in evidently 0.7.23 that makes rendering look up a
+    # metric that was never computed (KeyError in core/report.py).
+    return Report([DataSummaryPreset()]).run(
+        Dataset.from_pandas(current[compared_columns], data_definition=definition),
+        Dataset.from_pandas(reference[compared_columns], data_definition=definition),
+    )
+
+
+def _performance_dataset(joined, task_type: str):
+    """Wraps the rows with ground truth as an Evidently Dataset for either task type.
+
+    Args:
+        joined: predictions joined to outcomes: `actual`, `prediction`, and
+            for classification `probability`.
+        task_type: "regression" or "classification".
+
+    Returns:
+        An Evidently Dataset whose definition names the target and the
+        prediction (the probability, for classification).
+
+    Example:
+        _performance_dataset(joined, "regression")  # -> Dataset(actual, prediction)
+    """
+    from evidently import BinaryClassification, DataDefinition, Dataset, Regression
+
+    if task_type == "regression":
+        frame = joined[["actual", "prediction"]].astype(float)
+        definition = DataDefinition(
+            numerical_columns=["actual", "prediction"],
+            regression=[Regression(target="actual", prediction="prediction")],
+        )
+    else:
+        frame = joined[["actual", "probability"]].copy()
+        frame["actual"] = frame["actual"].astype(bool).astype(int)
+        frame["probability"] = frame["probability"].astype(float)
+        definition = DataDefinition(
+            numerical_columns=["probability"],
+            categorical_columns=["actual"],
+            classification=[
+                BinaryClassification(
+                    target="actual", prediction_probas="probability", pos_label=1
+                )
+            ],
+        )
+    return Dataset.from_pandas(frame, data_definition=definition)
+
+
 def performance_report(joined, task_type: str, threshold: float):
     """Has Evidently compute the performance metrics on the rows with ground truth.
 
@@ -237,28 +334,11 @@ def performance_report(joined, task_type: str, threshold: float):
         adapter.performance_metrics(summary, "regression")  # -> {"rmse": ...}
     """
     import evidently.metrics as em
-    from evidently import BinaryClassification, DataDefinition, Dataset, Regression, Report
+    from evidently import Report
 
     if task_type == "regression":
-        frame = joined[["actual", "prediction"]].astype(float)
-        definition = DataDefinition(
-            numerical_columns=["actual", "prediction"],
-            regression=[Regression(target="actual", prediction="prediction")],
-        )
         metrics = [em.RMSE(), em.MAE(), em.R2Score()]
     else:
-        frame = joined[["actual", "probability"]].copy()
-        frame["actual"] = frame["actual"].astype(bool).astype(int)
-        frame["probability"] = frame["probability"].astype(float)
-        definition = DataDefinition(
-            numerical_columns=["probability"],
-            categorical_columns=["actual"],
-            classification=[
-                BinaryClassification(
-                    target="actual", prediction_probas="probability", pos_label=1
-                )
-            ],
-        )
         metrics = [
             em.RocAuc(),
             em.F1Score(probas_threshold=threshold),
@@ -266,7 +346,88 @@ def performance_report(joined, task_type: str, threshold: float):
             em.Recall(probas_threshold=threshold),
             em.Accuracy(probas_threshold=threshold),
         ]
-    return Report(metrics).run(Dataset.from_pandas(frame, data_definition=definition), None)
+    return Report(metrics).run(_performance_dataset(joined, task_type), None)
+
+
+def performance_detail_report(joined, task_type: str, threshold: float, reference=None):
+    """Has Evidently draw the full performance picture on the rows with ground truth.
+
+    Display-only: residual plots and error distribution for regression,
+    confusion matrix and ROC/PR curves for classification. The numbers the
+    verdict is graded on still come from `performance_report`.
+
+    The reference, when given, is the champion scored on its TEST split
+    (`test_set_performance_frame`), never the train split: train performance
+    is the wrong yardstick (see `test_metrics_of`). With it, Evidently draws
+    both on the same axes - the error distribution of live traffic laid over
+    the one the model had when it was accepted.
+
+    Args:
+        joined: predictions joined to outcomes, as for `performance_report`.
+        task_type: "regression" or "classification".
+        threshold: the champion's decision threshold (classification).
+        reference: the same columns for the test split, or None to draw the
+            served records alone.
+
+    Returns:
+        Evidently's result object, for `combined_html`.
+
+    Example:
+        snapshot = performance_detail_report(joined, "regression", 0.5, reference=test_frame)
+        # -> error distribution with a "current" and a "reference" histogram
+    """
+    from evidently import Report
+    from evidently.presets import ClassificationPreset, RegressionPreset
+
+    # Presets left at their defaults - see data_summary_report on include_tests.
+    if task_type == "regression":
+        preset = RegressionPreset()
+    else:
+        preset = ClassificationPreset(probas_threshold=threshold)
+    reference_dataset = (
+        None if reference is None else _performance_dataset(reference, task_type)
+    )
+    return Report([preset]).run(_performance_dataset(joined, task_type), reference_dataset)
+
+
+def test_set_performance_frame(model, test_df, task_type: str, threshold: float, rows: int):
+    """Scores the champion on (a sample of) its test split, shaped like the served rows.
+
+    Sampled with the same seed and cap as the train sample the drift
+    sections use, so the page stays the same size whether the pipeline ran
+    on 200 thousand rows or two million. The Reference numbers Evidently
+    shows are therefore those of this sample; `test_*` in MLflow, which the
+    verdict reads, is the whole split, so the two can differ slightly.
+
+    Args:
+        model: the fitted champion Pipeline; it takes raw columns.
+        test_df: the champion's raw test split, target column included.
+        task_type: "regression" or "classification".
+        threshold: the champion's decision threshold (classification).
+        rows: the most rows to score.
+
+    Returns:
+        A DataFrame with `actual` and `prediction` - plus `probability`
+        between them for classification - the columns `_performance_dataset`
+        reads from the served side.
+
+    Example:
+        test_set_performance_frame(model, test_df, "regression", 0.5, 10_000)
+        # -> DataFrame[actual, prediction], at most 10,000 rows
+    """
+    if len(test_df) > rows:
+        test_df = test_df.sample(n=rows, random_state=REFERENCE_SEED)
+    target = schema.target_column(task_type)
+    features = test_df.drop(columns=[target])
+    actual = test_df[target].to_numpy()
+    if task_type == "regression":
+        return pd.DataFrame({"actual": actual, "prediction": model.predict(features)})
+    probability = model.predict_proba(features)[:, 1]
+    return pd.DataFrame({
+        "actual": actual.astype(bool),
+        "probability": probability,
+        "prediction": probability >= threshold,
+    })
 
 
 def known_categories(train_df, columns: list[str]) -> dict[str, list]:
@@ -328,6 +489,64 @@ def quality_report(frame, numeric: list[str], categorical: list[str], categories
     for column in categorical:
         subset[column] = subset[column].astype(object).where(subset[column].notna(), None)
     return Report(metrics).run(Dataset.from_pandas(subset, data_definition=definition), None)
+
+
+def combined_html(sections: list[tuple[str, object]]) -> bytes:
+    """Renders several Evidently results as one page, one titled section each.
+
+    Evidently runs a Report over a single current/reference pair, and the
+    monitoring sections do not share one: performance has only the rows with
+    ground truth and no reference, and folding the prediction column into
+    the drift dataset would change the drifted-column share the verdict is
+    graded on. So each section keeps its own run and only the rendering is
+    merged - the same thing `Snapshot.get_html_str` does for one result,
+    done for several.
+
+    `_widgets`, `group_widget` and `render_widgets` are Evidently internals;
+    the Dockerfile pins evidently<0.8 and test_monitor_stage.py fails if an
+    upgrade moves them.
+
+    Args:
+        sections: (title, Evidently result) pairs, in page order.
+
+    Returns:
+        The standalone HTML page as UTF-8 bytes.
+
+    Example:
+        combined_html([("Data drift", feature_report), ("Input quality", quality)])
+        # -> b"<html>..." with a "Data drift" section then an "Input quality" one
+    """
+    from evidently.core.report import render_widgets
+    from evidently.legacy.renderers.html_widgets import group_widget
+
+    widgets = [
+        group_widget(title=title, widgets=snapshot._widgets) for title, snapshot in sections
+    ]
+    return render_widgets(widgets, as_iframe=False).encode("utf-8")
+
+
+def _display_only(name: str, build):
+    """Builds something that only goes on the page, without letting it fail the run.
+
+    Args:
+        name: what is being built, for the log line.
+        build: a no-argument callable returning an Evidently result, or the
+            test-set frame a section is drawn against.
+
+    Returns:
+        The result, or None when building it raised. A preset choking on
+        unusual traffic (say, one class only), or a test split gone from
+        storage, must not cost the verdict, which the alerts read; the
+        section is left off the page, or drawn without its reference.
+
+    Example:
+        _display_only("data_summary", lambda: data_summary_report(ref, cur, num, cat))
+    """
+    try:
+        return build()
+    except Exception as error:  # broad on purpose - see Returns
+        print(f"WARNING: report section {name} left out: {error!r}", file=sys.stderr)
+        return None
 
 
 def flush_result() -> dict | None:
@@ -548,6 +767,32 @@ def main() -> int:
     )
     quality = drift.input_quality(quality_reference, quality_current, n_predictions)
 
+    # The page. The two display-only presets run last, after every level is
+    # decided, so they cannot change one.
+    data_summary = _display_only("data_summary", lambda: data_summary_report(
+        reference_clean, current_clean, shared_numeric, shared_categorical
+    ))
+    performance_detail = None
+    if len(joined) >= drift.MIN_GROUND_TRUTH:
+        test_frame = _display_only("performance reference", lambda: test_set_performance_frame(
+            model, storage.read_parquet(processed_key(data_id, task_type, "test")),
+            task_type, threshold or 0.5, reference_rows,
+        ))
+        performance_detail = _display_only("performance", lambda: performance_detail_report(
+            joined, task_type, threshold or 0.5, reference=test_frame
+        ))
+    sections = {
+        "feature": feature_report,
+        "data_summary": data_summary,
+        "prediction": prediction_report,
+        "performance": performance_detail,
+    }
+    html = combined_html([
+        (REPORT_SECTION_TITLES[name], snapshot)
+        for name, snapshot in sections.items()
+        if snapshot is not None
+    ])
+
     parts = {
         "feature": feature_part,
         "prediction": prediction_part,
@@ -562,9 +807,6 @@ def main() -> int:
                           "reference": reference_group_metrics(champion_run_id)},
         "report_key": report_key(model_name, run_id, "html"),
     })
-    feature_report.save_html("/tmp/evidently.html")
-    with open("/tmp/evidently.html", "rb") as handle:
-        html = handle.read()
     return _publish(storage, summary, parts, feature_summary=feature_summary, html=html)
 
 

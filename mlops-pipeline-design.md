@@ -549,6 +549,8 @@ Chưa có số đo cho mô hình cải tạo.
 
 Evidently chỉ trả kết quả của phía "current", nên mục data quality chạy hai lần: một lần trên lưu lượng, một lần trên mốc. Chỉ số hiệu năng Evidently tính **trùng khớp** với chỉ số `evaluate` tính trên cùng dữ liệu — một test kiểm tra điều này, vì chúng được chia cho nhau.
 
+**Trang báo cáo (`evidently.html`).** Các report được render vào **một** trang, mỗi report một mục có tiêu đề: data drift, tổng quan dữ liệu, prediction drift, performance. Data quality **không** lên trang: hai report của nó chỉ có nghĩa khi trừ cho nhau, việc Evidently không làm, và mỗi ô "out of list" in cả danh sách category trong tiêu đề. Kết luận của mục này (chỉ các cột vi phạm) nằm trên màn Drift của dashboard; tỉ lệ thiếu từng cột có trong mục tổng quan dữ liệu. Hai mục chỉ để xem, không số nào của chúng được đọc để xếp mức: tổng quan dữ liệu (`DataSummaryPreset`, cùng cột với data drift) và performance (`RegressionPreset` / `ClassificationPreset` tại decision threshold, trên các dòng có ground truth, **mốc là tập test** của champion — `processed/.../test`, lấy mẫu tối đa `MONITOR_REFERENCE_ROWS` dòng cùng seed với mẫu train, champion dự đoán lại trên đó; không bao giờ là tập huấn luyện, sai thước đo). Nhờ mốc này, phân bố sai số của lưu lượng và của tập test nằm chồng trên cùng một biểu đồ. Vì là mẫu, số "Reference" trên trang có thể lệch nhẹ so với `test_*` (tính trên cả tập test) mà mức performance drift dùng. Mục performance chỉ có khi đủ `MONITOR_MIN_GROUND_TRUTH` dòng; không đọc được tập test thì mục vẫn hiện, chỉ không có mốc. Không gộp thành một `Report` vì Evidently chạy một report trên đúng một cặp current/reference, còn các mục không cùng dữ liệu; và thêm cột `prediction` vào report data drift sẽ đổi tỉ lệ cột trôi. Một mục chỉ-để-xem lỗi thì bị bỏ khỏi trang kèm WARNING trong log, không làm hỏng lần đo.
+
 **Luật xếp mức** (ở `drift.py`):
 
 | Mục | `ok` | `warning` | `high` |
@@ -574,7 +576,7 @@ Data quality dùng dữ liệu **sau** các bước làm sạch của chính mô
 | --- | --- |
 | `reports/{model}/{run_id}/summary.json` | `model_name`, `model_version`, `task_type`, `run_id`, `computed_at`, `window_hours`, `severity`, `parts` (bốn mục), `input_quality` (mức và các cột vi phạm), `n_predictions`, `n_ground_truth`, `current_metrics`, `reference_metrics`, `reference_source`, `decision_threshold`, `group_metrics` (`current`: theo thành phố và loại nhà trên lưu lượng, nhóm ≥ 50 cặp; `reference`: của champion trên tập test), `flush` (kết quả ghi log trước khi đo), `consecutive_warnings` (số lần liên tiếp ở `warning` của từng mục, bắt đầu lại khi đổi champion), `report_key` |
 | `reports/{model}/latest.json` | Bản sao của summary mới nhất, ghi đè mỗi lần |
-| `reports/{model}/{run_id}/evidently.html` | Báo cáo chi tiết data drift của Evidently, khoảng 5 MB |
+| `reports/{model}/{run_id}/evidently.html` | Một trang Evidently gồm mọi mục của lần đo (xem dưới bảng mục), vài MB. Trang viết trước 26/09/2026 chỉ có data drift |
 
 Mọi nơi đọc summary phải chịu được việc thiếu trường: summary trước 22/09/2026 không có `reference_metrics`/`reference_source`; summary trước phiên bản 4 không có `input_quality`, `group_metrics`, `flush`, `consecutive_warnings`, `decision_threshold`.
 

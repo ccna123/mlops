@@ -75,6 +75,116 @@ def test_quality_report_counts_missing_and_unseen_after_cleaning(monitor):
     assert numbers["city"]["unseen_share"] == pytest.approx(1 / 3)
 
 
+def _regression_joined(seed: int = 1) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    actual = rng.normal(400_000, 80_000, 200)
+    return pd.DataFrame({"actual": actual, "prediction": actual + rng.normal(0, 30_000, 200)})
+
+
+def test_performance_detail_report_renders_regression_plots(monitor):
+    snapshot = monitor.performance_detail_report(_regression_joined(), "regression", 0.5)
+    assert len(snapshot._widgets) > 3
+
+
+def test_performance_detail_report_renders_classification_at_the_threshold(monitor):
+    rng = np.random.default_rng(2)
+    actual = rng.random(200) < 0.25
+    probability = np.clip(actual * 0.3 + rng.random(200) * 0.7, 0, 1)
+    joined = pd.DataFrame({"actual": actual, "probability": probability,
+                           "prediction": probability >= 0.35})
+    snapshot = monitor.performance_detail_report(joined, "classification", 0.35)
+    assert len(snapshot._widgets) > 3
+
+
+def _trace_names(snapshot) -> set[str]:
+    import json
+    import re
+
+    names: set[str] = set()
+    for widget in snapshot._widgets:
+        names.update(re.findall(r'"name": "([^"]{1,40})"', json.dumps(widget.dict(), default=str)))
+    return names
+
+
+def test_performance_detail_report_overlays_the_test_set_error_distribution(monitor):
+    served = _regression_joined(1).assign(prediction=lambda f: f["prediction"] - 80_000)
+    snapshot = monitor.performance_detail_report(
+        served, "regression", 0.5, reference=_regression_joined(2)
+    )
+    assert {"current", "reference"} <= _trace_names(snapshot)
+
+
+def test_performance_detail_report_takes_a_classification_reference(monitor):
+    def joined(seed):
+        rng = np.random.default_rng(seed)
+        actual = rng.random(200) < 0.25
+        probability = np.clip(actual * 0.3 + rng.random(200) * 0.7, 0, 1)
+        return pd.DataFrame({"actual": actual, "probability": probability,
+                             "prediction": probability >= 0.35})
+
+    alone = monitor.performance_detail_report(joined(1), "classification", 0.35)
+    beside = monitor.performance_detail_report(
+        joined(1), "classification", 0.35, reference=joined(2)
+    )
+    assert len(beside._widgets) > len(alone._widgets)
+
+
+class _FixedModel:
+    """Predicts from the living area alone, so the expected frame is known exactly."""
+
+    def predict(self, frame):
+        return frame["living_area_sqft"].to_numpy() * 100.0
+
+    def predict_proba(self, frame):
+        p = (frame["living_area_sqft"].to_numpy() > 2000).astype(float) * 0.8 + 0.1
+        return np.column_stack([1 - p, p])
+
+
+def test_test_set_performance_frame_scores_the_champion_on_a_capped_sample(monitor):
+    test_df = pd.DataFrame({"living_area_sqft": [1000.0, 1500.0, 2500.0, 3000.0],
+                            "sale_price": [110_000.0, 140_000.0, 260_000.0, 310_000.0]})
+    frame = monitor.test_set_performance_frame(_FixedModel(), test_df, "regression", 0.5, 3)
+    assert list(frame.columns) == ["actual", "prediction"]
+    assert len(frame) == 3
+    assert (frame["prediction"] == frame["actual"].map(
+        dict(zip(test_df["sale_price"], test_df["living_area_sqft"] * 100.0, strict=True))
+    )).all()
+
+
+def test_test_set_performance_frame_for_classification_applies_the_threshold(monitor):
+    test_df = pd.DataFrame({"living_area_sqft": [1000.0, 2500.0],
+                            "needs_renovation": [False, True]})
+    frame = monitor.test_set_performance_frame(_FixedModel(), test_df, "classification", 0.5, 10)
+    assert list(frame.columns) == ["actual", "probability", "prediction"]
+    assert frame["probability"].tolist() == pytest.approx([0.1, 0.9])
+    assert frame["prediction"].tolist() == [False, True]
+    assert frame["actual"].tolist() == [False, True]
+
+
+def test_data_summary_report_compares_only_the_named_columns(monitor):
+    rng = np.random.default_rng(3)
+    current = pd.DataFrame({"a": rng.normal(0, 1, 100), "c": rng.choice(["x", "y"], 100),
+                            "property_id": [f"p{i}" for i in range(100)]})
+    reference = current.assign(a=rng.normal(0.5, 1, 100))
+    snapshot = monitor.data_summary_report(reference, current, ["a"], ["c"])
+    html = monitor.combined_html([("Data summary", snapshot)]).decode("utf-8")
+    assert "property_id" not in html
+
+
+def test_combined_html_is_one_page_with_a_titled_section_per_report(monitor):
+    performance = monitor.performance_detail_report(_regression_joined(), "regression", 0.5)
+    quality = monitor.quality_report(
+        pd.DataFrame({"bedrooms": [3.0, None], "city": ["boston", None]}),
+        ["bedrooms"], ["city"], {"city": ["boston"]},
+    )
+    html = monitor.combined_html(
+        [("Performance on served traffic", performance), ("Input quality", quality)]
+    ).decode("utf-8")
+    assert html.count("<html") == 1
+    assert "Performance on served traffic" in html
+    assert "Input quality" in html
+
+
 def _raw_houses(n: int, seed: int) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     living = rng.uniform(800, 4000, n)
@@ -92,7 +202,8 @@ def _raw_houses(n: int, seed: int) -> pd.DataFrame:
     })
 
 
-def test_main_writes_a_summary_with_all_four_sections(monitor, tmp_path, monkeypatch):
+def _run_main(monitor, tmp_path, monkeypatch, *, with_test_split: bool = True) -> tuple[dict, str]:
+    """Runs main() against moto and a file MLflow store; returns (summary, report html)."""
     import json as _json
     from datetime import UTC, datetime
 
@@ -124,6 +235,10 @@ def test_main_writes_a_summary_with_all_four_sections(monitor, tmp_path, monkeyp
         version = mlflow.register_model(f"runs:/{run.info.run_id}/model", "m").version
         MlflowClient().set_registered_model_alias("m", "champion", version)
         store.write_parquet(train, storage_module.processed_key("dataid", "regression", "train"))
+        if with_test_split:
+            store.write_parquet(
+                _raw_houses(150, 3), storage_module.processed_key("dataid", "regression", "test")
+            )
 
         served = _raw_houses(120, 2)
         now = datetime.now(UTC)
@@ -150,11 +265,59 @@ def test_main_writes_a_summary_with_all_four_sections(monitor, tmp_path, monkeyp
         assert monitor.main() == 0
 
         summary = store.read_json(storage_module.drift_latest_key("m"))
-        assert set(summary["parts"]) == {"feature", "prediction", "performance", "input_quality"}
-        assert summary["parts"]["performance"] in ("ok", "warning", "high")
-        assert set(summary["current_metrics"]) == {"rmse", "mae", "r2"}
-        assert summary["input_quality"]["level"] in ("ok", "warning", "high")
-        assert summary["flush"]["ok"] is True
-        assert summary["group_metrics"]["current"]["city"]["boston"]["n"] >= 1
-        assert set(summary["consecutive_warnings"]) == set(summary["parts"])
-        assert store.exists(storage_module.report_key("m", "run1", "html"))
+        html = store.read_bytes(storage_module.report_key("m", "run1", "html")).decode("utf-8")
+    return summary, html
+
+
+def test_main_writes_a_summary_with_all_four_sections(monitor, tmp_path, monkeypatch):
+    summary, _ = _run_main(monitor, tmp_path, monkeypatch)
+    assert set(summary["parts"]) == {"feature", "prediction", "performance", "input_quality"}
+    assert summary["parts"]["performance"] in ("ok", "warning", "high")
+    assert set(summary["current_metrics"]) == {"rmse", "mae", "r2"}
+    assert summary["input_quality"]["level"] in ("ok", "warning", "high")
+    assert summary["flush"]["ok"] is True
+    assert summary["group_metrics"]["current"]["city"]["boston"]["n"] >= 1
+    assert set(summary["consecutive_warnings"]) == set(summary["parts"])
+
+
+def test_main_report_page_holds_every_section(monitor, tmp_path, monkeypatch):
+    _, html = _run_main(monitor, tmp_path, monkeypatch)
+    for title in monitor.REPORT_SECTION_TITLES.values():
+        assert title in html
+
+
+def test_main_report_page_sets_served_performance_against_the_test_set(
+    monitor, tmp_path, monkeypatch
+):
+    _, html = _run_main(monitor, tmp_path, monkeypatch)
+    assert "Reference: Model Quality" in html
+
+
+def test_main_without_a_test_split_still_grades_and_shows_served_performance_alone(
+    monitor, tmp_path, monkeypatch
+):
+    summary, html = _run_main(monitor, tmp_path, monkeypatch, with_test_split=False)
+    assert summary["parts"]["performance"] in ("ok", "warning", "high")
+    assert monitor.REPORT_SECTION_TITLES["performance"] in html
+    assert "Current: Model Quality" in html
+    assert "Reference: Model Quality" not in html
+
+
+def test_main_report_page_leaves_input_quality_to_the_dashboard(monitor, tmp_path, monkeypatch):
+    summary, html = _run_main(monitor, tmp_path, monkeypatch)
+    assert summary["input_quality"]["level"] in ("ok", "warning", "high")
+    assert "Input quality" not in html
+    assert "values out of list" not in html
+
+
+def test_a_failing_display_only_report_leaves_the_verdict_and_the_rest_of_the_page(
+    monitor, tmp_path, monkeypatch
+):
+    def broken(*args, **kwargs):
+        raise ValueError("evidently could not render this")
+
+    monkeypatch.setattr(monitor, "performance_detail_report", broken)
+    summary, html = _run_main(monitor, tmp_path, monkeypatch)
+    assert summary["parts"]["performance"] in ("ok", "warning", "high")
+    assert monitor.REPORT_SECTION_TITLES["performance"] not in html
+    assert monitor.REPORT_SECTION_TITLES["feature"] in html

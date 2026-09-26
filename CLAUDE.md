@@ -343,9 +343,19 @@ nên lần thêm nó đã phải build lại đủ năm tầng**. Trình duyệt
 MinIO; iframe trỏ vào API, dùng `sandbox="allow-scripts"` và chỉ mount khi bấm
 xem vì mỗi báo cáo khoảng 5 MB.
 
-Nhớ giới hạn của nó: Evidently chỉ có feature drift của **một** lần đo, không
-lịch sử, không performance — nó là phần chi tiết đứng cạnh ba dải lịch sử chứ
-không thay được. Và nó chấm theo luật tỉ lệ cột (ngưỡng 0,5) nên hay ghi
+Nhớ giới hạn của nó: Evidently chỉ có **một** lần đo, không lịch sử — nó là
+phần chi tiết đứng cạnh ba dải lịch sử chứ không thay được. Từ 2026-09-26 trang
+gom các mục của lần đo (data drift, tổng quan dữ liệu, prediction drift,
+performance) bằng `combined_html` trong `stages/monitor/main.py` — chất lượng
+input cố ý **không** lên trang, kết luận của nó ở bảng `InputQuality` trên màn Drift —
+dựa trên API nội bộ của Evidently (`_widgets`, `render_widgets`) — Evidently đang
+pin `<0.8`. Hai preset `DataSummaryPreset` và `Regression/ClassificationPreset`
+**chỉ để xem**, không số nào của chúng được đọc để xếp mức. Preset performance
+lấy **tập test** (mẫu ≤ 10k dòng, champion dự đoán lại) làm reference, nên phân bố
+sai số traffic và test nằm chồng lên nhau; số "Reference" trên trang vì là mẫu
+nên có thể lệch nhẹ so với `test_*` ở màn Models. Đừng truyền
+`include_tests=False` cho preset: ở 0.7.23 nó làm render `KeyError`. Báo cáo cũ
+hơn chỉ có data drift. Data drift chấm theo luật tỉ lệ cột (ngưỡng 0,5) nên hay ghi
 "Dataset Drift is NOT detected" trong khi badge Data drift báo `warning`: mức
 của ta còn tính luật độ lớn (Plan 4, Finding B). Khung báo cáo có sẵn dòng giải
 thích chuyện này.
