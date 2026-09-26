@@ -20,7 +20,13 @@ RUN mkdir -p /app/common/ml_common \
 # Now copy the actual code
 COPY common/ /app/common/
 
+# The source commit this image was built from, so every training run can log
+# it (NV-09, PCN-26). Placed last so a new commit does not rebuild the
+# dependency layers. scripts/build_base_image.ps1 passes it, suffixed with
+# "-dirty" when the working tree had uncommitted changes.
+ARG GIT_COMMIT=unknown
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    GIT_COMMIT=${GIT_COMMIT}
 
 CMD ["python", "-c", "import ml_common; print('ml-base ready, ml_common', ml_common.__version__)"]

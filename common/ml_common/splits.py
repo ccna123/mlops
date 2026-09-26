@@ -286,3 +286,26 @@ def build_manifest(dataset_version: str, listing_dates: pd.Series, row_count: in
         "split_points": {SOURCE_ORIGINAL: rule},
         "lineage": None,
     }
+
+
+def training_order(frame: pd.DataFrame) -> tuple[pd.Index, int]:
+    """Orders records for time-respecting cross-validation and threshold choice.
+
+    Args:
+        frame: a train set, with the columns `event_dates` reads.
+
+    Returns:
+        `(index, undated_rows)`: the frame's index labels with every undated
+        record first (in file order), then the dated ones from oldest to
+        newest; and how many undated records lead. Reorder with
+        `frame.loc[index]`.
+
+    Example:
+        order, undated = training_order(train_df)
+        train_df = train_df.loc[order]
+        cv = TimeOrderedSplit(5, undated_rows=undated)
+    """
+    dates = event_dates(frame)
+    undated = dates.isna() | dates.map(lambda d: d is None)
+    dated = dates[~undated].sort_values(kind="stable")
+    return frame.index[undated.to_numpy()].append(dated.index), int(undated.sum())

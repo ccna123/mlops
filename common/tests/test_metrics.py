@@ -29,14 +29,14 @@ def test_rmse_is_in_the_same_unit_as_the_target():
 
 def test_classification_keys_without_proba():
     result = compute_metrics("classification", [0, 1, 1, 0], [0, 1, 1, 0])
-    assert set(result) == {"f1", "accuracy"}
+    assert set(result) == {"f1", "precision", "recall", "accuracy"}
 
 
 def test_classification_keys_with_proba():
     result = compute_metrics(
         "classification", [0, 1, 1, 0], [0, 1, 1, 0], y_proba=[0.1, 0.9, 0.8, 0.2]
     )
-    assert set(result) == {"f1", "accuracy", "auc"}
+    assert set(result) == {"f1", "precision", "recall", "accuracy", "auc"}
 
 
 def test_all_values_are_plain_floats():

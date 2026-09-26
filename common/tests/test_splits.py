@@ -145,3 +145,10 @@ class TestBuildManifest:
         assert manifest["row_count"] == 100
         assert set(manifest["split_points"]) == {splits.SOURCE_ORIGINAL}
         assert manifest["lineage"] is None
+
+
+def test_training_order_puts_undated_first_then_oldest_to_newest():
+    frame = _listing_frame(["2021-03-01", None, "2020-01-01", "garbage", "2020-06-01"])
+    order, undated = splits.training_order(frame)
+    assert undated == 2
+    assert list(order) == [1, 3, 2, 4, 0]

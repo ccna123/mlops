@@ -152,7 +152,7 @@ def test_tune_true_wraps_the_estimator_in_grid_search_cv():
     estimator = build_estimator("regression", "ridge", tune=True)
     assert isinstance(estimator, GridSearchCV)
     assert estimator.param_grid == PARAM_GRIDS["regression"]["ridge"]
-    assert estimator.cv == CV_FOLDS
+    assert estimator.cv.n_splits == CV_FOLDS
 
 
 def test_tune_true_uses_the_metric_this_project_already_grades_models_on():
@@ -185,3 +185,95 @@ def test_tune_true_fits_every_declared_classification_estimator():
         estimator = build_estimator("classification", name, tune=True)
         estimator.fit(X, y)
         assert set(estimator.best_params_) == set(PARAM_GRIDS["classification"][name])
+
+
+# --- time-ordered CV, decision threshold, defaults --------------------------
+
+from ml_common.estimators import (  # noqa: E402
+    DEFAULT_ESTIMATOR,
+    TARGET_RECALL,
+    ThresholdedClassifier,
+    TimeOrderedSplit,
+    build_model,
+    choose_threshold,
+    decision_threshold,
+    fitted_search,
+)
+
+
+def test_time_ordered_split_scores_only_rows_after_the_learned_dated_rows():
+    rows = np.zeros((100, 1))
+    for learn, score in TimeOrderedSplit(n_splits=5, undated_rows=10).split(rows):
+        assert set(range(10)) <= set(learn)
+        assert learn[learn >= 10].max() < score.min()
+        assert score.min() >= 10
+
+
+def test_tuning_uses_time_ordered_folds():
+    assert isinstance(build_estimator("regression", "ridge", tune=True).cv, TimeOrderedSplit)
+
+
+def test_regression_default_is_xgboost_because_ridge_fails_gate_one():
+    assert DEFAULT_ESTIMATOR == {"regression": "xgboost", "classification": "xgboost"}
+
+
+def test_dag_default_estimators_match_the_common_ones():
+    from pathlib import Path
+
+    dag = (Path(__file__).resolve().parents[2] / "dags" / "ml_pipeline_dag.py").read_text()
+    for task_type, name in DEFAULT_ESTIMATOR.items():
+        assert f'"{task_type}": "{name}"' in dag
+
+
+def test_choose_threshold_is_the_highest_reaching_the_recall():
+    assert choose_threshold([1, 1, 1, 0], [0.9, 0.6, 0.2, 0.1], 0.66) == 0.6
+    assert choose_threshold([0, 0], [0.9, 0.1]) == 0.5
+
+
+def _classification_data(n=400, seed=0):
+    rng = np.random.default_rng(seed)
+    X = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    y = pd.Series((X["a"] + rng.normal(scale=1.0, size=n)) > 1.0)
+    return X, y
+
+
+def test_thresholded_classifier_reaches_the_recall_on_its_holdout():
+    X, y = _classification_data()
+    model = build_model("classification", "random_forest").fit(X, y)
+    cut = int(len(y) * 0.8)
+    assert isinstance(model, ThresholdedClassifier)
+    assert 0 < decision_threshold(model) < 1
+    temp = RandomForestClassifier(random_state=42).fit(X.iloc[:cut], y.iloc[:cut])
+    holdout_proba = temp.predict_proba(X.iloc[cut:])[:, 1]
+    caught = (holdout_proba >= model.threshold_)[y.iloc[cut:].to_numpy()]
+    assert caught.mean() >= TARGET_RECALL
+
+
+def test_thresholded_classifier_predicts_at_its_threshold():
+    X, y = _classification_data()
+    model = build_model("classification", "xgboost").fit(X, y)
+    proba = model.predict_proba(X)[:, 1]
+    assert (model.predict(X) == (proba >= model.threshold_)).all()
+
+
+def test_thresholded_classifier_survives_a_pickle_round_trip():
+    import pickle
+
+    X, y = _classification_data()
+    model = build_model("classification", "xgboost").fit(X, y)
+    again = pickle.loads(pickle.dumps(model))
+    assert again.threshold_ == model.threshold_
+    assert (again.predict(X) == model.predict(X)).all()
+
+
+def test_tuned_classifier_exposes_its_search_and_threshold():
+    X, y = _classification_data(200)
+    model = build_model("classification", "random_forest", tune=True).fit(X, y)
+    assert fitted_search(model) is not None
+    assert decision_threshold(model) is not None
+
+
+def test_regression_model_has_no_threshold():
+    model = build_model("regression", "ridge")
+    assert not isinstance(model, ThresholdedClassifier)
+    assert fitted_search(model) is None

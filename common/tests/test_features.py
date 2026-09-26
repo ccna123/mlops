@@ -141,3 +141,16 @@ def test_missing_values_do_not_crash(raw_df):
         X_missing[column] = np.nan
     predictions = pipeline.predict(X_missing)
     assert len(predictions) == 1
+
+
+def test_thresholded_classifier_pipeline_answers_a_single_raw_record(raw_df):
+    from ml_common.estimators import build_model
+
+    pipeline = features.build_pipeline("classification", build_model("classification", "xgboost"))
+    X = raw_df.drop(columns=["condition"])
+    y = raw_df["condition"].str.lower().isin(["poor", "fair"])
+    pipeline.fit(X, y)
+    record = X.head(1)
+    probability = pipeline.predict_proba(record)[:, 1]
+    threshold = pipeline.named_steps["model"].threshold_
+    assert list(pipeline.predict(record)) == [bool(probability[0] >= threshold)]

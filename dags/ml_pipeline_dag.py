@@ -27,11 +27,12 @@ MODEL_NAME_BY_TASK_TYPE = {
     "classification": "house_needs_renovation_classifier",
 }
 
+# A copy of ml_common.estimators.DEFAULT_ESTIMATOR (the DAG cannot import
+# ml_common); common/tests/test_estimators.py keeps the two equal. Regression
+# was "ridge" until 2026-09-25: it scored R2 0.68, below gate 1's 0.75, so a
+# run with the default always failed.
 DEFAULT_ESTIMATOR_BY_TASK_TYPE = {
-    "regression": "ridge",
-    # "logistic" until 2026-09-23, when the estimator list narrowed to
-    # xgboost/svm/random_forest for classification and logistic stopped being
-    # offered at all - see ml_common.estimators.
+    "regression": "xgboost",
     "classification": "xgboost",
 }
 
@@ -100,12 +101,36 @@ def stage_result(lines: list[str]) -> dict:
 FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['fingerprint'] }}"
 WORKING_COPY_ID = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['working_copy_id'] }}"
 SAMPLE_ROWS = "{{ params.sample_rows or '' }}"
+SPLIT_POINTS = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['split_points'] | tojson }}"
 DATASET_VERSION = "{{ params.dataset_version }}"
 RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | stage_result)['run_id'] }}"
 TASK_TYPE = "{{ params.task_type }}"
 MODEL_NAME = "{{ model_name_for(params.task_type) }}"
 ESTIMATOR_NAME = "{{ params.estimator_name or default_estimator_for(params.task_type) }}"
 TUNE_HYPERPARAMETERS = "{{ params.tune_hyperparameters | lower }}"
+
+
+def image_id(image: str) -> str:
+    """Looks up the ID (content digest) of a local image, for traceability.
+
+    Args:
+        image: the image tag, e.g. "ml-train:latest".
+
+    Returns:
+        The image ID, e.g. "sha256:9f2c...", or "unknown" when the Docker
+        daemon cannot be asked. A training run must not fail over a label.
+
+    Example:
+        # In a template, rendered just before the task runs:
+        # "{{ image_id('ml-train:latest') }}"  -> "sha256:9f2c..."
+    """
+    try:
+        import docker
+
+        return docker.DockerClient(base_url=DOCKER_URL).images.get(image).id
+    except Exception as error:  # noqa: BLE001 - any failure means "not known"
+        print(f"could not read the ID of {image}: {error}")
+        return "unknown"
 
 
 def stage(task_id: str, image: str, extra_env: dict) -> DockerOperator:
@@ -231,6 +256,7 @@ with DAG(
     user_defined_macros={
         "model_name_for": MODEL_NAME_BY_TASK_TYPE.__getitem__,
         "default_estimator_for": DEFAULT_ESTIMATOR_BY_TASK_TYPE.__getitem__,
+        "image_id": image_id,
     },
     # Airflow 2.10 has no built-in JSON filter, so register the scan-for-result
     # helper (see stage_result() above) as a Jinja filter for use in templates.
@@ -275,6 +301,10 @@ with DAG(
             "MODEL_NAME": MODEL_NAME,
             "ESTIMATOR_NAME": ESTIMATOR_NAME,
             "TUNE_HYPERPARAMETERS": TUNE_HYPERPARAMETERS,
+            "DATASET_VERSION": DATASET_VERSION,
+            "SAMPLE_ROWS": SAMPLE_ROWS,
+            "SPLIT_POINTS": SPLIT_POINTS,
+            "IMAGE_DIGEST": "{{ image_id('ml-train:latest') }}",
         },
     )
 
