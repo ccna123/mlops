@@ -17,13 +17,12 @@ import sys
 import httpx
 import pandas as pd
 
-from ml_common import schema
+from ml_common import lineage, schema
+from ml_common.datasets import ensure_manifest
 from ml_common.storage import Storage, raw_key
 
-from .runner import build_requests, send_feedback, send_predictions
+from .runner import build_requests, select_pool, send_feedback, send_predictions
 from .scenarios import SCENARIOS
-
-DEFAULT_POOL_ROWS = 20_000
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +33,8 @@ def parse_args() -> argparse.Namespace:
 
     Returns:
         A namespace with `scenario`, `task_type`, `count`, `seed`,
-        `pool_rows`, `feedback_ratio` and `dataset_version`.
+        `feedback_ratio` and `dataset_version` (used only when the champion
+        cannot be traced to its own).
 
     Example:
         # python -m services.agent --scenario price_inflation --count 500
@@ -46,12 +46,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=200, help="requests to send")
     parser.add_argument("--seed", type=int, default=42, help="makes the sample reproducible")
     parser.add_argument(
-        "--pool-rows",
-        type=int,
-        default=DEFAULT_POOL_ROWS,
-        help="how many of the most recent raw rows to sample from",
-    )
-    parser.add_argument(
         "--feedback-ratio",
         type=float,
         default=1.0,
@@ -61,29 +55,66 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_pool(storage: Storage, dataset_version: str, pool_rows: int) -> pd.DataFrame:
-    """Reads the most recent raw rows to draw traffic from.
+def champion_source(task_type: str) -> tuple[str, set] | None:
+    """Traces the champion to the dataset version and train set it learned from.
 
     Args:
-        storage: where the raw dataset lives.
-        dataset_version: which raw version to read, e.g. "v1".
-        pool_rows: how many of the most recent rows, by listing_date, to keep.
+        task_type: which model's champion.
 
     Returns:
-        The tail of the dataset ordered by `listing_date`. Whether these rows
-        are ones the model has seen depends on SAMPLE_ROWS: `extract` takes
-        head(SAMPLE_ROWS), so with the dev setting of 200k the tail really is
-        unseen, and on a full 2-million-row run nothing is. Either way the
-        drift comes from the scenario, not from the choice of rows.
+        `(dataset_version, property ids of its train set)`, or None when there
+        is no MLflow configured, no champion, or a champion trained before
+        dataset versions were logged.
 
     Example:
-        pool = load_pool(storage, "v1", 20_000)
-        # -> the 20,000 most recently listed houses
+        champion_source("regression")  # -> ("v1", {"p1", "p7", ...})
     """
-    frame = storage.read_parquet(raw_key(dataset_version))
-    if "listing_date" in frame.columns:
-        frame = frame.sort_values("listing_date", na_position="first")
-    return frame.tail(pool_rows).reset_index(drop=True)
+    if not os.environ.get("MLFLOW_TRACKING_URI"):
+        return None
+    from mlflow import MlflowClient
+
+    client = MlflowClient()
+    version = lineage.champion_version(client, schema.MODEL_NAMES[task_type])
+    if version is None:
+        return None
+    params = lineage.run_params(client, version.run_id)
+    dataset_version = params.get("dataset_version")
+    if not dataset_version or dataset_version == "unknown":
+        return None
+    train = Storage.from_env().read_parquet(
+        lineage.train_set_key(client, version.run_id, task_type), columns=[schema.ID_COLUMN]
+    )
+    return dataset_version, set(train[schema.ID_COLUMN].astype(str))
+
+
+def load_pool(storage: Storage, task_type: str, fallback_version: str) -> pd.DataFrame:
+    """Reads the houses the agent may send.
+
+    Args:
+        storage: where dataset versions live.
+        task_type: which model the traffic is for.
+        fallback_version: the dataset version to use when the champion cannot
+            be traced (no champion yet): its simulation set, with nothing
+            excluded.
+
+    Returns:
+        The simulation set of the champion's dataset version minus the houses
+        of the champion's train set (`runner.select_pool`, CN-26).
+
+    Example:
+        pool = load_pool(storage, "regression", "v1")
+        # -> about 20,000 rows listed after T2, none the champion trained on
+    """
+    traced = champion_source(task_type)
+    dataset_version, excluded = traced if traced else (fallback_version, set())
+    print(
+        f"pool from {dataset_version}"
+        + ("" if traced else " (no traceable champion, nothing excluded)"),
+        file=sys.stderr,
+    )
+    manifest = ensure_manifest(storage, dataset_version)
+    raw = storage.read_parquet(raw_key(dataset_version))
+    return select_pool(raw, manifest["split_points"], excluded)
 
 
 def main() -> int:
@@ -91,21 +122,23 @@ def main() -> int:
 
     Args:
         None. Takes settings from the command line, SERVING_URL (default
-        http://serving:8000), and the MinIO variables Storage.from_env needs.
+        http://serving:8000), MLFLOW_TRACKING_URI (to trace the champion), and
+        the MinIO variables Storage.from_env needs.
 
     Returns:
         0 on success, 1 when the pool yielded no usable rows.
 
     Example:
         # python -m services.agent --scenario price_inflation --count 500
-        # -> pool 20000 rows
+        # -> pool from v1
+        #    pool 19873 rows
         #    sent 500 predictions to http://serving:8000
         #    reported 500 outcomes, accepted 500
     """
     args = parse_args()
     base_url = os.environ.get("SERVING_URL", "http://serving:8000").rstrip("/")
 
-    pool = load_pool(Storage.from_env(), args.dataset_version, args.pool_rows)
+    pool = load_pool(Storage.from_env(), args.task_type, args.dataset_version)
     print(f"pool {len(pool)} rows", file=sys.stderr)
 
     requests = build_requests(pool, args.scenario, args.task_type, args.count, args.seed)

@@ -16,6 +16,13 @@ ID_COLUMN = "property_id"
 
 TASK_TYPES = ("regression", "classification")
 
+# The registered model of each task. The DAGs keep their own copy (the Airflow
+# image has no ml_common); everything that can import this reads it from here.
+MODEL_NAMES = {
+    "regression": "house_price_regressor",
+    "classification": "house_needs_renovation_classifier",
+}
+
 
 @dataclass(frozen=True)
 class ColumnSpec:

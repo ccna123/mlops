@@ -16,10 +16,39 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from ml_common import schema
+from ml_common import schema, splits
 from ml_common.targets import derive_target
 
 from .scenarios import adjust_truth, apply_scenario
+
+
+def select_pool(raw: pd.DataFrame, split_points: dict, excluded_ids) -> pd.DataFrame:
+    """Keeps the houses the agent may send: new to the model, like real traffic.
+
+    Only the simulation set of the dataset version (the latest listings, never
+    used to train or test), and never a house the champion trained on (CN-26).
+    Without that, the "none" scenario measured how well the model remembered
+    its lessons rather than how well it predicts.
+
+    Args:
+        raw: the dataset version's raw data.
+        split_points: its manifest's `split_points`.
+        excluded_ids: property ids of the champion's train set.
+
+    Returns:
+        The eligible rows, raw, with the bookkeeping columns of feedback
+        versions (`record_source`, `predicted_at`) removed: a real caller does
+        not send them.
+
+    Example:
+        select_pool(raw, manifest["split_points"], champion_train_ids)
+        # -> about 20,000 rows, all listed after T2
+    """
+    in_simulation = splits.assign_split(raw, split_points) == splits.SPLIT_SIMULATION
+    unseen = ~raw[schema.ID_COLUMN].astype(str).isin({str(i) for i in excluded_ids})
+    pool = raw[in_simulation & unseen]
+    bookkeeping = [c for c in (splits.SOURCE_COLUMN, splits.PREDICTED_AT_COLUMN) if c in pool]
+    return pool.drop(columns=bookkeeping).reset_index(drop=True)
 
 
 def build_requests(

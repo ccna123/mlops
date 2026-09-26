@@ -160,3 +160,17 @@ def test_send_feedback_with_nothing_to_report_makes_no_call():
     result = runner.send_feedback(post, "http://serving:8000", "regression", [])
     assert post.calls == []
     assert result == {"accepted": 0}
+
+
+def test_select_pool_keeps_only_unseen_simulation_houses():
+    from services.agent.runner import select_pool
+
+    raw = pd.DataFrame({
+        "property_id": ["a", "b", "c", "d"],
+        "listing_date": ["2020-01-01", "2023-01-01", "2023-02-01", "2023-03-01"],
+        "record_source": [None, None, None, None],
+    })
+    rules = {"original": {"t1": "2021-01-01", "t2": "2022-06-01", "undated_test_share": 0.2}}
+    pool = select_pool(raw, rules, excluded_ids={"c"})
+    assert list(pool["property_id"]) == ["b", "d"]
+    assert "record_source" not in pool.columns

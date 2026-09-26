@@ -39,6 +39,10 @@ BASE_ENV = {
     "MINIO_SECRET_KEY": _MINIO_SECRET,
     "ML_BUCKET": os.environ.get("ML_BUCKET", "ml-pipeline"),
     "SERVING_URL": "http://serving:8000",
+    # The agent traces the champion to its dataset version and train set, to
+    # send only houses the model never saw (CN-26); DATASET_VERSION is the
+    # fallback when there is no champion yet.
+    "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
     "DATASET_VERSION": os.environ.get("DATASET_VERSION", "v1"),
 }
 

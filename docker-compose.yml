@@ -245,6 +245,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       ML_BUCKET: ${ML_BUCKET:-ml-pipeline}
       SERVING_URL: http://serving:8000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
       DATASET_VERSION: ${DATASET_VERSION:-v1}
       AGENT_SCENARIO: ${AGENT_SCENARIO:-none}
       AGENT_TASK_TYPE: ${AGENT_TASK_TYPE:-regression}
