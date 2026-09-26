@@ -26,28 +26,61 @@ COMPARISON: dict[str, tuple[str, str]] = {
     "classification": ("auc", "higher"),
 }
 
+# How much better than the champion a candidate must be (CN-11). A difference
+# smaller than this is usually luck; without a margin the champion would be
+# replaced over and over with no real gain. Regression: rmse at least 1% lower
+# (relative, since rmse is in dollars). Classification: auc at least 0.005
+# higher (absolute, since auc is already on a 0-1 scale).
+MARGIN: dict[str, tuple[str, float]] = {
+    "regression": ("relative", 0.01),
+    "classification": ("absolute", 0.005),
+}
 
-def _is_better(candidate_value: float, champion_value: float, direction: str) -> bool:
-    """Compares two values of the same metric.
+# Floating-point slack, so an improvement of exactly the margin counts.
+_EPSILON = 1e-9
+
+
+def _required_value(champion_value: float, direction: str, margin: tuple[str, float]) -> float:
+    """Computes the score a candidate must reach to beat the champion by the margin.
+
+    Args:
+        champion_value: the incumbent's score on the same test set.
+        direction: "lower" when a smaller number is better (rmse), "higher"
+            otherwise (auc).
+        margin: `(kind, amount)` from `MARGIN`; kind is "relative" or "absolute".
+
+    Returns:
+        The bound: the candidate must be at or below it ("lower") or at or
+        above it ("higher").
+
+    Example:
+        _required_value(50_000, "lower", ("relative", 0.01))  # -> 49_500.0
+        _required_value(0.70, "higher", ("absolute", 0.005))  # -> 0.705
+    """
+    kind, amount = margin
+    step = abs(champion_value) * amount if kind == "relative" else amount
+    return champion_value - step if direction == "lower" else champion_value + step
+
+
+def _is_better(candidate_value: float, required: float, direction: str) -> bool:
+    """Tells whether a candidate reaches the bound `_required_value` set.
 
     Args:
         candidate_value: the challenger's score.
-        champion_value: the incumbent's score on the same test split.
-        direction: "lower" when a smaller number is better (rmse), "higher"
-            otherwise (auc).
+        required: the bound from `_required_value`.
+        direction: "lower" or "higher", as there.
 
     Returns:
-        True only on a strict improvement. A tie is not an improvement: the
-        incumbent keeps its place.
+        True when the candidate is at least as good as the bound. A tie with
+        the champion never is, because the bound includes the margin.
 
     Example:
-        _is_better(0.91, 0.88, "higher")    # -> True, auc went up
-        _is_better(48_000, 52_000, "lower") # -> True, rmse came down
-        _is_better(0.88, 0.88, "higher")    # -> False, a tie loses
+        _is_better(49_000, 49_500, "lower")  # -> True, 2% lower rmse
+        _is_better(49_800, 49_500, "lower")  # -> False, only 0.4% lower
     """
     if direction == "lower":
-        return candidate_value < champion_value
-    return candidate_value > champion_value
+        return candidate_value <= required + _EPSILON
+    return candidate_value >= required - _EPSILON
 
 
 def evaluate_gates(task_type: str, candidate: dict, champion: dict | None) -> dict:
@@ -73,6 +106,11 @@ def evaluate_gates(task_type: str, candidate: dict, champion: dict | None) -> di
         evaluate_gates("regression", {"r2": 0.95, "rmse": 41_000}, None)
         # -> {"passed": True, "floor_passed": True, "beats_champion": None,
         #     "reason": "passed the floor (r2=0.9500); no champion yet"}
+
+        # Better than what is live, but by less than the 1% margin:
+        evaluate_gates("regression", {"r2": 0.95, "rmse": 40_800},
+                       {"r2": 0.95, "rmse": 41_000})
+        # -> {"passed": False, ..., "beats_champion": False}
 
         # Good enough on its own, but not better than what is live:
         evaluate_gates("regression", {"r2": 0.94, "rmse": 45_000},
@@ -112,7 +150,8 @@ def evaluate_gates(task_type: str, candidate: dict, champion: dict | None) -> di
     compare_metric, direction = COMPARISON[task_type]
     candidate_value = candidate[compare_metric]
     champion_value = champion[compare_metric]
-    beats_champion = _is_better(candidate_value, champion_value, direction)
+    required = _required_value(champion_value, direction, MARGIN[task_type])
+    beats_champion = _is_better(candidate_value, required, direction)
 
     if not beats_champion:
         return {
@@ -120,8 +159,9 @@ def evaluate_gates(task_type: str, candidate: dict, champion: dict | None) -> di
             "floor_passed": True,
             "beats_champion": False,
             "reason": (
-                f"does not beat the champion: {compare_metric}={candidate_value:.4f} "
-                f"vs {champion_value:.4f} ({direction} is better)"
+                f"does not beat the champion by the margin: {compare_metric}="
+                f"{candidate_value:.4f} vs {champion_value:.4f}, needs "
+                f"{'<=' if direction == 'lower' else '>='} {required:.4f}"
             ),
         }
 

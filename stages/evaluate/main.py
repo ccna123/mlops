@@ -1,8 +1,13 @@
 """Evaluate stage: score the candidate and decide whether it may be promoted.
 
 Two gates, both required. The first blocks junk on an absolute threshold. The
-second blocks a merely-adequate model from displacing a better one, scored on
-the SAME test split — which is why that split has a fixed seed.
+second blocks a model from displacing the champion unless it is better by a
+margin, scored on the SAME test set - which is why the test set is fixed by the
+dataset version's split points.
+
+It also reports, for reading only: metrics per city and per property type, and
+how many test houses the champion learned from (if any, gate 2 leans towards
+the champion, and the run is tagged with a warning).
 
 A failed gate is a result, not an error: this stage always exits 0 and lets the
 DAG branch on what it reports.
@@ -15,15 +20,69 @@ import sys
 
 import mlflow
 import mlflow.sklearn
+from mlflow import MlflowClient
 from mlflow.exceptions import MlflowException
 
-from ml_common import schema
+from ml_common import lineage, schema
 from ml_common.gates import evaluate_gates
-from ml_common.metrics import compute_metrics
+from ml_common.metrics import EVALUATION_GROUP_MIN_ROWS, compute_metrics, group_metrics
 from ml_common.stageio import emit_result
 from ml_common.storage import Storage, processed_key
 
 CHAMPION_ALIAS = "champion"
+
+
+def predictions(model, features, task_type: str):
+    """Runs a model over the test set.
+
+    Args:
+        model: a fitted Pipeline.
+        features: the test set without its target.
+        task_type: "regression" or "classification".
+
+    Returns:
+        `(y_pred, y_proba)`; `y_proba` is None for regression or for a
+        classifier without probabilities. For a classifier trained with a
+        decision threshold, `y_pred` is already at that threshold.
+
+    Example:
+        y_pred, y_proba = predictions(candidate, features, "classification")
+    """
+    y_pred = model.predict(features)
+    y_proba = None
+    if task_type == "classification" and hasattr(model, "predict_proba"):
+        y_proba = model.predict_proba(features)[:, 1]
+    return y_pred, y_proba
+
+
+def champion_overlap(storage: Storage, model_name: str, task_type: str, test_ids) -> int | None:
+    """Counts test houses the current champion learned from.
+
+    Args:
+        storage: where the champion's train set lives.
+        model_name: the registered model.
+        task_type: "regression" or "classification".
+        test_ids: the property ids of the test set.
+
+    Returns:
+        The count; 0 when there is no champion. None when the champion's train
+        set cannot be traced (registered outside the pipeline, or deleted).
+
+    Example:
+        champion_overlap(storage, "house_price_regressor", "regression", ids)
+        # -> 0 when both models used the same dataset version
+    """
+    client = MlflowClient()
+    version = lineage.champion_version(client, model_name)
+    if version is None:
+        return 0
+    try:
+        key = lineage.train_set_key(client, version.run_id, task_type)
+        champion_ids = storage.read_parquet(key, columns=[schema.ID_COLUMN])[schema.ID_COLUMN]
+    except (KeyError, FileNotFoundError) as error:
+        print(f"cannot trace the champion's train set: {error}", file=sys.stderr)
+        return None
+    return int(test_ids.isin(set(champion_ids)).sum())
 
 
 def score_model(model, features, y_true, task_type: str) -> dict:
@@ -49,10 +108,7 @@ def score_model(model, features, y_true, task_type: str) -> dict:
         # Candidate and champion are scored with the SAME three arguments.
         # That is the whole reason the test split has a fixed seed.
     """
-    y_pred = model.predict(features)
-    y_proba = None
-    if task_type == "classification" and hasattr(model, "predict_proba"):
-        y_proba = model.predict_proba(features)[:, 1]
+    y_pred, y_proba = predictions(model, features, task_type)
     return compute_metrics(task_type, y_true, y_pred, y_proba)
 
 
@@ -92,7 +148,9 @@ def main() -> int:
     Returns:
         Always 0, even when the gates block the model. A failed gate is a
         result, not an error: the stage result carries `passed`, `reason`,
-        `metrics` and `champion_metrics`, and the DAG branches on it. The
+        `metrics`, `champion_metrics` and `champion_overlap`, and the DAG
+        branches on it. Per-group metrics go to MLflow as
+        `group_metrics.json`. The
         numbers are also written back onto the candidate's own MLflow run, so a
         blocked model still leaves a record of why it was blocked.
 
@@ -117,8 +175,16 @@ def main() -> int:
     print(f"scoring on {len(test_df)} test rows", file=sys.stderr)
 
     candidate = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
-    candidate_metrics = score_model(candidate, features, y_true, task_type)
+    y_pred, y_proba = predictions(candidate, features, task_type)
+    candidate_metrics = compute_metrics(task_type, y_true, y_pred, y_proba)
+    groups = group_metrics(
+        task_type, test_df, y_true, y_pred, y_proba, min_rows=EVALUATION_GROUP_MIN_ROWS
+    )
     print(f"candidate: {candidate_metrics}", file=sys.stderr)
+
+    overlap = champion_overlap(storage, model_name, task_type, test_df[schema.ID_COLUMN])
+    if overlap:
+        print(f"WARNING: the champion learned {overlap} test houses", file=sys.stderr)
 
     champion = load_champion(model_name)
     champion_metrics = None
@@ -137,12 +203,18 @@ def main() -> int:
             mlflow.log_metrics(
                 {f"champion_test_{name}": value for name, value in champion_metrics.items()}
             )
-        mlflow.set_tags(
-            {
-                "gate_passed": str(decision["passed"]),
-                "gate_reason": decision["reason"],
-            }
-        )
+        mlflow.log_dict(groups, "group_metrics.json")
+        tags = {
+            "gate_passed": str(decision["passed"]),
+            "gate_reason": decision["reason"],
+            "champion_overlap": "unknown" if overlap is None else str(overlap),
+        }
+        if overlap:
+            tags["warning"] = (
+                f"the champion learned {overlap} houses of this test set; "
+                "gate 2 leans towards the champion"
+            )
+        mlflow.set_tags(tags)
 
     emit_result(
         {
@@ -150,6 +222,7 @@ def main() -> int:
             "reason": decision["reason"],
             "metrics": candidate_metrics,
             "champion_metrics": champion_metrics,
+            "champion_overlap": overlap,
         }
     )
     return 0

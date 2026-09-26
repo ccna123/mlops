@@ -110,3 +110,20 @@ def test_classification_missing_auc_raises():
     """AUC is now load-bearing: evaluate must always supply it, or we stop."""
     with pytest.raises(KeyError):
         evaluate_gates("classification", candidate={"f1": 0.9}, champion=None)
+
+
+def test_regression_must_beat_the_champion_by_at_least_one_percent():
+    champion = {"r2": 0.80, "rmse": 1000.0}
+    assert not evaluate_gates("regression", {"r2": 0.8, "rmse": 995.0}, champion)["passed"]
+    assert evaluate_gates("regression", {"r2": 0.8, "rmse": 990.0}, champion)["passed"]
+
+
+def test_classification_must_beat_the_champion_by_at_least_half_a_point_of_auc():
+    champion = {"auc": 0.700}
+    assert not evaluate_gates("classification", {"auc": 0.704}, champion)["passed"]
+    assert evaluate_gates("classification", {"auc": 0.705}, champion)["passed"]
+
+
+def test_the_blocking_reason_names_the_margin():
+    result = evaluate_gates("classification", {"auc": 0.701}, {"auc": 0.700})
+    assert "margin" in result["reason"]

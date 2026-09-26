@@ -50,3 +50,33 @@ def test_all_values_are_plain_floats():
 def test_invalid_task_type_raises():
     with pytest.raises(ValueError, match="task_type"):
         compute_metrics("clustering", [1.0], [1.0])
+
+
+def test_group_metrics_normalizes_names_and_marks_small_groups():
+    import pandas as pd
+
+    from ml_common.metrics import group_metrics
+
+    raw = pd.DataFrame({"city": ["NEW YORK", "new_york"] * 3 + ["Tulsa"],
+                        "property_type": ["condo"] * 7})
+    y = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 90.0]
+    pred = [101.0, 111.0, 119.0, 131.0, 139.0, 151.0, 50.0]
+    result = group_metrics("regression", raw, y, pred, min_rows=5)
+    assert result["city"]["new york"]["n"] == 6
+    assert "rmse" in result["city"]["new york"]
+    assert result["city"]["tulsa"] == {"n": 1, "insufficient_data": True}
+    assert result["property_type"]["condo"]["n"] == 7
+
+
+def test_group_metrics_leaves_auc_out_of_a_one_class_group():
+    import pandas as pd
+
+    from ml_common.metrics import group_metrics
+
+    raw = pd.DataFrame({"city": ["a"] * 4 + ["b"] * 4})
+    y = [True, True, True, True, True, False, True, False]
+    pred = y
+    proba = [0.9, 0.8, 0.7, 0.6, 0.9, 0.1, 0.8, 0.2]
+    result = group_metrics("classification", raw, y, pred, proba, min_rows=2)
+    assert "auc" not in result["city"]["a"]
+    assert "auc" in result["city"]["b"]
