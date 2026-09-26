@@ -82,7 +82,7 @@ def test_real_quality_result_reads_missing_and_unseen_shares():
 
 
 def test_regression_metrics_match_what_evaluation_computes():
-    data = pd.read_csv(FIXTURES / "performance_regression_data.csv")
+    data = pd.read_json(FIXTURES / "performance_regression_data.json")
     from_evidently = adapter.performance_metrics(_load("performance_regression.json"),
                                                  "regression")
     from_evaluation = compute_metrics("regression", data["actual"], data["prediction"])
@@ -90,7 +90,7 @@ def test_regression_metrics_match_what_evaluation_computes():
 
 
 def test_classification_metrics_match_evaluation_at_the_model_threshold():
-    data = pd.read_csv(FIXTURES / "performance_classification_data.csv")
+    data = pd.read_json(FIXTURES / "performance_classification_data.json")
     threshold = 0.4  # the probas_threshold the fixture was produced with
     from_evidently = adapter.performance_metrics(
         _load("performance_classification.json"), "classification"
