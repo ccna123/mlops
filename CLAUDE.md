@@ -119,7 +119,8 @@ docker build -f services/agent/Dockerfile -t ml-agent:latest .
 docker build -f services/api/Dockerfile -t ml-api:latest .
 ```
 
-Chỉ build `ml-base` là **chưa đủ**. Bảy stage image (kể cả `ml-monitor`),
+Chỉ build `ml-base` là **chưa đủ**. Tám stage image (kể cả `ml-monitor` và
+`ml-build-feedback`),
 `ml-serving`, `ml-agent` và `ml-api` đều `FROM ml-base:latest`, nên tới khi được
 build lại chúng vẫn giữ nguyên bản `ml_common` cũ nướng sẵn bên trong — `docker
 images` sẽ cho thấy `ml-base` mới tinh còn phần còn lại thì không. Triệu
@@ -142,6 +143,8 @@ docker run --rm ml-base:latest sh -c "pip install --quiet 'pytest>=8.0' 'moto[s3
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
 | API layer (`services/api/`) | http://localhost:8001 — endpoint ở `/api/...` (vd `/api/health`), Swagger ở `/docs` | — (chưa có auth, xem `mlops-pipeline-design.md` mục 3.2) |
 | Dashboard | http://localhost:5173 (`cd dashboard; npm run dev`) | — (chưa có auth) |
+| Grafana | http://localhost:3000 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` trong `.env` (mặc định admin / admin) |
+| Prometheus / Pushgateway | http://localhost:9090 / http://localhost:9091 | — |
 
 ## Giới hạn máy — đã gây ra quyết định thiết kế
 
@@ -195,11 +198,34 @@ dựng xong 5 màn và đang ở `main` dưới dạng chưa tách nhánh:
 | 4/5 | Monitoring — agent 5 kịch bản, `/feedback`, Evidently 3 loại drift, `monitoring_dag` | `scripts\verify_monitoring.ps1` |
 | 5a/5 | API layer — `services/api/` (FastAPI, cổng 8001, 18 endpoint), Airflow REST bật basic auth, `sample_rows` thành param của DAG | `scripts\verify_api.ps1` |
 | 5b/5 | Dashboard — `dashboard/` (Vite + React + Tailwind, 4 màn), xoá model version / cả model, trigger drift thủ công, chọn thuật toán train, mô phỏng traffic | chưa có script; verify bằng trình duyệt |
+| 6 | Khớp 要件定義書 / 基本設計書 v1.3 — chia theo thời gian, data version không ghi đè, model card, smoke test + rollback khi deploy, `/flush` + `/metrics`, giám sát 4 phần, DAG `feedback_data_pipeline`, Prometheus + Grafana + cảnh báo, CI | **chưa chạy trên stack thật**; nhánh `claude/gifted-euler-4cyh8a` |
 
-Đo ngày 2026-09-23: 666 test pass ở Python 3.13 (local,
+Đo ngày 2026-09-26: 804 test pass ở Python 3.13 (local,
 `pytest common/ services/`). Ở 3.12 (container) image `ml-base` chỉ chứa
 `common/`, nên test cần `stages/` hoặc `services/` bị skip có chủ ý ở đó, và
 **test của `services/api/` chỉ chạy ở máy dev**, không chạy trong container.
+
+### Giai đoạn 6 — khớp tài liệu v1.3 (2026-09-26)
+
+Chi tiết ở `mlops-pipeline-design.md` mục 12.3. Những điều không tự suy ra được từ code:
+
+- **Chưa chạy trên stack thật.** Máy làm việc không có Docker; chỉ kiểm bằng
+  pytest (moto, MLflow file store, Evidently thật, promtool) và CI trên GitHub
+  (ruff, pytest, build image ở Python 3.12). Trước khi tin, build lại **đủ năm
+  tầng** (kể cả `ml-build-feedback` trong `build_stage_images.ps1`), chạy lại
+  các script verify, và unpause DAG nếu dựng từ đầu.
+- **Data version không ghi đè được.** Upload hay seed một tên đã có trả 409;
+  mỗi data version có `manifest.json` chứa split point T1/T2. Data version cũ
+  thiếu manifest được `extract` tạo bù (`ensure_manifest`).
+- **`fingerprint` trong XCom/MLflow giờ là data ID** (working copy ID +
+  `sample_rows` + seed). Tên khoá giữ nguyên để run cũ vẫn đọc được.
+- **Bốn DAG**, đều unpaused và `max_active_runs=1`: thêm `feedback_data_pipeline`
+  (sinh ra đã unpaused). Tạo data version từ feedback cần ≥ 500 record.
+- **Cảnh báo đi qua Grafana** tới webhook `ALERT_WEBHOOK_URL` trong `.env`, nhắc
+  lại mỗi 24 giờ. Để trống thì luật vẫn chạy nhưng không gửi đi đâu.
+  `scripts/check_alert_config.py` kiểm cấu hình cảnh báo mà không cần stack.
+- **CI** ở `.github/workflows/ci.yml`. Muốn nó chặn merge thì phải bật branch
+  protection trên GitHub — việc của chủ repo.
 
 ### Plan 5b — dashboard (2026-09-21)
 
