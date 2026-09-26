@@ -34,7 +34,7 @@ import mlflow.artifacts
 import mlflow.sklearn
 from mlflow import MlflowClient
 
-from ml_common import drift, schema
+from ml_common import drift, pushgateway, schema
 from ml_common import evidently_adapter as adapter
 from ml_common.cleaning import DateFeatures, OutlierClipper, RawRecordCleaner
 from ml_common.estimators import decision_threshold
@@ -395,7 +395,8 @@ def main() -> int:
     Args:
         None. Reads TASK_TYPE, MODEL_NAME, MLFLOW_TRACKING_URI, optional
         MONITOR_WINDOW_HOURS (default 24), MONITOR_REFERENCE_ROWS (default
-        10000), MONITOR_RUN_ID and FLUSH_RESULT, plus the MinIO variables
+        10000), MONITOR_RUN_ID, FLUSH_RESULT and PUSHGATEWAY_URL (optional:
+        where the levels are pushed for alerting), plus the MinIO variables
         `Storage.from_env` needs.
 
     Returns:
@@ -595,6 +596,10 @@ def _publish(storage: Storage, summary: dict, parts: dict, feature_summary, html
         storage.write_json(feature_summary, report_key(model_name, run_id, "json"))
     storage.write_json(summary, drift_summary_key(model_name, run_id))
     storage.write_json(summary, drift_latest_key(model_name))
+    # After the summary is safely written: the alert rules read these (02 7.5).
+    pushgateway.push(
+        pushgateway.monitoring_samples(summary), "monitoring", {"model_name": model_name}
+    )
     emit_result({
         "severity": summary["severity"],
         "parts": parts,

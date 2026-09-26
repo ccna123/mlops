@@ -14,6 +14,7 @@ import os
 import pendulum
 from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
+from run_outcome import report as report_run_outcome
 
 DOCKER_URL = "unix://var/run/docker.sock"
 NETWORK = "mlops_default"
@@ -44,6 +45,10 @@ with DAG(
     max_active_runs=1,
     is_paused_upon_creation=False,
     tags=["ml", "data"],
+    # How each run ended goes to the Pushgateway, where the "pipeline failed"
+    # alert rule reads it (CN-46).
+    on_success_callback=report_run_outcome,
+    on_failure_callback=report_run_outcome,
     params={
         "task_type": "regression",
         "new_version": "",

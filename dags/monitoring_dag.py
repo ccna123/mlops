@@ -57,6 +57,8 @@ BASE_ENV = {
     "AWS_ACCESS_KEY_ID": _MINIO_KEY,
     "AWS_SECRET_ACCESS_KEY": _MINIO_SECRET,
     "MONITOR_WINDOW_HOURS": os.environ.get("MONITOR_WINDOW_HOURS", "24"),
+    # Where the monitor stage pushes its levels for the alert rules.
+    "PUSHGATEWAY_URL": os.environ.get("PUSHGATEWAY_URL", ""),
 }
 
 # Kept in sync with ml_common.stageio.RESULT_PREFIX by a test in common/tests.

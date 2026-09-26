@@ -18,6 +18,7 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 from deploy_check import deploy_with_smoke_test
+from run_outcome import report as report_run_outcome
 
 DOCKER_URL = "unix://var/run/docker.sock"
 NETWORK = "mlops_default"
@@ -240,6 +241,10 @@ with DAG(
     # 16GB box and race each other writing the same dataset_version prefix.
     max_active_runs=1,
     tags=["ml", "training"],
+    # How each run ended goes to the Pushgateway, where the "pipeline failed"
+    # alert rule reads it (CN-46).
+    on_success_callback=report_run_outcome,
+    on_failure_callback=report_run_outcome,
     params={
         "task_type": "regression",
         "force_reprocess": False,

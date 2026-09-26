@@ -1,0 +1,23 @@
+# Where alerts go. ALERT_WEBHOOK_URL comes from .env (a Slack or Discord
+# incoming webhook, or any endpoint taking JSON). Left at its default, the
+# webhook points nowhere: alerts still show in Grafana, nothing is sent.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: operator
+    receivers:
+      - uid: operator-webhook
+        type: webhook
+        settings:
+          url: $ALERT_WEBHOOK_URL
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: operator
+    group_by: [alertname, model_name, pipeline]
+    group_wait: 30s
+    group_interval: 5m
+    # One problem that goes on is repeated once a day, not every few minutes:
+    # an operator flooded with alerts learns to ignore them (NV-10).
+    repeat_interval: 24h

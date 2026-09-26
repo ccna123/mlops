@@ -1,0 +1,154 @@
+# Alert rules (CN-46, 02 7.5), kept with the source code rather than clicked
+# together in the UI, so they are versioned and checked by CI.
+#
+# The rules only compare numbers. Levels and warning streaks are computed by
+# the monitor stage (ml_common.drift): insufficient_data is pushed as -1, so it
+# never matches a rule. "$$" is a literal "$": Grafana expands environment
+# variables in provisioning files.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: mlops
+    folder: MLOps
+    interval: 1m
+    rules:
+      - uid: mlops-level-high
+        title: Monitoring section at High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max by (model_name, model_version, part) (ml_monitoring_level)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [1.5]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: high}
+        annotations:
+          summary: "{{ $$labels.model_name }} v{{ $$labels.model_version }}: {{ $$labels.part }} is High"
+          description: "The last monitoring run graded {{ $$labels.part }} at High. Open the drift screen: http://localhost:5173 (Giám sát drift)."
+          runbook: "運用手順書 - Drift hoặc data quality ở mức Cao"
+
+      - uid: mlops-warning-persistent
+        title: Monitoring section at Warning three times in a row
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max by (model_name, model_version, part) (ml_monitoring_consecutive_warnings)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [2.5]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $$labels.model_name }}: {{ $$labels.part }} at Warning {{ $$values.A }} runs in a row"
+          description: "A warning that persists is no longer noise. Open the drift screen: http://localhost:5173 (Giám sát drift)."
+          runbook: "運用手順書 - Cảnh báo kéo dài"
+
+      - uid: mlops-pipeline-failed
+        title: Pipeline run failed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max by (pipeline, task_type, status) (ml_pipeline_last_run_status{status=~"failed|smoke_test_failed"})
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0.5]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: high}
+        annotations:
+          summary: "{{ $$labels.pipeline }} ({{ $$labels.task_type }}) ended {{ $$labels.status }}"
+          description: "smoke_test_failed means serving did not take the new version and the champion was rolled back. Logs: http://localhost:8080 (Airflow)."
+          runbook: "運用手順書 - Pipeline thất bại"
+
+      - uid: mlops-serving-errors
+        title: Prediction service errors above 1%
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              # 503 is "no champion loaded yet", which 02 5.1 says is not a system error.
+              expr: sum(rate(serving_requests_total{status=~"5..",status!="503"}[5m])) / clamp_min(sum(rate(serving_requests_total[5m])), 1e-9)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0.01]}
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels: {severity: high}
+        annotations:
+          summary: "Prediction service: {{ $$values.A }} of requests failed over 5 minutes"
+          description: "System errors (5xx other than 503 'no champion loaded'). The Grafana dashboard MLOps shows requests split by status."
+          runbook: "運用手順書 - Prediction service lỗi"
+
+      - uid: mlops-log-dropped
+        title: Prediction log records dropped
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(delta(serving_inference_log_dropped[5m]))
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels: {severity: warning}
+        annotations:
+          summary: "The prediction log buffer was full: {{ $$values.A }} records dropped in 5 minutes"
+          description: "Storage has been unreachable long enough to fill the buffer (5,000 records). Monitoring will miss that traffic."
+          runbook: "運用手順書 - Mất prediction log"

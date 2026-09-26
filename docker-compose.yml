@@ -108,6 +108,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       ML_BUCKET: ${ML_BUCKET}
       SERVING_URL: ${SERVING_URL}
+      PUSHGATEWAY_URL: http://pushgateway:9091
     volumes: &airflow-volumes
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -228,6 +229,60 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Metrics over time and alerting (02 7.5). Bound to 127.0.0.1: these have no
+  # authentication of their own worth trusting and must not face the network.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: mlops-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 15 days is enough to see a trend and bounds the disk it takes (RB-01).
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: 512m
+    restart: unless-stopped
+
+  pushgateway:
+    image: prom/pushgateway:v1.9.0
+    container_name: mlops-pushgateway
+    # Persisted, so the last level of each model survives a restart and an
+    # ongoing problem keeps alerting.
+    command:
+      - --persistence.file=/data/metrics
+      - --persistence.interval=1m
+    volumes:
+      - pushgateway-data:/data
+    ports:
+      - "127.0.0.1:9091:9091"
+    mem_limit: 128m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: mlops-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Empty means "not configured": alerts are still shown in Grafana, and
+      # the webhook points at a port nothing listens on.
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://127.0.0.1:9/alert-channel-not-configured}
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    mem_limit: 512m
+    restart: unless-stopped
+
   agent:
     build:
       context: .
@@ -267,3 +322,6 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  prometheus-data:
+  pushgateway-data:
+  grafana-data:
