@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.request
 
 import pendulum
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
+from deploy_check import deploy_with_smoke_test
 
 DOCKER_URL = "unix://var/run/docker.sock"
 NETWORK = "mlops_default"
@@ -194,40 +194,40 @@ def choose_branch(ti) -> str:
     return "register" if verdict["passed"] else "stop_no_deploy"
 
 
-SERVING_RELOAD_URL = os.environ.get("SERVING_URL", "http://serving:8000").rstrip("/") + "/reload"
+SERVING_URL = os.environ.get("SERVING_URL", "http://serving:8000").rstrip("/")
+MLFLOW_URL = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000").rstrip("/")
 
 
-def reload_serving() -> str:
-    """Tells serving to pick up the version that was just registered.
-
-    One HTTP call, so no image and no Airflow Connection: a PythonOperator with
-    the standard library is the whole task.
+def deploy(ti, params) -> dict:
+    """Reloads serving, smoke-tests the new version, and rolls back on failure.
 
     Args:
-        None. Posts to SERVING_URL (default http://serving:8000) + "/reload".
+        ti: the task instance, used to pull register's result.
+        params: the run params, for the task type.
 
     Returns:
-        Serving's response body, which lists the versions now live. It is
-        returned rather than only printed so it lands in XCom and the run keeps
-        a record of what was deployed.
+        `{"deployed": version}`, kept in XCom as the record of what went live.
 
     Raises:
-        urllib.error.URLError: when serving is unreachable or answers an error.
-            The task fails, which is the point: the alias moved but nothing is
-            serving the new version, and that should be visible in the DAG.
+        DeployFailedError: when serving does not answer with the new version.
+            The champion alias has already been moved back and serving
+            reloaded; the task fails so the run shows what happened (CN-13).
 
     Example:
-        reload_serving()
-        # -> '{"models": {"regression": {"loaded": true, "version": "4"}, ...}}'
-
-        # Runs only on the register branch, so serving is asked to reload
-        # exactly when there is something new to load.
+        # register emitted {"version": "4", "previous_version": "3", ...}
+        deploy(ti, params)   # -> {"deployed": "4"}
     """
-    request = urllib.request.Request(SERVING_RELOAD_URL, data=b"", method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        body = response.read().decode("utf-8")
-    print(f"serving reloaded: {body}")
-    return body
+    registered = stage_result(ti.xcom_pull(task_ids="register"))
+    task_type = params["task_type"]
+    return deploy_with_smoke_test(
+        task_type=task_type,
+        model_name=MODEL_NAME_BY_TASK_TYPE[task_type],
+        new_version=registered["version"],
+        previous_version=registered.get("previous_version"),
+        sample_record=registered["sample_record"],
+        serving_url=SERVING_URL,
+        mlflow_url=MLFLOW_URL,
+    )
 
 
 with DAG(
@@ -334,8 +334,8 @@ with DAG(
 
     stop_no_deploy = EmptyOperator(task_id="stop_no_deploy")
 
-    deploy = PythonOperator(task_id="deploy", python_callable=reload_serving)
+    deploy_task = PythonOperator(task_id="deploy", python_callable=deploy)
 
     extract >> validate >> prepare_dataset >> train >> evaluate >> branch
     branch >> [register, stop_no_deploy]
-    register >> deploy
+    register >> deploy_task
