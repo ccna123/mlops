@@ -79,6 +79,33 @@ def publish_dataset(storage: Storage, local_parquet: str, dataset_version: str) 
     return manifest
 
 
+def publish_frame(storage: Storage, frame: pd.DataFrame, dataset_version: str, manifest: dict):
+    """Creates a dataset version from a frame built inside the system.
+
+    Used by the feedback pipeline, whose manifest (split points, lineage) is
+    decided by the builder rather than computed from listing dates.
+
+    Args:
+        storage: where to write.
+        frame: the data, every column text or None.
+        dataset_version: the new version's name. Must not exist yet.
+        manifest: the manifest to store with it.
+
+    Returns:
+        None.
+
+    Raises:
+        DatasetVersionExistsError: when the name is taken (CN-02).
+
+    Example:
+        publish_frame(storage, merged, "v1-fb1", manifest)
+    """
+    if dataset_exists(storage, dataset_version):
+        raise DatasetVersionExistsError(f"dataset version {dataset_version!r} already exists")
+    storage.write_parquet(frame, raw_key(dataset_version))
+    storage.write_json(manifest, dataset_manifest_key(dataset_version))
+
+
 def read_manifest(storage: Storage, dataset_version: str) -> dict:
     """Reads the manifest of a dataset version.
 

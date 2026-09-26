@@ -9,7 +9,8 @@ $stages = @(
     @{ Dir = "train";                     Tag = "ml-train:latest" },
     @{ Dir = "evaluate";                  Tag = "ml-evaluate:latest" },
     @{ Dir = "register";                  Tag = "ml-register:latest" },
-    @{ Dir = "monitor";                   Tag = "ml-monitor:latest" }
+    @{ Dir = "monitor";                   Tag = "ml-monitor:latest" },
+    @{ Dir = "build_feedback";            Tag = "ml-build-feedback:latest" }
 )
 
 foreach ($stage in $stages) {

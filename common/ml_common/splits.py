@@ -142,6 +142,62 @@ def event_dates(frame: pd.DataFrame) -> pd.Series:
     return result
 
 
+def to_moment(value: object) -> pd.Timestamp | None:
+    """Reads a split point or a prediction time as a naive UTC timestamp.
+
+    Args:
+        value: an ISO date ("2021-01-01", read as midnight), an ISO timestamp
+            with or without an offset, a date/datetime, or missing.
+
+    Returns:
+        A timezone-naive UTC `pd.Timestamp`, or None when missing or unreadable.
+
+    Example:
+        to_moment("2026-09-20T23:30:00+02:00")  # -> Timestamp("2026-09-20 21:30:00")
+        to_moment("2021-01-01")                 # -> Timestamp("2021-01-01 00:00:00")
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        stamp = pd.Timestamp(value)
+    except (ValueError, TypeError):
+        return None
+    if pd.isna(stamp):
+        return None
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert(UTC).tz_localize(None)
+    return stamp
+
+
+def event_moments(frame: pd.DataFrame) -> pd.Series:
+    """Places every record on the time axis at the finest grain its source has.
+
+    Original records only have a listing DAY, placed at midnight. Feedback
+    records keep the exact prediction time: the simulation agent sends a whole
+    batch within minutes, so a day-grained axis could not cut its latest 20%
+    from the rest.
+
+    Args:
+        frame: a dataset frame with `listing_date`, and for feedback records
+            `predicted_at`.
+
+    Returns:
+        A Series with the frame's index holding a naive UTC `pd.Timestamp` or
+        None.
+
+    Example:
+        event_moments(frame)  # -> [Timestamp("2023-07-15"), Timestamp("2026-09-20 10:04:31")]
+    """
+    days = event_dates(frame)
+    result = pd.Series(
+        [None if d is None else pd.Timestamp(d) for d in days], index=frame.index, dtype=object
+    )
+    feedback = record_sources(frame) == SOURCE_FEEDBACK
+    if feedback.any():
+        result[feedback] = [to_moment(v) for v in frame.loc[feedback, PREDICTED_AT_COLUMN]]
+    return result
+
+
 def compute_split_points(dates: pd.Series) -> dict:
     """Chooses T1 and T2 for a set of dated records.
 
@@ -213,7 +269,8 @@ def assign_split(frame: pd.DataFrame, split_points: dict) -> pd.Series:
     Args:
         frame: a dataset frame with `property_id` and `listing_date`.
         split_points: the manifest's `split_points`: one rule per record source
-            present in the frame, as `compute_split_points` builds them.
+            present in the frame. `t1`/`t2` are ISO dates or ISO timestamps
+            (feedback rules cut by prediction time, see `event_moments`).
 
     Returns:
         A Series with the frame's index holding "train", "test" or "simulation".
@@ -229,25 +286,27 @@ def assign_split(frame: pd.DataFrame, split_points: dict) -> pd.Series:
                                                     "2023-01-01"]}), rules)
         # -> ["train", "test", "simulation"]
     """
-    dates = event_dates(frame)
+    moments = event_moments(frame)
     sources = record_sources(frame)
     result = pd.Series(SPLIT_TRAIN, index=frame.index, dtype=object)
     for source in pd.unique(sources):
         if source not in split_points:
             raise ValueError(f"no split rule for record source {source!r}")
         rule = split_points[source]
-        t1 = date.fromisoformat(rule["t1"])
-        t2 = date.fromisoformat(rule["t2"]) if rule.get("t2") else None
+        t1 = to_moment(rule["t1"])
+        t2 = to_moment(rule.get("t2"))
         undated_share = float(rule.get("undated_test_share", UNDATED_TEST_SHARE))
         mask = sources == source
         labels = []
-        for property_id, day in zip(frame.loc[mask, schema.ID_COLUMN], dates[mask], strict=True):
-            if day is None:
+        for property_id, moment in zip(
+            frame.loc[mask, schema.ID_COLUMN], moments[mask], strict=True
+        ):
+            if moment is None:
                 labels.append(SPLIT_TEST if _hash_share(property_id) < undated_share
                               else SPLIT_TRAIN)
-            elif day < t1:
+            elif moment < t1:
                 labels.append(SPLIT_TRAIN)
-            elif t2 is None or day < t2:
+            elif t2 is None or moment < t2:
                 labels.append(SPLIT_TEST)
             else:
                 labels.append(SPLIT_SIMULATION)
@@ -292,7 +351,7 @@ def training_order(frame: pd.DataFrame) -> tuple[pd.Index, int]:
     """Orders records for time-respecting cross-validation and threshold choice.
 
     Args:
-        frame: a train set, with the columns `event_dates` reads.
+        frame: a train set, with the columns `event_moments` reads.
 
     Returns:
         `(index, undated_rows)`: the frame's index labels with every undated
@@ -305,7 +364,7 @@ def training_order(frame: pd.DataFrame) -> tuple[pd.Index, int]:
         train_df = train_df.loc[order]
         cv = TimeOrderedSplit(5, undated_rows=undated)
     """
-    dates = event_dates(frame)
-    undated = dates.isna() | dates.map(lambda d: d is None)
-    dated = dates[~undated].sort_values(kind="stable")
+    moments = event_moments(frame)
+    undated = moments.map(lambda m: m is None)
+    dated = moments[~undated].astype("datetime64[ns]").sort_values(kind="stable")
     return frame.index[undated.to_numpy()].append(dated.index), int(undated.sum())

@@ -138,7 +138,8 @@ def test_main_writes_a_summary_with_all_four_sections(monitor, tmp_path, monkeyp
             "model_version": [str(version)] * 120,
         })
         store.write_parquet(log, storage_module.inference_log_key("m", now.date(), "a1"))
-        truth = pd.DataFrame({"request_id": log["request_id"], "predicted_on": now.date().isoformat(),
+        truth = pd.DataFrame({"request_id": log["request_id"],
+                              "predicted_on": now.date().isoformat(),
                               "actual": served["sale_price"], "model_name": "m"})
         store.write_parquet(truth, storage_module.ground_truth_key("m", now.date(), "b1"))
 

@@ -25,7 +25,7 @@ from .clients.airflow import AirflowClient
 from .clients.registry import RegistryClient
 from .clients.reports import ReportsClient
 from .clients.serving import ServingClient
-from .routes import data, drift, health, models, pipeline, simulate
+from .routes import data, drift, feedback, health, models, pipeline, simulate
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ def create_app(
     app.include_router(drift.router, prefix="/api")
     app.include_router(data.router, prefix="/api")
     app.include_router(simulate.router, prefix="/api")
+    app.include_router(feedback.router, prefix="/api")
     return app
 
 
