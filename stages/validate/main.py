@@ -19,7 +19,7 @@ def main() -> int:
     """Measures the extracted dataset and writes the validation report.
 
     Args:
-        None. Reads FINGERPRINT and TASK_TYPE, plus the MinIO variables
+        None. Reads WORKING_COPY_ID and TASK_TYPE, plus the MinIO variables
         `Storage.from_env` needs.
 
     Returns:
@@ -29,18 +29,18 @@ def main() -> int:
         dirty on purpose.
 
     Raises:
-        KeyError: when FINGERPRINT or TASK_TYPE is unset.
-        FileNotFoundError: when the extracted data for that fingerprint is not
+        KeyError: when WORKING_COPY_ID or TASK_TYPE is unset.
+        FileNotFoundError: when the working copy is not
             in storage, meaning `extract` did not run.
     """
-    fingerprint = os.environ["FINGERPRINT"]
+    working_copy_id = os.environ["WORKING_COPY_ID"]
     task_type = os.environ["TASK_TYPE"]
     storage = Storage.from_env()
 
-    df = storage.read_parquet(extracted_key(fingerprint))
+    df = storage.read_parquet(extracted_key(working_copy_id))
     report = validate_dataframe(df, task_type)
 
-    report_destination = validation_report_key(fingerprint)
+    report_destination = validation_report_key(working_copy_id)
     storage.write_json(report, report_destination)
     print(f"report written to {report_destination}", file=sys.stderr)
     print(f"rows={report['row_count']} duplicates={report['duplicate_rows']}", file=sys.stderr)

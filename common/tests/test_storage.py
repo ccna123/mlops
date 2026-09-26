@@ -345,3 +345,16 @@ class TestReadBytes:
         store.write_bytes(raw, "reports/m/r/evidently.html", "text/html")
 
         assert store.read_bytes("reports/m/r/evidently.html") == raw
+
+
+def test_read_parquet_rows_returns_only_the_chosen_rows_across_batches(store):
+    frame = pd.DataFrame({"id": [f"p{i}" for i in range(250_000)], "x": range(250_000)})
+    store.write_parquet(frame, "k.parquet")
+    result = store.read_parquet_rows("k.parquet", [1, 99_999, 100_000, 249_999])
+    assert result["id"].tolist() == ["p1", "p99999", "p100000", "p249999"]
+    assert list(result.index) == [0, 1, 2, 3]
+
+
+def test_read_parquet_rows_with_no_positions_keeps_the_columns(store):
+    store.write_parquet(pd.DataFrame({"id": ["a"]}), "k.parquet")
+    assert list(store.read_parquet_rows("k.parquet", []).columns) == ["id"]

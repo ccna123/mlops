@@ -73,7 +73,9 @@ def derive_target(df: pd.DataFrame, task_type: str) -> pd.Series:
 
     Regression reads `sale_price` straight from the data. Classification has no
     target column in the raw data at all: `needs_renovation` is derived from
-    `condition`, which is why `condition` is leakage for that task.
+    `condition`, which is why `condition` is leakage for that task. A feedback
+    record (see `feedback.py`) already holds the observed `needs_renovation`;
+    where that value is readable it is used as it is.
 
     Args:
         df: the raw DataFrame, with the source column present.
@@ -118,4 +120,14 @@ def derive_target(df: pd.DataFrame, task_type: str) -> pd.Series:
             values.append(None)
         else:
             values.append(normalized in NEEDS_RENOVATION_CONDITIONS)
-    return pd.Series(values, index=df.index, dtype="object")
+    result = pd.Series(values, index=df.index, dtype="object")
+    # Feedback records carry the observed answer itself, not a condition to
+    # derive it from; where one is readable it wins.
+    if schema.TARGET_CLASSIFICATION in df.columns:
+        given = pd.Series(
+            [parsers.parse_bool(v) for v in df[schema.TARGET_CLASSIFICATION]],
+            index=df.index,
+            dtype="object",
+        )
+        result = given.where(given.notna(), result)
+    return result

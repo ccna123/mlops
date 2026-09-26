@@ -67,10 +67,11 @@ def trigger_run(request: Request, body: RunRequest) -> dict:
 
     Args:
         request: the FastAPI request, used to reach the injected client.
-        body: the run settings. `sample_rows` None means every row; a value
-            of 0 or less is rejected rather than silently treated as "all",
-            which would start a two-million-row run on a machine that asked
-            for a small one.
+        body: the run settings. `sample_rows` is how many TRAIN rows to sample
+            at random (the test set never shrinks); None means every train
+            row. A value of 0 or less is rejected rather than silently
+            treated as "all", which would start a two-million-row run on a
+            machine that asked for a small one.
 
     Returns:
         `run_id`, `dag_id` and `state`. The run is only QUEUED - it has not

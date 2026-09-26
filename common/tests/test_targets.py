@@ -110,3 +110,13 @@ def test_invalid_task_type_raises_in_derive_target():
 
 def test_needs_renovation_conditions_are_the_two_bad_ones():
     assert NEEDS_RENOVATION_CONDITIONS == frozenset({"poor", "fair"})
+
+
+def test_classification_uses_a_given_label_over_condition():
+    df = pd.DataFrame(
+        {
+            "condition": ["good", "poor", None],
+            "needs_renovation": ["True", None, "False"],
+        }
+    )
+    assert list(derive_target(df, "classification")) == [True, True, False]

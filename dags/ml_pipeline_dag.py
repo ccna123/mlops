@@ -95,7 +95,12 @@ def stage_result(lines: list[str]) -> dict:
     raise ValueError(f"no {RESULT_PREFIX.strip()} line in stage output: {lines!r}")
 
 
+# The data ID: names the prepared train/test sets. Kept under the name
+# "fingerprint" so models registered earlier still trace back the same way.
 FINGERPRINT = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['fingerprint'] }}"
+WORKING_COPY_ID = "{{ (ti.xcom_pull(task_ids='extract') | stage_result)['working_copy_id'] }}"
+SAMPLE_ROWS = "{{ params.sample_rows or '' }}"
+DATASET_VERSION = "{{ params.dataset_version }}"
 RUN_ID = "{{ (ti.xcom_pull(task_ids='train') | stage_result)['run_id'] }}"
 TASK_TYPE = "{{ params.task_type }}"
 MODEL_NAME = "{{ model_name_for(params.task_type) }}"
@@ -216,8 +221,9 @@ with DAG(
         "dataset_version": "v1",
         "estimator_name": None,
         "tune_hyperparameters": False,
-        # None = use every row, same as the old default. A triggered run's
-        # conf overrides this, which is how the dashboard picks a row count.
+        # How many TRAIN rows to sample at random; None = every train row.
+        # The test set never shrinks. A triggered run's conf overrides this,
+        # which is how the dashboard picks a row count.
         "sample_rows": None,
     },
     # model_name is derived, never passed: a run that names the wrong registered
@@ -234,24 +240,27 @@ with DAG(
         "extract",
         "ml-extract:latest",
         {
-            "DATASET_VERSION": "{{ params.dataset_version }}",
+            "DATASET_VERSION": DATASET_VERSION,
             # Airflow merges a triggered run's conf into params, so this covers
             # both the API path and a hand-triggered run.
-            "SAMPLE_ROWS": "{{ params.sample_rows or '' }}",
+            "SAMPLE_ROWS": SAMPLE_ROWS,
         },
     )
 
     validate = stage(
         "validate",
         "ml-validate:latest",
-        {"FINGERPRINT": FINGERPRINT, "TASK_TYPE": TASK_TYPE},
+        {"WORKING_COPY_ID": WORKING_COPY_ID, "TASK_TYPE": TASK_TYPE},
     )
 
     prepare_dataset = stage(
         "prepare_dataset_for_train",
         "ml-prepare-dataset:latest",
         {
+            "WORKING_COPY_ID": WORKING_COPY_ID,
             "FINGERPRINT": FINGERPRINT,
+            "DATASET_VERSION": DATASET_VERSION,
+            "SAMPLE_ROWS": SAMPLE_ROWS,
             "TASK_TYPE": TASK_TYPE,
             "FORCE_REPROCESS": "{{ params.force_reprocess | lower }}",
         },

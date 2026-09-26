@@ -16,7 +16,9 @@ import os
 from datetime import date
 
 import boto3
+import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 from botocore.exceptions import ClientError
 
@@ -88,15 +90,16 @@ def _check_task_type(task_type: str) -> None:
 
 
 def processed_key(fingerprint: str, task_type: str, split: str) -> str:
-    """Builds the path to processed data for one fingerprint, task and split.
+    """Builds the path to processed data for one data ID, task and split.
 
-    The fingerprint acts as a cache key: `prepare_dataset_for_train` skips work if the
-    files already exist. It hashes only the raw data, so both task types share it —
-    yet their processed files differ (different target, different rows dropped).
-    The task type is part of the path so one task can never pick up the other's cache.
+    The data ID (called `fingerprint` in the pipeline) acts as a cache key:
+    `prepare_dataset_for_train` skips work if the files already exist. It does
+    not name a task, so both task types share it — yet their processed files
+    differ (different target, different rows dropped). The task type is part of
+    the path so one task can never pick up the other's cache.
 
     Args:
-        fingerprint: the value `fingerprint.compute_fingerprint` produced.
+        fingerprint: the data ID `fingerprint.compute_data_id` produced.
         task_type: "regression" or "classification".
         split: "train" or "test".
 
@@ -125,7 +128,7 @@ def processed_prefix(fingerprint: str, task_type: str) -> str:
     """Builds the prefix covering both splits of one fingerprint and task type.
 
     Args:
-        fingerprint: the value `fingerprint.compute_fingerprint` produced.
+        fingerprint: the data ID `fingerprint.compute_data_id` produced.
         task_type: "regression" or "classification".
 
     Returns:
@@ -145,44 +148,41 @@ def processed_prefix(fingerprint: str, task_type: str) -> str:
     return f"processed/{fingerprint}/{task_type}/"
 
 
-def extracted_key(fingerprint: str) -> str:
-    """Builds the path to the sampled working copy that `extract` writes.
+def extracted_key(working_copy_id: str) -> str:
+    """Builds the path to the working copy that `extract` writes.
 
-    Separate from `raw/`: raw holds the full dataset as it arrived, while this
-    holds exactly the rows this pipeline run will use, after SAMPLE_ROWS.
+    The working copy is the WHOLE raw dataset, never the first N rows: limiting
+    rows is done by random sampling of the train set in the prepare stage.
 
     Args:
-        fingerprint: the value `fingerprint.compute_fingerprint` produced.
+        working_copy_id: the value `fingerprint.compute_working_copy_id` produced.
 
     Returns:
         The key, e.g. "extracted/ab12cd34.../data.parquet".
 
     Example:
-        extracted_key("3f0a9c1d5e2b7a48")
-        # -> "extracted/3f0a9c1d5e2b7a48/data.parquet"
-
-        # raw/ holds 2 million rows as they arrived; this holds the 200k this
-        # run will actually use. Every stage after extract reads from here.
+        extracted_key("9d41c07a2be35f10")
+        # -> "extracted/9d41c07a2be35f10/data.parquet"
     """
-    return f"extracted/{fingerprint}/data.parquet"
+    return f"extracted/{working_copy_id}/data.parquet"
 
 
-def validation_report_key(fingerprint: str) -> str:
-    """Builds the path to the counts `validate` produces for one fingerprint.
+def validation_report_key(working_copy_id: str) -> str:
+    """Builds the path to the counts `validate` produces for one working copy.
 
     Args:
-        fingerprint: the value `fingerprint.compute_fingerprint` produced.
+        working_copy_id: the value `fingerprint.compute_working_copy_id` produced.
 
     Returns:
         The key, e.g. "reports/validation/ab12cd34....json".
 
     Example:
-        validation_report_key("3f0a9c1d5e2b7a48")
-        # -> "reports/validation/3f0a9c1d5e2b7a48.json"
-        # Keyed by fingerprint, not by task: the counts describe the raw data,
+        validation_report_key("9d41c07a2be35f10")
+        # -> "reports/validation/9d41c07a2be35f10.json"
+        # Keyed by working copy, not by task: the counts describe the raw data,
         # which both tasks share.
     """
-    return f"reports/validation/{fingerprint}.json"
+    return f"reports/validation/{working_copy_id}.json"
 
 
 def baseline_key(model_name: str, version: int | str) -> str:
@@ -585,6 +585,43 @@ class Storage:
             return parquet_file.schema_arrow.empty_table().to_pandas(), 0
         return first_batch.to_pandas(), total_rows
 
+    def read_parquet_rows(self, key: str, positions) -> pd.DataFrame:
+        """Reads only the rows at the given positions of a parquet file.
+
+        Decodes the file one batch at a time and keeps only the wanted rows of
+        each batch, so RAM holds the selected rows plus one batch, never the
+        whole all-string dataset. The compressed object is still downloaded
+        once, as `read_parquet_head` explains.
+
+        Args:
+            key: the key to read.
+            positions: sorted, unique 0-based row positions (any integer
+                array-like).
+
+        Returns:
+            The selected rows in position order, with a fresh positional index.
+
+        Raises:
+            FileNotFoundError: when the key does not exist.
+
+        Example:
+            rows = storage.read_parquet_rows(extracted_key(wc_id), [0, 5, 9])
+            len(rows)  # -> 3
+        """
+        wanted = np.asarray(positions, dtype=np.int64)
+        parquet_file = pq.ParquetFile(io.BytesIO(self._get_object_bytes(key)))
+        pieces = []
+        offset = 0
+        for batch in parquet_file.iter_batches(batch_size=100_000):
+            end = offset + batch.num_rows
+            lo, hi = np.searchsorted(wanted, [offset, end])
+            if hi > lo:
+                pieces.append(batch.take(pa.array(wanted[lo:hi] - offset)).to_pandas())
+            offset = end
+        if not pieces:
+            return parquet_file.schema_arrow.empty_table().to_pandas()
+        return pd.concat(pieces, ignore_index=True)
+
     def write_json(self, obj: dict, key: str) -> None:
         """Writes a dict as UTF-8 JSON.
 
@@ -735,7 +772,7 @@ class Storage:
 
         Example:
             etag = storage.object_etag(raw_key("v1"))   # -> "9b2cf5e1a4..."
-            fingerprint = compute_fingerprint("v1", etag, sample_rows)
+            working_copy_id = compute_working_copy_id("v1", etag)
 
             # The ETag stands in for hashing the file: it already changes
             # whenever the object does, so 2 million rows are never re-read
