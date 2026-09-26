@@ -11,6 +11,7 @@ import argparse
 import os
 import tempfile
 
+from ml_common.datasets import DatasetVersionExistsError, dataset_exists, publish_dataset
 from ml_common.rawdata import csv_to_parquet
 from ml_common.storage import Storage, raw_key
 
@@ -51,7 +52,11 @@ def main() -> int:
         variables `Storage.from_env` needs from the environment.
 
     Returns:
-        0. The parquet file is built in a temporary directory that is removed
+        0 on success, 1 when the dataset version already exists: versions are
+        never overwritten, so seeding twice is refused rather than repeated.
+        The split points are computed from the whole file and written to the
+        version's manifest, exactly as an upload through the API does. The
+        parquet file is built in a temporary directory that is removed
         on the way out, so nothing large is left behind on a disk that is
         already nearly full.
 
@@ -74,6 +79,9 @@ def main() -> int:
 
     storage = Storage.from_env()
     key = raw_key(args.version)
+    if dataset_exists(storage, args.version):
+        print(f"Dataset version {args.version} already exists; versions are never overwritten.")
+        return 1
 
     with tempfile.TemporaryDirectory() as workdir:
         local_parquet = os.path.join(workdir, "data.parquet")
@@ -86,9 +94,13 @@ def main() -> int:
         )
         size_mb = os.path.getsize(local_parquet) / 2**20
         print(f"Uploading {size_mb:.1f} MB to {key}")
-        storage.upload_file(local_parquet, key)
+        try:
+            manifest = publish_dataset(storage, local_parquet, args.version)
+        except DatasetVersionExistsError:
+            print(f"Dataset version {args.version} already exists; versions are never overwritten.")
+            return 1
 
-    print(f"Seeded {row_count:,} rows to {key}")
+    print(f"Seeded {row_count:,} rows to {key}; split points {manifest['split_points']}")
     return 0
 
 

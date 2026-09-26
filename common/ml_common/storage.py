@@ -46,6 +46,24 @@ def raw_key(dataset_version: str) -> str:
     return f"raw/{dataset_version}/data.parquet"
 
 
+def dataset_manifest_key(dataset_version: str) -> str:
+    """Builds the path to the manifest of a dataset version.
+
+    The manifest sits next to the raw data and holds what was decided once,
+    when the version was created: its split points and where it came from.
+
+    Args:
+        dataset_version: the version label, e.g. "v1".
+
+    Returns:
+        The key, e.g. "raw/v1/manifest.json".
+
+    Example:
+        dataset_manifest_key("v2")  # -> "raw/v2/manifest.json"
+    """
+    return f"raw/{dataset_version}/manifest.json"
+
+
 def _check_task_type(task_type: str) -> None:
     """Rejects a task type the schema does not know.
 
@@ -498,11 +516,14 @@ class Storage:
             raise
         return response["Body"].read()
 
-    def read_parquet(self, key: str) -> pd.DataFrame:
+    def read_parquet(self, key: str, columns: list[str] | None = None) -> pd.DataFrame:
         """Reads a parquet file into a DataFrame.
 
         Args:
             key: the key to read, built by one of the *_key() functions.
+            columns: decode only these columns, or None for all. The whole
+                object is still downloaded; only the decoding is bounded,
+                which is what costs RAM on a 2-million-row string dataset.
 
         Returns:
             The frame, with a fresh positional index.
@@ -520,7 +541,7 @@ class Storage:
             except FileNotFoundError:
                 ...  # prepare has not run for this fingerprint yet
         """
-        return pd.read_parquet(io.BytesIO(self._get_object_bytes(key)))
+        return pd.read_parquet(io.BytesIO(self._get_object_bytes(key)), columns=columns)
 
     def read_parquet_head(self, key: str, rows: int) -> tuple[pd.DataFrame, int]:
         """Reads the first rows of a parquet file, plus how many rows it has in total.

@@ -50,7 +50,12 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} &&
       mc mb --ignore-existing local/${ML_BUCKET} &&
-      echo 'Bucket ${ML_BUCKET} ready'
+      mc version enable local/${ML_BUCKET} &&
+      mc ilm rule rm --all --force local/${ML_BUCKET} ;
+      for prefix in extracted/ processed/ artifacts/ monitoring-baseline/ inference-log/ ground-truth/ reports/ ; do
+        mc ilm rule add --prefix $$prefix --noncurrent-expire-days 1 local/${ML_BUCKET} || exit 1 ;
+      done &&
+      echo 'Bucket ${ML_BUCKET} ready (versioned; only raw/ keeps old versions)'
       "
 
   mlflow:

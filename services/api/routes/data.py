@@ -35,6 +35,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from starlette.concurrency import run_in_threadpool
 
 from ml_common import schema
+from ml_common.datasets import DatasetVersionExistsError, dataset_exists, publish_dataset
 from ml_common.rawdata import csv_to_parquet
 from ml_common.storage import raw_key
 from ml_common.validation import validate_dataframe
@@ -71,11 +72,13 @@ async def upload(
     file: Annotated[UploadFile, File()],
     dataset_version: Annotated[str, Form(pattern=DATASET_VERSION_PATTERN)],
 ) -> dict:
-    """Streams a CSV to object storage as the raw dataset of a version.
+    """Streams a CSV to object storage as a new dataset version.
 
-    Uploading to a version that already exists replaces it. That is safe: the
-    pipeline fingerprints the object's etag, so a replaced dataset is seen as
-    new data rather than served from a stale cache.
+    A dataset version is never overwritten (CN-02): a model version must trace
+    back to exactly the data it learned from. The name is checked before the
+    body is copied, and again when the version is written, so a name taken in
+    between is still refused. The split points are computed here, once, from
+    the whole file, and stored in the version's manifest (CN-01).
 
     Args:
         request: the FastAPI request.
@@ -85,13 +88,16 @@ async def upload(
             or digit, at most 64 characters.
 
     Returns:
-        `dataset_version`, `rows` and `size_mb`. `size_mb` is the size of the
-        parquet object that was stored, not of the CSV that was uploaded.
+        `dataset_version`, `rows`, `size_mb` and `split_points`. `size_mb` is
+        the size of the parquet object that was stored, not of the CSV that
+        was uploaded.
 
     Raises:
-        HTTPException: 422 when the file is not a `.csv`, when the CSV cannot
-            be parsed (a malformed row, bytes that are not text), or when it
-            has a header but no rows; 413 when it exceeds the cap. The cap
+        HTTPException: 409 when the dataset version already exists; 422 when
+            the file is not a `.csv`, when the CSV cannot be parsed (a
+            malformed row, bytes that are not text), when it has a header but
+            no rows, or when no row has a readable `listing_date` to place the
+            split points on; 413 when it exceeds the cap. The cap
             limits what this handler copies and converts, not what has
             already been received: the framework has spooled the whole body
             to disk before the handler starts, so a 413 arrives only after
@@ -101,10 +107,16 @@ async def upload(
 
     Example:
         # POST /api/data/upload  (multipart: file=..., dataset_version=v2)
-        # -> {"dataset_version": "v2", "rows": 2000000, "size_mb": 118.4}
+        # -> {"dataset_version": "v2", "rows": 2000000, "size_mb": 118.4,
+        #     "split_points": {"original": {"t1": "2023-11-02", "t2": "2024-10-15",
+        #                                   "undated_test_share": 0.2}}}
     """
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=422, detail="only .csv uploads are accepted")
+
+    storage = request.app.state.storage
+    if await run_in_threadpool(dataset_exists, storage, dataset_version):
+        raise _version_taken(dataset_version)
 
     max_bytes = request.app.state.max_upload_bytes
     with tempfile.TemporaryDirectory() as workdir:
@@ -144,14 +156,40 @@ async def upload(
         if row_count == 0:
             raise HTTPException(status_code=422, detail="the CSV has no data rows")
 
-        await run_in_threadpool(
-            request.app.state.storage.upload_file, parquet_path, raw_key(dataset_version)
-        )
+        try:
+            manifest = await run_in_threadpool(
+                publish_dataset, storage, parquet_path, dataset_version
+            )
+        except DatasetVersionExistsError as error:
+            raise _version_taken(dataset_version) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         return {
             "dataset_version": dataset_version,
             "rows": row_count,
             "size_mb": round(os.path.getsize(parquet_path) / 2**20, 2),
+            "split_points": manifest["split_points"],
         }
+
+
+def _version_taken(dataset_version: str) -> HTTPException:
+    """Builds the refusal for a dataset version name that is already used.
+
+    Args:
+        dataset_version: the name that was asked for.
+
+    Returns:
+        A 409 whose detail tells the operator to pick another name.
+
+    Example:
+        raise _version_taken("v1")
+        # -> 409 {"detail": "dataset version 'v1' already exists; ..."}
+    """
+    return HTTPException(
+        status_code=409,
+        detail=f"dataset version {dataset_version!r} already exists; "
+        "versions are never overwritten, choose another name",
+    )
 
 
 def _blank_strings_as_missing(frame: pd.DataFrame) -> pd.DataFrame:

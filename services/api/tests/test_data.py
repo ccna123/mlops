@@ -10,7 +10,7 @@ import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
 
-from ml_common.storage import raw_key
+from ml_common.storage import dataset_manifest_key, raw_key
 from services.api.app import create_app
 from services.api.routes import data as data_routes
 from services.api.routes.data import (
@@ -19,7 +19,10 @@ from services.api.routes.data import (
     PREVIEW_STATS_ROWS,
 )
 
-CSV = b"property_id,city,sale_price\np1,boston,450000\np2,miami,380000\n"
+CSV = (
+    b"property_id,listing_date,city,sale_price\n"
+    b"p1,2023-07-15,boston,450000\np2,07/16/2023,miami,380000\n"
+)
 
 
 def _on_the_event_loop_thread() -> bool:
@@ -33,10 +36,20 @@ def _on_the_event_loop_thread() -> bool:
 class FakeStorage:
     """Reads the file at call time: the route deletes its temp files afterwards."""
 
-    def __init__(self, error=None):
+    def __init__(self, error=None, existing=()):
         self.uploaded = []
+        self.json = {}
         self.on_loop_thread = []
         self.error = error
+        self.existing = set(existing)
+
+    def exists(self, key):
+        return key in self.existing or key in self.json or any(
+            key == uploaded_key for uploaded_key, _ in self.uploaded
+        )
+
+    def write_json(self, obj, key):
+        self.json[key] = obj
 
     def upload_file(self, local_path, key):
         self.on_loop_thread.append(_on_the_event_loop_thread())
@@ -98,7 +111,7 @@ def test_the_stored_parquet_is_all_text_with_the_original_values():
 
 def test_a_currency_value_is_not_repaired_on_the_way_in():
     storage = FakeStorage()
-    _post(_client(storage), content=b'id,price\np1,"$450,000"\n')
+    _post(_client(storage), content=b'id,listing_date,price\np1,2023-07-15,"$450,000"\n')
 
     assert _stored_table(storage).column("price").to_pylist() == ["$450,000"]
 
@@ -107,6 +120,43 @@ def test_upload_reports_the_row_count_and_size():
     body = _post(_client(FakeStorage())).json()
     assert body["rows"] == 2
     assert body["size_mb"] >= 0
+
+
+def test_upload_to_an_existing_version_is_409_and_stores_nothing():
+    storage = FakeStorage(existing={raw_key("v2")})
+    response = _post(_client(storage))
+
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+    assert storage.uploaded == []
+    assert storage.json == {}
+
+
+def test_a_second_upload_under_the_same_name_is_409():
+    storage = FakeStorage()
+    client = _client(storage)
+    assert _post(client).status_code == 200
+    assert _post(client).status_code == 409
+    assert len(storage.uploaded) == 1
+
+
+def test_upload_writes_the_manifest_with_split_points():
+    storage = FakeStorage()
+    body = _post(_client(storage)).json()
+
+    manifest = storage.json[dataset_manifest_key("v2")]
+    assert manifest["row_count"] == 2
+    assert body["split_points"] == manifest["split_points"]
+    assert set(manifest["split_points"]["original"]) == {"t1", "t2", "undated_test_share"}
+
+
+def test_a_csv_without_listing_dates_is_422_and_stores_nothing():
+    storage = FakeStorage()
+    response = _post(_client(storage), content=b"property_id,city\np1,boston\n")
+
+    assert response.status_code == 422
+    assert "listing_date" in response.json()["detail"]
+    assert storage.uploaded == []
 
 
 def test_upload_over_the_cap_is_413_not_an_out_of_memory_kill():
