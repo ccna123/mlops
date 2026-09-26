@@ -286,3 +286,62 @@ def test_inference_log_probability_is_none_for_regression():
     _client(loaded, buffer=buffer).post("/predict/regression", json=RAW_RECORD)
     record = buffer.take()[0]
     assert record["probability"] is None
+
+
+# --- /flush and /metrics ------------------------------------------------------
+
+
+def _loaded():
+    return {
+        "regression": LoadedModel("house_price_regressor", "3", FakeModel()),
+        "classification": None,
+    }
+
+
+def test_flush_writes_the_buffer_now_and_reports_it():
+    written = []
+    client = _client(_loaded(), flush=written.extend)
+    client.post("/predict/regression", json=RAW_RECORD)
+    client.post("/predict/regression", json=RAW_RECORD)
+
+    body = client.post("/flush").json()
+
+    assert body == {"ok": True, "written": 2, "buffered": 0, "error": None}
+    assert len(written) == 2
+
+
+def test_a_failed_flush_is_reported_and_keeps_the_records():
+    def broken(records):
+        raise OSError("minio is down")
+
+    client = _client(_loaded(), flush=broken)
+    client.post("/predict/regression", json=RAW_RECORD)
+
+    body = client.post("/flush").json()
+
+    assert body["ok"] is False
+    assert "minio is down" in body["error"]
+    assert body["buffered"] == 1
+
+
+def test_metrics_count_requests_by_status_and_expose_the_buffer():
+    client = _client(_loaded())
+    client.post("/predict/regression", json=RAW_RECORD)
+    client.post("/predict/classification", json=RAW_RECORD)  # 503, nothing loaded
+
+    text = client.get("/metrics").text
+
+    assert (
+        'serving_requests_total{endpoint="/predict/{task_type}",status="200",'
+        'task_type="regression"} 1.0'
+    ) in text
+    assert 'status="503",task_type="classification"} 1.0' in text
+    assert "serving_request_latency_seconds_bucket" in text
+    assert "serving_inference_log_buffered 1.0" in text
+    assert "serving_inference_log_dropped 0.0" in text
+
+
+def test_metrics_do_not_count_themselves():
+    client = _client(_loaded())
+    client.get("/metrics")
+    assert 'endpoint="/metrics"' not in client.get("/metrics").text

@@ -319,3 +319,40 @@ def test_delete_version_lets_an_outage_propagate_instead_of_reading_as_missing()
         RegistryClient(client=fake).delete_version(REGRESSOR, "2")
 
     assert not isinstance(caught.value, RegistryNotFoundError)
+
+
+def test_model_card_reads_the_card_artifact_of_the_version(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from services.api.clients.registry import RegistryClient
+
+    class CardClient:
+        def get_model_version(self, name, version):
+            return SimpleNamespace(run_id="r1")
+
+        def download_artifacts(self, run_id, path, dst):
+            target = f"{dst}/{path}"
+            with open(target, "w", encoding="utf-8") as handle:
+                json.dump({"run": run_id, "version": "4"}, handle)
+            return target
+
+    assert RegistryClient(CardClient()).model_card("m", "4") == {"run": "r1", "version": "4"}
+
+
+def test_a_version_without_a_card_is_not_found():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from services.api.clients.registry import RegistryClient, RegistryNotFoundError
+
+    class NoCard:
+        def get_model_version(self, name, version):
+            return SimpleNamespace(run_id="r1")
+
+        def download_artifacts(self, run_id, path, dst):
+            raise OSError("not found")
+
+    with pytest.raises(RegistryNotFoundError):
+        RegistryClient(NoCard()).model_card("m", "4")

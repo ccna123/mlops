@@ -24,6 +24,7 @@ from ml_common.storage import Storage
 from .clients.airflow import AirflowClient
 from .clients.registry import RegistryClient
 from .clients.reports import ReportsClient
+from .clients.serving import ServingClient
 from .routes import data, drift, health, models, pipeline, simulate
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ def create_app(
     reports=None,
     probes: dict | None = None,
     storage=None,
+    serving=None,
 ) -> FastAPI:
     """Builds the API application.
 
@@ -50,6 +52,8 @@ def create_app(
             one probe per real dependency.
         storage: `ml_common.storage.Storage` that uploaded datasets are
             written to. Same rule as `airflow`.
+        serving: client asked to reload after a manual champion change or a
+            model deletion. None builds the real one from SERVING_URL.
 
     Returns:
         A FastAPI app serving everything under `/api`. A dependency that could
@@ -67,6 +71,7 @@ def create_app(
     app.state.airflow = airflow if airflow is not None else _real_airflow()
     app.state.registry = registry if registry is not None else _real_registry()
     app.state.storage = storage if storage is not None else _real_storage()
+    app.state.serving = serving if serving is not None else ServingClient()
     if reports is not None:
         app.state.reports = reports
     elif app.state.storage is not None:

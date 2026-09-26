@@ -36,8 +36,26 @@ class FakeRegistry:
         return {"name": name, "deleted": True}
 
 
-def _client(registry):
-    return TestClient(create_app(registry=registry))
+class FakeServing:
+    def __init__(self, versions=None, error=None):
+        self.versions = versions or {}
+        self.error = error
+        self.reloads = 0
+
+    def reload(self):
+        self.reloads += 1
+        if self.error:
+            raise self.error
+        return {
+            "regression": {"name": "house_price_regressor",
+                           "version": self.versions.get("house_price_regressor")},
+            "classification": {"name": "house_needs_renovation_classifier",
+                               "version": self.versions.get("house_needs_renovation_classifier")},
+        }
+
+
+def _client(registry, serving=None):
+    return TestClient(create_app(registry=registry, serving=serving or FakeServing()))
 
 
 REGRESSION = {
@@ -110,7 +128,9 @@ def test_promote_a_version_that_does_not_exist_is_404():
 def test_promote_failing_for_another_reason_is_not_a_404():
     # MLflow being down must not read as "that version does not exist".
     registry = FakeRegistry([], promote_error=RuntimeError("mlflow down"))
-    client = TestClient(create_app(registry=registry), raise_server_exceptions=False)
+    client = TestClient(
+        create_app(registry=registry, serving=FakeServing()), raise_server_exceptions=False
+    )
 
     response = client.post("/api/models/house_price_regressor/4/promote")
 
@@ -176,7 +196,9 @@ def test_delete_a_version_that_does_not_exist_is_404():
 def test_delete_failing_for_another_reason_is_not_a_404():
     # MLflow being down must not read as "that version is already gone".
     registry = FakeRegistry([], delete_error=RuntimeError("mlflow down"))
-    client = TestClient(create_app(registry=registry), raise_server_exceptions=False)
+    client = TestClient(
+        create_app(registry=registry, serving=FakeServing()), raise_server_exceptions=False
+    )
 
     response = client.delete("/api/models/house_price_regressor/4")
 
@@ -224,8 +246,75 @@ def test_delete_a_model_that_does_not_exist_is_404():
 
 def test_delete_model_failing_for_another_reason_is_not_a_404():
     registry = FakeRegistry([], delete_error=RuntimeError("mlflow down"))
-    client = TestClient(create_app(registry=registry), raise_server_exceptions=False)
+    client = TestClient(
+        create_app(registry=registry, serving=FakeServing()), raise_server_exceptions=False
+    )
 
     response = client.delete("/api/models/house_price_regressor")
 
     assert response.status_code == 500
+
+
+# --- serving follows manual changes (CN-16, CN-18) ---------------------------
+
+
+def test_promote_reloads_serving_and_reports_it_switched():
+    serving = FakeServing({"house_price_regressor": "4"})
+    body = _client(FakeRegistry([REGRESSION]), serving).post(
+        "/api/models/house_price_regressor/4/promote"
+    ).json()
+
+    assert serving.reloads == 1
+    assert body["serving"] == {"switched": True, "version": "4", "error": None}
+
+
+def test_promote_says_so_when_serving_did_not_follow():
+    serving = FakeServing({"house_price_regressor": "3"})
+    body = _client(FakeRegistry([REGRESSION]), serving).post(
+        "/api/models/house_price_regressor/4/promote"
+    ).json()
+
+    assert body["alias"] == "champion"  # the MLflow change is kept
+    assert body["serving"]["switched"] is False
+    assert "expected 4" in body["serving"]["error"]
+
+
+def test_promote_with_serving_unreachable_is_still_200_with_the_reason():
+    serving = FakeServing(error=RuntimeError("connection refused"))
+    response = _client(FakeRegistry([REGRESSION]), serving).post(
+        "/api/models/house_price_regressor/4/promote"
+    )
+    assert response.status_code == 200
+    assert "connection refused" in response.json()["serving"]["error"]
+
+
+def test_a_failed_promote_does_not_reload_serving():
+    serving = FakeServing()
+    registry = FakeRegistry([], promote_error=RegistryNotFoundError("no such version"))
+    _client(registry, serving).post("/api/models/house_price_regressor/99/promote")
+    assert serving.reloads == 0
+
+
+def test_delete_model_reloads_serving_so_it_stops_using_it():
+    serving = FakeServing({})
+    body = _client(FakeRegistry([REGRESSION]), serving).delete(
+        "/api/models/house_price_regressor"
+    ).json()
+    assert body["serving"] == {"switched": True, "version": None, "error": None}
+
+
+class CardRegistry(FakeRegistry):
+    def model_card(self, name, version):
+        if version != "4":
+            raise RegistryNotFoundError("no card")
+        return {"model_name": name, "version": version}
+
+
+def test_model_card_is_returned():
+    body = _client(CardRegistry()).get("/api/models/house_price_regressor/4/card").json()
+    assert body == {"model_name": "house_price_regressor", "version": "4"}
+
+
+def test_a_version_without_a_card_is_404():
+    response = _client(CardRegistry()).get("/api/models/house_price_regressor/3/card")
+    assert response.status_code == 404

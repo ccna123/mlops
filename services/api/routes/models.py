@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 
 from ..clients.registry import RegistryConflictError, RegistryNotFoundError
+from ..clients.serving import serving_state_after_change
 from ..deps import require_auth
 
 router = APIRouter()
@@ -58,7 +59,11 @@ def promote(
         version: the version to promote, digits only (e.g. "4").
 
     Returns:
-        `name`, `version` and `alias`.
+        `name`, `version`, `alias`, and `serving`: after the alias moves, the
+        prediction service is asked to reload, and `serving` says whether it
+        now answers with this version (`switched`, `version`, `error`). The
+        alias change is kept even when serving did not follow, and the UI must
+        say so rather than report a full success (CN-16).
 
     Raises:
         HTTPException: 422 when `version` is not made of digits only - raised
@@ -74,12 +79,15 @@ def promote(
     Example:
         # POST /api/models/house_price_regressor/4/promote
         # -> {"name": "house_price_regressor", "version": "4",
-        #     "alias": "champion"}
+        #     "alias": "champion",
+        #     "serving": {"switched": true, "version": "4", "error": null}}
     """
     try:
-        return request.app.state.registry.promote(name, version)
+        result = request.app.state.registry.promote(name, version)
     except RegistryNotFoundError as err:
         raise HTTPException(status_code=404, detail=f"cannot promote: {err}") from err
+    serving = serving_state_after_change(request.app.state.serving, name, str(version))
+    return {**result, "serving": serving}
 
 
 @router.delete("/models/{name}/{version}", dependencies=[Depends(require_auth)])
@@ -130,7 +138,9 @@ def delete_model(request: Request, name: str) -> dict:
         name: the registered model to delete.
 
     Returns:
-        `name` and `deleted`.
+        `name`, `deleted`, and `serving`: the prediction service is asked to
+        reload so it stops using the deleted model at once (CN-18);
+        `switched` is True when it no longer holds any version of it.
 
     Raises:
         HTTPException: 404 when no such registered model exists.
@@ -139,15 +149,49 @@ def delete_model(request: Request, name: str) -> dict:
 
     Note:
         There is no champion guard here, unlike deleting a single version:
-        taking the champion along is what deleting a model means. serving
-        keeps answering from the model already in memory until its next
-        reload or restart, and answers 503 "no champion loaded" after that.
+        taking the champion along is what deleting a model means. After the
+        reload, serving answers 503 "no champion loaded" for that task.
 
     Example:
         # DELETE /api/models/house_price_regressor
-        # -> {"name": "house_price_regressor", "deleted": true}
+        # -> {"name": "house_price_regressor", "deleted": true,
+        #     "serving": {"switched": true, "version": null, "error": null}}
     """
     try:
-        return request.app.state.registry.delete_model(name)
+        result = request.app.state.registry.delete_model(name)
     except RegistryNotFoundError as err:
         raise HTTPException(status_code=404, detail=f"cannot delete: {err}") from err
+    serving = serving_state_after_change(request.app.state.serving, name, None)
+    return {**result, "serving": serving}
+
+
+@router.get("/models/{name}/{version}/card", dependencies=[Depends(require_auth)])
+def model_card(
+    request: Request,
+    name: str,
+    version: Annotated[str, Path(pattern=VERSION_PATTERN)],
+) -> dict:
+    """Returns the model card of one version (CN-12).
+
+    Args:
+        request: the FastAPI request.
+        name: the registered model.
+        version: the version, digits only.
+
+    Returns:
+        The card: purpose, algorithm and decision threshold, data version and
+        split points, metrics overall and per group, excluded columns, known
+        limitations.
+
+    Raises:
+        HTTPException: 404 when the version does not exist or has no card
+            (registered before cards existed). 422 for a non-numeric version.
+
+    Example:
+        # GET /api/models/house_price_regressor/4/card
+        # -> {"model_name": "house_price_regressor", "version": "4", ...}
+    """
+    try:
+        return request.app.state.registry.model_card(name, version)
+    except RegistryNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err

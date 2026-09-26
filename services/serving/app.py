@@ -21,13 +21,22 @@ import asyncio
 import contextlib
 import json
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 from uuid import uuid4
 
 import pandas as pd
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request, Response
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 from ml_common.inference_log import InferenceLogBuffer
 from ml_common.storage import Storage, ground_truth_key, inference_log_key
@@ -130,9 +139,10 @@ def create_app(
             dicts and returns the key written; tests pass a recorder.
 
     Returns:
-        A FastAPI app serving GET /health, POST /reload and
-        POST /predict/{task_type}. Champions are loaded on startup, and any
-        partial batch is flushed on shutdown.
+        A FastAPI app serving GET /health, POST /reload, POST /flush,
+        GET /metrics, POST /predict/{task_type} and POST /feedback/{task_type}.
+        Champions are loaded on startup, and any partial batch is flushed on
+        shutdown.
 
     Example:
         # Production — module level, everything real:
@@ -152,27 +162,58 @@ def create_app(
     registry = registry if registry is not None else ModelRegistry()
     buffer = buffer if buffer is not None else InferenceLogBuffer()
 
-    def drain(force: bool = False) -> None:
+    metrics = CollectorRegistry()
+    requests_total = Counter(
+        "serving_requests_total",
+        "Requests answered, by endpoint, task type and HTTP status.",
+        ["endpoint", "task_type", "status"],
+        registry=metrics,
+    )
+    latency = Histogram(
+        "serving_request_latency_seconds",
+        "Time to answer a request, by endpoint and task type.",
+        ["endpoint", "task_type"],
+        buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+        registry=metrics,
+    )
+    flush_failures = Counter(
+        "serving_inference_log_flush_failures_total",
+        "Inference log writes that failed and were kept for a retry.",
+        registry=metrics,
+    )
+    Gauge(
+        "serving_inference_log_buffered",
+        "Inference log records waiting to be written.",
+        registry=metrics,
+    ).set_function(lambda: buffer.stats()["buffered"])
+    Gauge(
+        "serving_inference_log_dropped",
+        "Inference log records dropped because the buffer was full, since start.",
+        registry=metrics,
+    ).set_function(lambda: buffer.stats()["dropped"])
+
+    def drain(force: bool = False) -> dict:
         """Hands one batch to the writer, putting it back if the write fails.
 
         Args:
-            force: True skips the size-or-age check. Shutdown uses it: a partial
-                batch still waiting for its 30 seconds would otherwise die with
-                the container.
+            force: True skips the size-or-age check. Shutdown and /flush use it:
+                a partial batch still waiting for its 30 seconds would otherwise
+                be missed.
 
         Returns:
-            Nothing, and never raises. A failed write is logged to stderr and
-            its records go back to the buffer for the next attempt.
+            `{"written": n, "error": None | str}`, and never raises. A failed
+            write is logged to stderr, counted, and its records go back to the
+            buffer for the next attempt.
 
         Example:
             drain()       # every second from the flusher; a no-op when not ready
-            drain(True)   # at shutdown, taking whatever is there
+            drain(True)   # -> {"written": 137, "error": None}
         """
         if not force and not buffer.should_flush():
-            return
+            return {"written": 0, "error": None}
         records = buffer.take()
         if not records:
-            return
+            return {"written": 0, "error": None}
         try:
             flush(records)
         except Exception as err:  # noqa: BLE001 - any write failure is retryable
@@ -180,7 +221,10 @@ def create_app(
                 f"inference log flush failed, keeping {len(records)} records: {err}",
                 file=sys.stderr,
             )
+            flush_failures.inc()
             buffer.give_back(records)
+            return {"written": 0, "error": str(err)}
+        return {"written": len(records), "error": None}
 
     async def flusher() -> None:
         """Polls the buffer forever, draining it whenever it is ready.
@@ -220,6 +264,75 @@ def create_app(
         await asyncio.to_thread(drain, True)
 
     app = FastAPI(title="house pricing serving", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def measure(request: Request, call_next):
+        """Counts every answered request and times it, for /metrics.
+
+        Args:
+            request: the incoming request.
+            call_next: the rest of the app.
+
+        Returns:
+            The response, unchanged. The endpoint label is the route template
+            ("/predict/{task_type}"), never the raw path, so labels stay few.
+        """
+        started = time.perf_counter()
+        response = await call_next(request)
+        route = request.scope.get("route")
+        endpoint = getattr(route, "path", "unmatched")
+        if endpoint != "/metrics":
+            task_type = request.path_params.get("task_type", "")
+            requests_total.labels(endpoint, task_type, str(response.status_code)).inc()
+            latency.labels(endpoint, task_type).observe(time.perf_counter() - started)
+        return response
+
+    @app.get("/metrics")
+    def prometheus_metrics() -> Response:
+        """Exposes the operational metrics for Prometheus to scrape (PCN-27).
+
+        Args:
+            None.
+
+        Returns:
+            The Prometheus text format: request counts by status, latency
+            histograms (Prometheus derives the median, p95 and p99 from them),
+            and the inference log's buffered and dropped counts.
+
+        Example:
+            # curl http://localhost:8000/metrics
+            # serving_requests_total{endpoint="/predict/{task_type}",
+            #                        status="200",task_type="regression"} 300.0
+        """
+        return Response(generate_latest(metrics), media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/flush")
+    def flush_now() -> dict:
+        """Writes whatever the inference log holds, now, and waits for it (CN-29).
+
+        The monitoring pipeline calls this before it reads the log, so the
+        traffic just sent is in storage and not still sitting in the buffer.
+
+        Args:
+            None.
+
+        Returns:
+            `ok`, `written` (records written by this call), `buffered` (still
+            waiting afterwards) and `error` (why the write failed, or None).
+            Always HTTP 200: a failed write is a state to report, and the
+            records stay in the buffer for the next attempt.
+
+        Example:
+            # curl -X POST http://localhost:8000/flush
+            # {"ok": true, "written": 137, "buffered": 0, "error": null}
+        """
+        outcome = drain(True)
+        return {
+            "ok": outcome["error"] is None,
+            "written": outcome["written"],
+            "buffered": buffer.stats()["buffered"],
+            "error": outcome["error"],
+        }
 
     @app.get("/health")
     def health() -> dict:

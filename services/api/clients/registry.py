@@ -285,6 +285,42 @@ class RegistryClient:
             raise
         return {"name": name, "deleted": True}
 
+    def model_card(self, name: str, version: str) -> dict:
+        """Reads the model card register wrote for one version (CN-12).
+
+        Args:
+            name: the registered model.
+            version: the version.
+
+        Returns:
+            The card, as `ml_common.model_card.build_model_card` wrote it.
+
+        Raises:
+            RegistryNotFoundError: when the version does not exist, or has no
+                card (registered before cards existed, or outside the pipeline).
+
+        Example:
+            model_card("house_price_regressor", "4")["data"]["dataset_version"]
+            # -> "v2"
+        """
+        import json
+        import tempfile
+
+        try:
+            run_id = self._client.get_model_version(name, version).run_id
+        except MlflowException as err:
+            if err.error_code in (NOT_FOUND_CODE, INVALID_PARAMETER_CODE):
+                raise RegistryNotFoundError(str(err)) from err
+            raise
+        with tempfile.TemporaryDirectory() as workdir:
+            try:
+                path = self._client.download_artifacts(run_id, "model_card.json", workdir)
+            except (MlflowException, OSError) as err:
+                message = f"version {version} of {name} has no model card"
+                raise RegistryNotFoundError(message) from err
+            with open(path, encoding="utf-8") as handle:
+                return json.load(handle)
+
     def _champion_version(self, name: str) -> str | None:
         """Finds which version of a model currently holds the champion alias.
 

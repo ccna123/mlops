@@ -6,7 +6,8 @@
 # with the train stage makes the versions match structurally.
 FROM ml-base:latest
 
-RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.30"
+RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.30" \
+    "prometheus-client>=0.20"
 
 COPY services/ /app/services/
 
